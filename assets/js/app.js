@@ -201,17 +201,6 @@
     showScreen('screen-order');
   });
 
-  document.getElementById('btn-reorder').addEventListener('click', function () {
-    resetOrderForm();
-    var last = (state.stats && state.stats.recentOrders && state.stats.recentOrders[0]) || null;
-    if (last && last.customer) {
-      var match = state.customers.find(function (c) { return c.establishmentName === last.customer; });
-      setCustomer(match || { establishmentName: last.customer, address: '', licenseNumber: '' });
-    }
-    showScreen('screen-order');
-    toast('Pick beers below to repeat this account’s order');
-  });
-
   document.getElementById('back-to-home').addEventListener('click', function () { showScreen('screen-home'); });
   document.getElementById('footer-cancel').addEventListener('click', function () { showScreen('screen-home'); });
 
@@ -358,45 +347,51 @@
 
   function renderProductList() {
     var host = document.getElementById('product-list');
-    host.innerHTML = window.LM_PRODUCTS.map(function (p) {
+
+    var tiles = window.LM_PRODUCTS.map(function (p) {
       var selected = !!state.selection[p.id];
       return (
-        '<div class="product-card' + (selected ? ' selected' : '') + '" data-product="' + p.id + '">' +
-          '<div class="product-row">' +
-            '<div class="product-thumb"><img src="' + p.image + '" alt="' + escapeHtml(p.name) + ' can" /></div>' +
-            '<div class="product-text">' +
-              '<div class="pname">' + escapeHtml(p.name) + '</div>' +
-              '<div class="psub">' + escapeHtml(p.subtitle) + '</div>' +
-            '</div>' +
-            '<button class="product-toggle" data-toggle="' + p.id + '">' + (selected ? 'Selected ✓' : 'Select') + '</button>' +
-          '</div>' +
-          '<div class="product-info">' +
-            '<div class="format-list">' +
-              p.formats.map(function (f) {
-                var qty = (state.selection[p.id] && state.selection[p.id][f.code]) || 0;
-                return (
-                  '<div class="format-row" data-product="' + p.id + '" data-code="' + f.code + '">' +
-                    '<div><div class="flabel">' + escapeHtml(f.label) + '</div>' +
-                    '<div class="fdetail">' + escapeHtml(f.detail) + ' · $' + f.price.toFixed(2) + ' ea</div>' +
-                    '<div class="fcode">' + f.code + '</div></div>' +
-                    '<div class="qty-stepper">' +
-                      '<button data-step="-1">−</button>' +
-                      '<span class="qty-val">' + qty + '</span>' +
-                      '<button data-step="1">+</button>' +
-                    '</div>' +
-                  '</div>'
-                );
-              }).join('') +
-            '</div>' +
+        '<button type="button" class="product-tile' + (selected ? ' selected' : '') + '" data-toggle="' + p.id + '">' +
+          (selected ? '<span class="tile-check">✓</span>' : '') +
+          '<span class="tile-logo"><img src="' + p.image + '" alt="' + escapeHtml(p.name) + ' can" /></span>' +
+          '<span class="tile-name">' + escapeHtml(p.name) + '</span>' +
+          '<span class="tile-sub">' + escapeHtml(p.subtitle) + '</span>' +
+        '</button>'
+      );
+    }).join('');
+
+    var details = window.LM_PRODUCTS.filter(function (p) { return !!state.selection[p.id]; }).map(function (p) {
+      return (
+        '<div class="product-details-card" data-product="' + p.id + '">' +
+          '<div class="details-title">' + escapeHtml(p.name) + '</div>' +
+          '<div class="format-list">' +
+            p.formats.map(function (f) {
+              var qty = (state.selection[p.id] && state.selection[p.id][f.code]) || 0;
+              return (
+                '<div class="format-row" data-product="' + p.id + '" data-code="' + f.code + '">' +
+                  '<div><div class="flabel">' + escapeHtml(f.label) + '</div>' +
+                  '<div class="fdetail">' + escapeHtml(f.detail) + ' · $' + f.price.toFixed(2) + ' ea</div>' +
+                  '<div class="fcode">' + f.code + '</div></div>' +
+                  '<div class="qty-stepper">' +
+                    '<button data-step="-1">−</button>' +
+                    '<span class="qty-val">' + qty + '</span>' +
+                    '<button data-step="1">+</button>' +
+                  '</div>' +
+                '</div>'
+              );
+            }).join('') +
           '</div>' +
         '</div>'
       );
     }).join('');
+
+    host.innerHTML = '<div class="product-grid">' + tiles + '</div>' + details;
   }
 
   document.getElementById('product-list').addEventListener('click', function (e) {
-    var toggleId = e.target.getAttribute('data-toggle');
-    if (toggleId) {
+    var toggleBtn = e.target.closest('[data-toggle]');
+    if (toggleBtn) {
+      var toggleId = toggleBtn.getAttribute('data-toggle');
       if (state.selection[toggleId]) delete state.selection[toggleId];
       else state.selection[toggleId] = {};
       renderProductList();
