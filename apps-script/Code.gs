@@ -32,6 +32,64 @@ function respond(obj) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
+// Google Sheets "Table" objects (the banded/filterable kind) have their own
+// range separate from the sheet's data range. sheet.appendRow() only extends
+// the sheet, not the Table sitting on top of it, so rows written by this
+// script would otherwise land just below the table with none of its
+// formatting/filters until someone manually drags the table's resize handle.
+// This finds the Table on a given sheet (if any) and grows its range to
+// include the row that was just appended. It's a nice-to-have, never a
+// requirement — any failure here is swallowed so the actual data write
+// (which already happened via appendRow) is never affected.
+function extendTableForNewRow(sheet) {
+  try {
+    extendTableForNewRowUnsafe(sheet);
+  } catch (err) {
+    console.error('extendTableForNewRow failed (non-fatal): ' + err.message);
+  }
+}
+
+function extendTableForNewRowUnsafe(sheet) {
+  var ss = sheet.getParent();
+  var sheetId = sheet.getSheetId();
+  var meta = Sheets.Spreadsheets.get(ss.getId(), { fields: 'sheets(properties.sheetId,tables,bandedRanges)' });
+  var thisSheet = null;
+  for (var i = 0; i < meta.sheets.length; i++) {
+    if (meta.sheets[i].properties.sheetId === sheetId) { thisSheet = meta.sheets[i]; break; }
+  }
+  if (!thisSheet) return { skipped: 'sheet not found in metadata' };
+  var table = thisSheet.tables && thisSheet.tables.length ? thisSheet.tables[0] : null; // at most one table per sheet in this project
+  if (!table) return { skipped: 'no table on this sheet' };
+
+  var newLastRow = sheet.getLastRow(); // 1-based row index of the row we just appended
+  if (table.range.endRowIndex === undefined) return { skipped: 'unbounded, already covers everything' };
+  if (table.range.endRowIndex >= newLastRow) return { skipped: 'already covers new row', endRowIndex: table.range.endRowIndex, newLastRow: newLastRow };
+
+  var requests = [];
+
+  // Sheets auto-creates a separate "preview" banded range over rows written
+  // just below an existing table (same band colors, different object) before
+  // the table officially adopts them. Growing the table's own range over
+  // that same area collides with it — "You cannot add alternating background
+  // colors to a range that already has alternating background colors." —
+  // so any stray banded range covering the rows we're about to pull in has
+  // to be deleted first, in the same batch, before the table resize.
+  (thisSheet.bandedRanges || []).forEach(function (br) {
+    var isTablesOwnBand = String(br.bandedRangeId) === String(table.tableId);
+    var overlapsGrowthZone = br.range.startRowIndex < newLastRow && (br.range.endRowIndex === undefined || br.range.endRowIndex > table.range.endRowIndex);
+    if (!isTablesOwnBand && overlapsGrowthZone) {
+      requests.push({ deleteBanding: { bandedRangeId: br.bandedRangeId } });
+    }
+  });
+
+  var updatedTable = JSON.parse(JSON.stringify(table));
+  updatedTable.range.endRowIndex = newLastRow;
+  requests.push({ updateTable: { table: updatedTable, fields: '*' } });
+
+  var res = Sheets.Spreadsheets.batchUpdate({ requests: requests }, ss.getId());
+  return { extended: true, newRange: updatedTable.range, removedStrayBands: requests.length - 1, apiResponse: res };
+}
+
 function handleLogin(name, pin) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(REPS_SHEET_NAME);
   if (!sheet) return { ok: false, error: 'Reps tab not found' };
@@ -235,6 +293,7 @@ function handleOrder(body) {
     if (idx.invoiceStatus !== -1) row[idx.invoiceStatus] = 'Not Created';
     if (idx.notes !== -1) row[idx.notes] = body.notes || '';
     sheet.appendRow(row);
+    extendTableForNewRow(sheet);
   });
 
   return { ok: true, linesAdded: lines.length };
@@ -363,6 +422,7 @@ function handleAddCustomer(customer) {
   set(row, col, 'Payment Method', customer.paymentMethod || 'Not Set Up');
   set(row, col, 'Imported to Ekos', false);
   sheet.appendRow(row);
+  extendTableForNewRow(sheet);
 
   return { ok: true };
 }
