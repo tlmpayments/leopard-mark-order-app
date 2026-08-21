@@ -362,11 +362,15 @@
       var selected = !!state.selection[p.id];
       return (
         '<div class="product-card' + (selected ? ' selected' : '') + '" data-product="' + p.id + '">' +
-          '<div class="product-media"><img src="' + p.image + '" alt="' + escapeHtml(p.name) + ' can" /></div>' +
-          '<div class="product-info">' +
+          '<div class="product-row">' +
+            '<div class="product-thumb"><img src="' + p.image + '" alt="' + escapeHtml(p.name) + ' can" /></div>' +
+            '<div class="product-text">' +
+              '<div class="pname">' + escapeHtml(p.name) + '</div>' +
+              '<div class="psub">' + escapeHtml(p.subtitle) + '</div>' +
+            '</div>' +
             '<button class="product-toggle" data-toggle="' + p.id + '">' + (selected ? 'Selected ✓' : 'Select') + '</button>' +
-            '<div class="pname">' + escapeHtml(p.name) + '</div>' +
-            '<div class="psub">' + escapeHtml(p.subtitle) + '</div>' +
+          '</div>' +
+          '<div class="product-info">' +
             '<div class="format-list">' +
               p.formats.map(function (f) {
                 var qty = (state.selection[p.id] && state.selection[p.id][f.code]) || 0;
