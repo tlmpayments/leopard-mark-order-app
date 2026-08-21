@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Leopard Mark — Rep Orders</title>
+  <meta name="theme-color" content="#0a1730" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png" />
+  <link rel="icon" href="assets/icons/icon-192.png" />
+  <link rel="stylesheet" href="assets/css/app.css" />
+</head>
+<body>
+
+  <div id="toast" class="toast"></div>
+
+  <!-- LOGIN -->
+  <section id="screen-login" class="screen active">
+    <img class="logo-mark" src="assets/icons/icon-192.png" alt="Leopard Mark Brewing" />
+    <div class="brand-title">The Leopard Mark Brewing Co.</div>
+    <div class="brand-sub">Sales Rep Orders</div>
+
+    <form class="login-card" id="login-form">
+      <div class="field">
+        <label for="login-name">Your Name</label>
+        <input id="login-name" name="name" autocomplete="username" required />
+      </div>
+      <div class="field">
+        <label for="login-pin">PIN</label>
+        <input id="login-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="current-password" required />
+      </div>
+      <div class="error-text" id="login-error"></div>
+      <button class="btn btn-primary btn-block" type="submit" id="login-submit">Log In</button>
+    </form>
+  </section>
+
+  <!-- LANDING / STATS -->
+  <section id="screen-home" class="screen">
+    <div class="topbar">
+      <div class="who">
+        <img src="assets/icons/icon-192.png" alt="" />
+        <div>
+          <div class="name" id="home-rep-name">—</div>
+          <div class="rep-label">Sales Rep</div>
+        </div>
+      </div>
+      <button class="icon-btn" id="logout-btn">Log Out</button>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="value" id="stat-orders">0</div>
+        <div class="label">Orders Logged</div>
+      </div>
+      <div class="stat-card">
+        <div class="value" id="stat-units">0</div>
+        <div class="label">Units Ordered</div>
+      </div>
+    </div>
+
+    <div class="cta-row">
+      <button class="cta-btn" id="btn-new-order">
+        <span>Place Order<small>Start a new order for an account</small></span>
+        <span>→</span>
+      </button>
+      <button class="cta-btn secondary" id="btn-reorder">
+        <span>Reorder<small>Repeat a recent order's line items</small></span>
+        <span>→</span>
+      </button>
+    </div>
+
+    <div class="section-title">Recent Orders</div>
+    <div class="order-history" id="order-history">
+      <div class="empty-note">No orders yet.</div>
+    </div>
+  </section>
+
+  <!-- PRODUCT PICKER -->
+  <section id="screen-order" class="screen">
+    <a class="back-link" id="back-to-home">← Back</a>
+    <div class="section-title">Customer</div>
+    <button class="cta-btn secondary" id="btn-pick-customer" type="button" style="margin-bottom:16px; width:100%;">
+      <span id="picked-customer-label">Select account →</span>
+    </button>
+    <div id="picked-customer-detail" class="order-summary" style="display:none; margin-top:-6px;"></div>
+
+    <div class="section-title">Select Beer &amp; Quantity</div>
+    <div id="product-list"></div>
+
+    <div class="order-summary" id="order-total-box" style="display:none;">
+      <div class="oline"><strong>Order Total</strong><strong id="order-total-value">$0.00</strong></div>
+    </div>
+
+    <div class="field" style="margin-bottom:100px;">
+      <label for="order-notes">Notes (optional)</label>
+      <textarea id="order-notes" rows="2" placeholder="Delivery instructions, special requests..."></textarea>
+    </div>
+  </section>
+
+  <div class="sticky-footer" id="order-footer" style="display:none;">
+    <div class="inner">
+      <button class="btn btn-ghost" id="footer-cancel">Cancel</button>
+      <button class="btn btn-primary btn-block" id="footer-submit">
+        <span id="footer-submit-label">Submit Order</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- CUSTOMER PICKER -->
+  <section id="screen-customers" class="screen">
+    <a class="back-link" id="back-customers-to-order">← Back</a>
+    <div class="section-title">Accounts</div>
+    <div class="field" style="margin-bottom:14px;">
+      <input id="customer-search" placeholder="Search by name, region, or city" />
+    </div>
+    <button class="cta-btn secondary" id="btn-add-customer" type="button" style="margin-bottom:16px;">
+      <span>+ Add New Customer</span>
+    </button>
+    <div id="customer-list" class="order-history"></div>
+  </section>
+
+  <!-- ADD NEW CUSTOMER -->
+  <section id="screen-new-customer" class="screen">
+    <a class="back-link" id="back-newcustomer-to-customers">← Back</a>
+    <div class="section-title">Add New Customer</div>
+    <form id="new-customer-form" style="display:flex; flex-direction:column; gap:14px; padding-bottom:100px;">
+      <div class="field"><label>Establishment Name *</label><input id="nc-name" required /></div>
+      <div class="field"><label>Address *</label><input id="nc-address" required /></div>
+      <div class="field"><label>Ordering Contact *</label><input id="nc-contact" required /></div>
+      <div class="field"><label>Phone Number *</label><input id="nc-phone" type="tel" required /></div>
+      <div class="field"><label>Email *</label><input id="nc-email" type="email" required /></div>
+      <div class="field"><label>Delivery Address *</label><input id="nc-delivery-address" required /></div>
+      <div class="field"><label>Delivery Instructions *</label><textarea id="nc-delivery-instructions" rows="2" required></textarea></div>
+      <div class="field"><label>Region *</label><input id="nc-region" required /></div>
+      <div class="field"><label>License Number (if known)</label><input id="nc-license" /></div>
+      <div class="error-text" id="new-customer-error"></div>
+      <button class="btn btn-primary btn-block" type="submit" id="nc-submit">Save Customer</button>
+    </form>
+  </section>
+
+  <script src="assets/js/config.js"></script>
+  <script src="assets/js/products.js"></script>
+  <script src="assets/js/customers.js"></script>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>
