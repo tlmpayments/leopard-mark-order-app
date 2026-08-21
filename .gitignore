@@ -1,2 +1,4 @@
 apps-script/clasp-project/
 .DS_Store
+.vercel
+.env*

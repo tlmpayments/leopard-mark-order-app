@@ -194,6 +194,7 @@ function handleOrder(body) {
     lineTotal: salesCol(col, header, 'Line Total', ['line', 'total']),
     inventorySource: salesCol(col, header, 'Inventory Source', ['inventory', 'source']),
     bol: salesCol(col, header, 'BOL #', ['bol']),
+    createdByOrderForm: salesCol(col, header, 'Created by Order Form', ['created', 'by', 'order', 'form']),
     salesRep: salesCol(col, header, 'Sales Rep', ['sales', 'rep']),
     paymentMethod: salesCol(col, header, 'Payment Method', ['payment', 'method']),
     invoiceStatus: salesCol(col, header, 'Invoice Status', ['invoice', 'status']),
@@ -228,6 +229,7 @@ function handleOrder(body) {
     if (idx.lineTotal !== -1) row[idx.lineTotal] = lineTotal;
     if (idx.inventorySource !== -1) row[idx.inventorySource] = warehouse;
     if (idx.bol !== -1) row[idx.bol] = deliveryDate ? nextBolNumber(sheet, idx.bol, hc.headerRowNumber, warehouse, deliveryDate) : '';
+    if (idx.createdByOrderForm !== -1) row[idx.createdByOrderForm] = true;
     if (idx.salesRep !== -1) row[idx.salesRep] = body.rep || '';
     if (idx.paymentMethod !== -1) row[idx.paymentMethod] = body.paymentMethod || '';
     if (idx.invoiceStatus !== -1) row[idx.invoiceStatus] = 'Not Created';
