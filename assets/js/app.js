@@ -250,8 +250,13 @@
   function renderCustomerList(query) {
     var host = document.getElementById('customer-list');
     var q = (query || '').trim().toLowerCase();
+
+    if (!q) {
+      host.innerHTML = '<div class="empty-note">Start typing to search accounts.</div>';
+      return;
+    }
+
     var list = state.customers.filter(function (c) {
-      if (!q) return true;
       // Search across everything a rep might type to disambiguate near-duplicate
       // accounts (e.g. two "La Nena Cantina" locations) -- name, legal entity,
       // license #, region, and address all count as a match.
