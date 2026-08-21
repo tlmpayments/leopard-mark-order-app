@@ -150,6 +150,8 @@
   // ---------- Home / stats ----------
   function enterHome() {
     document.getElementById('home-rep-name').textContent = state.rep;
+    var regions = window.LM_REP_REGIONS || {};
+    document.getElementById('home-rep-region').textContent = regions[state.rep] || 'Sales Rep';
     showScreen('screen-home');
     loadStats();
     refreshCustomers();
