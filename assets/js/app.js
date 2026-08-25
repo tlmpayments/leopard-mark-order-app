@@ -546,6 +546,49 @@
     return (parts[parts.length - 1] || '').toLowerCase();
   }
 
+  // Region is inferred, never typed by the rep: an establishment's address is
+  // the most reliable signal (it's an exact place, not a rep's general
+  // territory), so city/area keywords are checked first. Only when the
+  // address doesn't match anything recognized do we fall back to the
+  // logged-in rep's territory, via the same last-name matching used for
+  // "My Accounts" above (Sales sheet rep names and Customer Accounts sales
+  // person names aren't written consistently).
+  var REGION_KEYWORDS = [
+    { region: 'San Rafael', match: ['san rafael'] },
+    { region: 'Burlingame', match: ['burlingame'] },
+    { region: 'North Bay', match: ['north bay', 'santa rosa', 'napa', 'sonoma', 'petaluma', 'novato', 'marin'] },
+    { region: 'San Francisco', match: ['san francisco', 'oakland', 'berkeley', 'daly city', ' sf ', ' sf,', ' sf.'] },
+    { region: 'Arcadia', match: ['arcadia'] },
+    { region: 'Long Beach', match: ['long beach'] },
+    { region: 'Orange County', match: ['orange county', 'anaheim', 'irvine', 'santa ana', 'huntington beach', 'costa mesa'] },
+    { region: 'San Diego', match: ['san diego'] },
+    // No bare "la" token here -- real CA cities like La Mesa, La Jolla, and
+    // La Habra all contain it and would be misclassified as Los Angeles.
+    { region: 'Los Angeles', match: ['los angeles'] }
+  ];
+
+  // Reps whose territory we know from historical order data -- keyed by last
+  // name so "T. Gilbert" and "Thomas Gilbert" both resolve. Reps not listed
+  // here have no reliable default yet; for them, region only fills in when
+  // the address itself gives a match.
+  var REP_DEFAULT_REGION = {
+    'gilbert': 'San Francisco',
+    'williams': 'Los Angeles',
+    'krause': 'Orange County',
+    'sprague': 'Orange County'
+  };
+
+  function inferRegion(rep, address) {
+    var addr = ' ' + String(address || '').toLowerCase() + ' ';
+    for (var i = 0; i < REGION_KEYWORDS.length; i++) {
+      var rule = REGION_KEYWORDS[i];
+      for (var j = 0; j < rule.match.length; j++) {
+        if (addr.indexOf(rule.match[j]) !== -1) return rule.region;
+      }
+    }
+    return REP_DEFAULT_REGION[repLastName(rep)] || '';
+  }
+
   function myMappedAccounts() {
     var mine = repLastName(state.rep);
     if (!mine) return [];
@@ -1015,7 +1058,7 @@
       email: val('nc-email'),
       deliveryAddress: val('nc-delivery-address'),
       deliveryInstructions: val('nc-delivery-instructions'),
-      region: val('nc-region'),
+      region: inferRegion(state.rep, val('nc-address')),
       licenseNumber: val('nc-license'),
       tapHandleRequested: getYnToggle('nc-tap-handle'),
       salesRep: state.rep || '',
@@ -1026,7 +1069,7 @@
       paymentMethod: 'Not Set Up'
     };
 
-    var required = ['establishmentName', 'address', 'orderingContact', 'phone', 'email', 'deliveryAddress', 'deliveryInstructions', 'region'];
+    var required = ['establishmentName', 'address', 'orderingContact', 'phone', 'email', 'deliveryAddress', 'deliveryInstructions'];
     var missing = required.filter(function (k) { return !newCustomer[k]; });
     if (missing.length) { errEl.textContent = 'Please fill in all required fields.'; return; }
 
