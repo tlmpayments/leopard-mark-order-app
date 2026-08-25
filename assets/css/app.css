@@ -121,6 +121,7 @@ a { color: var(--accent); }
 .rep-tile:active { transform: scale(0.97); border-color: var(--accent); }
 
 #login-step-pin .back-link { display: block; text-align: center; margin-bottom: 4px; }
+.pin-instructions { text-align: center; color: var(--silver); font-size: 14px; font-weight: 600; }
 .pin-dots { display: flex; justify-content: center; gap: 14px; margin: 6px 0; }
 .pin-dot {
   width: 16px;

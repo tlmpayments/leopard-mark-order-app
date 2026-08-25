@@ -185,24 +185,37 @@
   function renderRepPicker(reps) {
     var host = document.getElementById('rep-picker');
     host.innerHTML = reps.map(function (r) {
-      return '<button type="button" class="rep-tile" data-name="' + escapeHtml(r.name) + '" data-role="' + escapeHtml(r.role || 'Rep') + '">' + escapeHtml(r.name) + '</button>';
+      return '<button type="button" class="rep-tile" data-name="' + escapeHtml(r.name) + '" data-role="' + escapeHtml(r.role || 'Rep') + '" data-needs-pin="' + (r.needsPin ? '1' : '') + '">' + escapeHtml(r.name) + '</button>';
     }).join('');
     host.querySelectorAll('.rep-tile').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        openPinPad(btn.getAttribute('data-name'), btn.getAttribute('data-role'));
+        openPinPad(btn.getAttribute('data-name'), btn.getAttribute('data-role'), btn.getAttribute('data-needs-pin') === '1');
       });
     });
   }
 
-  function openPinPad(name, role) {
+  // mode is 'login' (rep already has a PIN), 'create' (first digits of a new
+  // PIN), or 'confirm' (re-entering it to catch typos) -- 'create'/'confirm'
+  // only happen the very first time a rep taps their name with no PIN set.
+  function openPinPad(name, role, needsPin) {
     pinState.rep = name;
     pinState.role = role || 'Rep';
+    pinState.mode = needsPin ? 'create' : 'login';
+    pinState.firstPin = null;
     pinState.digits = '';
     document.getElementById('pin-rep-name').textContent = name;
     document.getElementById('pin-error').textContent = '';
+    updatePinInstructions();
     updatePinDots(false);
     document.getElementById('login-step-pick').style.display = 'none';
     document.getElementById('login-step-pin').style.display = 'flex';
+  }
+
+  function updatePinInstructions() {
+    var el = document.getElementById('pin-instructions');
+    if (pinState.mode === 'create') el.textContent = 'Choose a 4-digit PIN';
+    else if (pinState.mode === 'confirm') el.textContent = 'Re-enter your PIN to confirm';
+    else el.textContent = 'Enter your PIN';
   }
 
   document.getElementById('pin-back-link').addEventListener('click', function (e) {
@@ -231,10 +244,38 @@
     if (pinState.digits.length >= 4) return;
     pinState.digits += key;
     updatePinDots(false);
-    if (pinState.digits.length === 4) submitPin();
+    if (pinState.digits.length === 4) handlePinComplete();
   });
 
-  function submitPin() {
+  function handlePinComplete() {
+    if (pinState.mode === 'create') {
+      pinState.firstPin = pinState.digits;
+      pinState.digits = '';
+      pinState.mode = 'confirm';
+      updatePinInstructions();
+      updatePinDots(false);
+      return;
+    }
+    if (pinState.mode === 'confirm') {
+      if (pinState.digits !== pinState.firstPin) {
+        document.getElementById('pin-error').textContent = "PINs didn't match -- try again";
+        updatePinDots(true);
+        setTimeout(function () {
+          pinState.mode = 'create';
+          pinState.firstPin = null;
+          pinState.digits = '';
+          updatePinInstructions();
+          updatePinDots(false);
+        }, 500);
+        return;
+      }
+      submitSetPin();
+      return;
+    }
+    submitLogin();
+  }
+
+  function submitLogin() {
     var errEl = document.getElementById('pin-error');
     errEl.textContent = '';
     var name = pinState.rep;
@@ -258,6 +299,42 @@
       .catch(function (err) {
         errEl.textContent = friendlyApiError(err);
         pinState.digits = '';
+        updatePinDots(false);
+      });
+  }
+
+  function submitSetPin() {
+    var errEl = document.getElementById('pin-error');
+    errEl.textContent = '';
+    var name = pinState.rep;
+    var pin = pinState.firstPin;
+
+    if (!apiConfigured()) {
+      completeLogin(name, pinState.role);
+      return;
+    }
+
+    apiPost({ action: 'setPin', name: name, pin: pin })
+      .then(function (res) {
+        if (res.ok) {
+          completeLogin(res.rep, res.role);
+        } else {
+          errEl.textContent = res.error || 'Could not save your PIN';
+          setTimeout(function () {
+            pinState.mode = 'create';
+            pinState.firstPin = null;
+            pinState.digits = '';
+            updatePinInstructions();
+            updatePinDots(false);
+          }, 600);
+        }
+      })
+      .catch(function (err) {
+        errEl.textContent = friendlyApiError(err);
+        pinState.mode = 'create';
+        pinState.firstPin = null;
+        pinState.digits = '';
+        updatePinInstructions();
         updatePinDots(false);
       });
   }

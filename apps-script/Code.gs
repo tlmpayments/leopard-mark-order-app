@@ -26,6 +26,7 @@ function doPost(e) {
     if (body.action === 'order') return respond(handleOrder(body));
     if (body.action === 'addCustomer') return respond(handleAddCustomer(body.customer));
     if (body.action === 'updateCustomer') return respond(handleUpdateCustomer(body.customer));
+    if (body.action === 'setPin') return respond(handleSetPin(body.name, body.pin));
     return respond({ ok: false, error: 'Unknown action' });
   } catch (err) {
     return respond({ ok: false, error: err.message });
@@ -168,7 +169,9 @@ function handleLogin(name, pin) {
 }
 
 // Names only (no PINs) so the login screen can show a tap-to-pick list
-// instead of making reps type their name every time.
+// instead of making reps type their name every time. Flags reps whose PIN
+// cell is still blank so the app can send them through PIN setup instead
+// of PIN entry.
 function handleReps() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(REPS_SHEET_NAME);
   if (!sheet) return { ok: false, error: 'Reps tab not found' };
@@ -180,9 +183,36 @@ function handleReps() {
     if (!rowName) continue;
     if (!(active === true || active === 'TRUE' || active === '')) continue;
     var role = String(rows[i][3] || '').trim();
-    reps.push({ name: rowName, role: role.toLowerCase() === 'admin' ? 'Admin' : 'Rep' });
+    var hasPin = String(rows[i][1] || '').trim() !== '';
+    reps.push({ name: rowName, role: role.toLowerCase() === 'admin' ? 'Admin' : 'Rep', needsPin: !hasPin });
   }
   return { ok: true, reps: reps };
+}
+
+// Lets a rep choose their own PIN the first time they log in. Only works
+// while the sheet's PIN cell for that rep is still blank -- once a PIN is
+// set, this endpoint refuses to touch it, so it can't be used to hijack
+// someone else's account by overwriting their PIN. Resetting a forgotten
+// PIN is a job for whoever manages the Reps sheet directly (clear the cell,
+// which re-opens this setup flow for that rep).
+function handleSetPin(name, pin) {
+  var cleanPin = String(pin || '').trim();
+  if (!/^\d{4}$/.test(cleanPin)) return { ok: false, error: 'PIN must be 4 digits' };
+
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(REPS_SHEET_NAME);
+  if (!sheet) return { ok: false, error: 'Reps tab not found' };
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    var rowName = String(rows[i][0] || '').trim();
+    if (rowName.toLowerCase() !== String(name || '').trim().toLowerCase()) continue;
+    var active = rows[i][2];
+    if (!(active === true || active === 'TRUE' || active === '')) return { ok: false, error: 'Account is not active' };
+    if (String(rows[i][1] || '').trim() !== '') return { ok: false, error: 'PIN already set for this account' };
+    sheet.getRange(i + 1, 2).setValue(cleanPin);
+    var role = String(rows[i][3] || '').trim();
+    return { ok: true, rep: rowName, role: role.toLowerCase() === 'admin' ? 'Admin' : 'Rep' };
+  }
+  return { ok: false, error: 'Rep not found' };
 }
 
 function getSalesHeaderAndCol(sheet) {
