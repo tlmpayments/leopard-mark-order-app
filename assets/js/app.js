@@ -1017,12 +1017,26 @@
     document.getElementById('new-customer-form').reset();
     document.getElementById('new-customer-error').textContent = '';
     setYnToggle('nc-tap-handle', 'No');
+    document.getElementById('new-customer-form').style.display = 'flex';
+    document.getElementById('nc-success').style.display = 'none';
+    document.getElementById('back-newcustomer-to-customers').style.display = 'block';
     state.newCustomerReturnTo = returnTo;
     showScreen('screen-new-customer');
   }
 
   document.getElementById('back-newcustomer-to-customers').addEventListener('click', function () {
     showScreen(state.newCustomerReturnTo || 'screen-customers');
+  });
+
+  document.getElementById('nc-place-order-btn').addEventListener('click', function () {
+    if (!state.lastAddedCustomer) return;
+    resetOrderForm();
+    setCustomer(state.lastAddedCustomer);
+    showScreen('screen-order');
+  });
+
+  document.getElementById('nc-success-done-btn').addEventListener('click', function () {
+    showScreen('screen-home');
   });
 
   // ---------- Yes/No toggle fields (e.g. Tap Handle Requested) ----------
@@ -1085,7 +1099,14 @@
       btn.textContent = 'Save Customer';
       toast('Account added');
       if (addedFromHome) {
-        showScreen('screen-home');
+        // Give the rep the option to place an order right away instead of
+        // bouncing them back home -- most new accounts get their first
+        // order placed on the same visit.
+        document.getElementById('nc-success-message').textContent = newCustomer.establishmentName + ' was added.';
+        document.getElementById('new-customer-form').style.display = 'none';
+        document.getElementById('back-newcustomer-to-customers').style.display = 'none';
+        document.getElementById('nc-success').style.display = 'flex';
+        state.lastAddedCustomer = newCustomer;
       } else {
         setCustomer(newCustomer);
         showScreen('screen-order');
