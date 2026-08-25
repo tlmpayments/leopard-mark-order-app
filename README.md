@@ -23,7 +23,7 @@ Open the order sheet: https://docs.google.com/spreadsheets/d/1AjH3tCpLYbAuSD-yZt
 1. Confirm the tab behind `gid=690017703` (the "Sales" section) has this exact header row:
    `Invoice # | Customer | License Number | PO Date | Delivery (Invoice) Date | Product Name | Packaging Format | Product Code | Lot # | Qty | Price (ea) | Line Total | Inventory Source | BOL # | Sales Rep | Payment Method | ACH Invoice REF # | Invoice Status | TLM Tap Handle | SGB Tap Handle | CNT Tap Handle | MicroStar 1/2 Empty | MicroStar 1/6 Empty | Notes`
    If the tab name isn't literally "Sales", open `apps-script/Code.gs` after pasting it in and change `SALES_SHEET_NAME`.
-2. Add a new tab named **Reps** with columns: `Name | PIN | Active`. One row per rep, e.g. `Jack Begley | 4821 | TRUE`. This is what the app checks on login.
+2. Add a new tab named **Reps** with columns: `Name | PIN | Active | Role`. One row per rep, e.g. `Jack Begley | 4821 | TRUE | Admin`. This is what the app checks on login. `Role` is optional per row — leave it blank for a normal rep; put `Admin` (case-insensitive) for anyone who should see the "Admin: All Orders" dashboard.
 
 ## 2. Deploy the backend
 
@@ -36,6 +36,20 @@ Open the order sheet: https://docs.google.com/spreadsheets/d/1AjH3tCpLYbAuSD-yZt
 5. Paste that URL into `assets/js/config.js` as `APPS_SCRIPT_URL`.
 
 Redeploy (Deploy → Manage deployments → edit → new version) any time you change `Code.gs`.
+
+## 2c. Redeploy for this update (login redesign, Add Account, admin accounts)
+
+`apps-script/Code.gs` now has `reps` and `allOrders` actions, and reads/writes a
+`Tap Handle Requested` column. Redeploy the same way: **Deploy → Manage
+deployments → edit (pencil) → Version: New version → Deploy.**
+
+This update expects:
+- The **Reps** tab to have a 4th column, `Role` (see step 1 above). Existing
+  rows without it still work — they're treated as a normal rep.
+- The **Customer Accounts** tab to have a `Tap Handle Requested` column
+  (values `Yes`/`No`). If it's missing, the app still works — the answer from
+  the "Add Account" / edit-account forms just won't be saved anywhere until
+  you add the column.
 
 ## 2b. Redeploy after this update
 

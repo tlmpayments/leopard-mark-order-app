@@ -5,8 +5,7 @@
     stats: null,
     selection: {}, // productId -> { formatCode: qty }
     customer: null,
-    customers: loadCachedCustomers() || (window.LM_CUSTOMERS || []).slice(),
-    navReturnTo: 'screen-order' // where the customer picker sends you back to
+    customers: loadCachedCustomers() || (window.LM_CUSTOMERS || []).slice()
   };
 
   var screens = {};
@@ -90,6 +89,7 @@
           if (screens['screen-customers'].classList.contains('active')) {
             renderCustomerList(document.getElementById('customer-search').value);
           }
+          updateMyMapButton();
         }
       })
       .catch(function () {
@@ -99,6 +99,21 @@
   }
 
   // ---------- Login ----------
+  function saveRole(role) {
+    localStorage.setItem('lm_role', role || 'Rep');
+  }
+  function loadRole() {
+    return localStorage.getItem('lm_role') || 'Rep';
+  }
+
+  function completeLogin(rep, role) {
+    state.rep = rep;
+    state.repRole = role || 'Rep';
+    saveSession(rep);
+    saveRole(state.repRole);
+    enterHome();
+  }
+
   document.getElementById('login-form').addEventListener('submit', function (e) {
     e.preventDefault();
     var name = document.getElementById('login-name').value.trim();
@@ -109,9 +124,7 @@
 
     if (!apiConfigured()) {
       // Dev fallback so the app is testable before Apps Script is deployed.
-      state.rep = name;
-      saveSession(name);
-      enterHome();
+      completeLogin(name, 'Rep');
       return;
     }
 
@@ -120,9 +133,7 @@
     apiGet({ action: 'login', name: name, pin: pin })
       .then(function (res) {
         if (res.ok) {
-          state.rep = res.rep;
-          saveSession(res.rep);
-          enterHome();
+          completeLogin(res.rep, res.role);
         } else {
           errEl.textContent = res.error || 'Invalid name or PIN';
         }
@@ -134,6 +145,123 @@
       });
   });
 
+  document.getElementById('login-use-form-link').addEventListener('click', function (e) {
+    e.preventDefault();
+    showLoginFallback();
+  });
+
+  function showLoginFallback() {
+    document.getElementById('login-step-pick').style.display = 'none';
+    document.getElementById('login-step-pin').style.display = 'none';
+    document.getElementById('login-form').style.display = 'flex';
+  }
+
+  // ---------- Tap-to-pick-name + PIN pad ----------
+  // Big-target tap flow so reps never have to type on the small login
+  // screen: pick your name from a list, then punch a 4-digit PIN. Falls
+  // back to the plain typed form (below) if the reps list can't load.
+  var pinState = { rep: null, digits: '' };
+
+  function loadRepPicker() {
+    var host = document.getElementById('rep-picker');
+    if (!apiConfigured()) {
+      var demoNames = Object.keys(window.LM_REP_REGIONS || {});
+      renderRepPicker(demoNames.length ? demoNames.map(function (n) { return { name: n, role: 'Rep' }; }) : [{ name: 'Demo Rep', role: 'Rep' }]);
+      return;
+    }
+    apiGet({ action: 'reps' })
+      .then(function (res) {
+        if (res.ok && Array.isArray(res.reps) && res.reps.length) {
+          renderRepPicker(res.reps);
+        } else {
+          host.innerHTML = '<div class="empty-note">Could not load reps.</div>';
+        }
+      })
+      .catch(function () {
+        host.innerHTML = '<div class="empty-note">Could not reach the server. Use "Log in a different way" below.</div>';
+      });
+  }
+
+  function renderRepPicker(reps) {
+    var host = document.getElementById('rep-picker');
+    host.innerHTML = reps.map(function (r) {
+      return '<button type="button" class="rep-tile" data-name="' + escapeHtml(r.name) + '" data-role="' + escapeHtml(r.role || 'Rep') + '">' + escapeHtml(r.name) + '</button>';
+    }).join('');
+    host.querySelectorAll('.rep-tile').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        openPinPad(btn.getAttribute('data-name'), btn.getAttribute('data-role'));
+      });
+    });
+  }
+
+  function openPinPad(name, role) {
+    pinState.rep = name;
+    pinState.role = role || 'Rep';
+    pinState.digits = '';
+    document.getElementById('pin-rep-name').textContent = name;
+    document.getElementById('pin-error').textContent = '';
+    updatePinDots(false);
+    document.getElementById('login-step-pick').style.display = 'none';
+    document.getElementById('login-step-pin').style.display = 'flex';
+  }
+
+  document.getElementById('pin-back-link').addEventListener('click', function (e) {
+    e.preventDefault();
+    document.getElementById('login-step-pin').style.display = 'none';
+    document.getElementById('login-step-pick').style.display = 'flex';
+  });
+
+  function updatePinDots(isError) {
+    var dots = document.querySelectorAll('#pin-dots .pin-dot');
+    dots.forEach(function (d, i) {
+      d.classList.toggle('filled', !isError && i < pinState.digits.length);
+      d.classList.toggle('error', !!isError);
+    });
+  }
+
+  document.getElementById('pin-pad').addEventListener('click', function (e) {
+    var btn = e.target.closest('button[data-key]');
+    if (!btn) return;
+    var key = btn.getAttribute('data-key');
+    if (key === 'back') {
+      pinState.digits = pinState.digits.slice(0, -1);
+      updatePinDots(false);
+      return;
+    }
+    if (pinState.digits.length >= 4) return;
+    pinState.digits += key;
+    updatePinDots(false);
+    if (pinState.digits.length === 4) submitPin();
+  });
+
+  function submitPin() {
+    var errEl = document.getElementById('pin-error');
+    errEl.textContent = '';
+    var name = pinState.rep;
+    var pin = pinState.digits;
+
+    if (!apiConfigured()) {
+      completeLogin(name, pinState.role);
+      return;
+    }
+
+    apiGet({ action: 'login', name: name, pin: pin })
+      .then(function (res) {
+        if (res.ok) {
+          completeLogin(res.rep, res.role);
+        } else {
+          errEl.textContent = res.error || 'Incorrect PIN';
+          updatePinDots(true);
+          setTimeout(function () { pinState.digits = ''; updatePinDots(false); }, 400);
+        }
+      })
+      .catch(function (err) {
+        errEl.textContent = friendlyApiError(err);
+        pinState.digits = '';
+        updatePinDots(false);
+      });
+  }
+
   function friendlyApiError(err) {
     if (err && err.message === 'NOT_SIGNED_IN') {
       return 'Sign in to your Google account first: open the link at the bottom of this page once, sign in, then come back and try again.';
@@ -144,17 +272,24 @@
   document.getElementById('logout-btn').addEventListener('click', function () {
     clearSession();
     state.rep = null;
+    state.repRole = null;
+    document.getElementById('login-step-pin').style.display = 'none';
+    document.getElementById('login-form').style.display = 'none';
+    document.getElementById('login-step-pick').style.display = 'flex';
     showScreen('screen-login');
+    loadRepPicker();
   });
 
   // ---------- Home / stats ----------
   function enterHome() {
     document.getElementById('home-rep-name').textContent = state.rep;
     var regions = window.LM_REP_REGIONS || {};
-    document.getElementById('home-rep-region').textContent = regions[state.rep] || 'Sales Rep';
+    document.getElementById('home-rep-region').textContent = regions[state.rep] || (state.repRole === 'Admin' ? 'Admin' : 'Sales Rep');
+    document.getElementById('btn-admin-orders').style.display = state.repRole === 'Admin' ? 'flex' : 'none';
     showScreen('screen-home');
     loadStats();
     refreshCustomers();
+    updateMyMapButton();
   }
 
   function loadStats() {
@@ -181,13 +316,471 @@
     }
     host.innerHTML = orders.map(function (o) {
       var statusClass = String(o.status || 'pending').toLowerCase();
-      return '<div class="order-row">' +
+      var lines = o.lines || [];
+      var sub = lines.length === 1
+        ? escapeHtml(lines[0].product || '') + ' · ' + escapeHtml(lines[0].packaging || '') + ' · Qty ' + lines[0].qty
+        : lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' · Qty ' + o.qty;
+      var clickable = !!o.invoiceNumber;
+      return '<div class="order-row' + (clickable ? ' clickable' : '') + '"' + (clickable ? ' data-invoice="' + escapeHtml(o.invoiceNumber) + '"' : '') + '>' +
         '<div><div class="oname">' + escapeHtml(o.customer || 'Unknown account') + '</div>' +
-        '<div class="osub">' + escapeHtml(o.product || '') + ' · ' + escapeHtml(o.packaging || '') + ' · Qty ' + o.qty + '</div></div>' +
+        '<div class="osub">' + sub + '</div></div>' +
         '<span class="pill ' + statusClass + '">' + escapeHtml(o.status || 'Pending') + '</span>' +
         '</div>';
     }).join('');
   }
+
+  document.getElementById('order-history').addEventListener('click', function (e) {
+    var row = e.target.closest('.order-row[data-invoice]');
+    if (!row) return;
+    openInvoice(row.getAttribute('data-invoice'));
+  });
+
+  // ---------- Invoice ----------
+  document.getElementById('back-invoice-to-home').addEventListener('click', function () {
+    showScreen(state.invoiceReturnTo || 'screen-home');
+  });
+
+  function openInvoice(invoiceNumber) {
+    var current = Object.keys(screens).filter(function (k) { return screens[k].classList.contains('active'); })[0];
+    if (current && current !== 'screen-invoice') state.invoiceReturnTo = current;
+    showScreen('screen-invoice');
+    document.getElementById('invoice-loading').style.display = 'block';
+    document.getElementById('invoice-loading').textContent = 'Loading invoice…';
+    document.getElementById('invoice-doc').style.display = 'none';
+    document.getElementById('invoice-print-btn').style.display = 'none';
+
+    apiGet({ action: 'invoiceDetail', invoiceNumber: invoiceNumber })
+      .then(function (res) {
+        if (!res.ok) { document.getElementById('invoice-loading').textContent = res.error || 'Could not load invoice.'; return; }
+        renderInvoice(res);
+        document.getElementById('invoice-loading').style.display = 'none';
+        document.getElementById('invoice-doc').style.display = 'block';
+        document.getElementById('invoice-print-btn').style.display = 'block';
+      })
+      .catch(function (err) {
+        document.getElementById('invoice-loading').textContent = friendlyApiError(err);
+      });
+  }
+
+  function fmtDate(v) {
+    if (!v) return '—';
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return String(v);
+    return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
+  }
+
+  function fmtMoney(n) {
+    return '$' + (Number(n) || 0).toFixed(2);
+  }
+
+  // Builds the full inner markup for one invoice. Used both for the
+  // single-invoice screen and for batch printing (one call per order).
+  function buildInvoiceHtml(inv) {
+    var rowsHtml = inv.lines.map(function (l) {
+      return '<tr>' +
+        '<td data-label="Item">' + escapeHtml(l.productName) + ' ' + escapeHtml(l.packagingFormat) + '</td>' +
+        '<td data-label="Item Number">' + escapeHtml(l.productCode) + '</td>' +
+        '<td data-label="UPC">' + escapeHtml(l.upc || '—') + '</td>' +
+        '<td class="num" data-label="Quantity">' + l.qty.toFixed(2) + '</td>' +
+        '<td class="num" data-label="Unit Price">' + fmtMoney(l.unitPrice) + '</td>' +
+        '<td class="num" data-label="Total">' + fmtMoney(l.total) + '</td>' +
+        '</tr>';
+    }).join('');
+    if (inv.kegDepositQty > 0) {
+      rowsHtml += '<tr>' +
+        '<td data-label="Item">Keg Deposit</td>' +
+        '<td data-label="Item Number">—</td>' +
+        '<td data-label="UPC">—</td>' +
+        '<td class="num" data-label="Quantity">' + inv.kegDepositQty.toFixed(2) + '</td>' +
+        '<td class="num" data-label="Unit Price">' + fmtMoney(inv.kegDepositTotal / inv.kegDepositQty) + '</td>' +
+        '<td class="num" data-label="Total">' + fmtMoney(inv.kegDepositTotal) + '</td>' +
+        '</tr>';
+    }
+
+    var totalsHtml =
+      '<div class="row"><span class="label">SUBTOTAL</span><span class="value">' + fmtMoney(inv.subtotal) + '</span></div>' +
+      (inv.kegDepositQty > 0 ? '<div class="row"><span class="label">KEG DEPOSIT</span><span class="value">' + fmtMoney(inv.kegDepositTotal) + '</span></div>' : '') +
+      '<div class="row"><span class="label">TAX: Exempt (0.0000%)</span><span class="value">$0.00</span></div>' +
+      '<div class="row bold"><span class="label">INVOICE TOTAL</span><span class="value">' + fmtMoney(inv.invoiceTotal) + '</span></div>';
+
+    return (
+      '<div class="inv-header">' +
+        '<img class="inv-logo" src="assets/icons/brand/logo-alt.svg" alt="The Leopard Mark Brewing Co." />' +
+        '<div class="inv-doc-label">Invoice</div>' +
+      '</div>' +
+      '<div class="inv-info-row">' +
+        '<div class="inv-company-block">' +
+          'The Leopard Mark Brewing Company<br/>(707) 261-0200<br/>ar@theleopardmark.com<br/>' +
+          'Sales Rep : ' + escapeHtml(inv.salesRep || '') +
+        '</div>' +
+        '<div class="inv-meta-block">' +
+          'Invoice: ' + escapeHtml(inv.invoiceNumber || '') + '<br/>' +
+          'PO Date: ' + fmtDate(inv.poDate) + '<br/>' +
+          'Delivery Date: ' + fmtDate(inv.invoiceDate) + '<br/>' +
+          'Payment Terms: ' + escapeHtml(inv.paymentTerms || '') + '<br/>' +
+          'Due Date: ' + fmtDate(inv.dueDate) +
+        '</div>' +
+      '</div>' +
+      '<div class="inv-parties">' +
+        '<div class="inv-party">' +
+          '<div class="inv-heading">Ship To:</div>' +
+          '<div>' + escapeHtml(inv.shipTo.name || '') + '</div>' +
+          '<div>' + escapeHtml(inv.shipTo.address || '') + '</div>' +
+          '<div>' + escapeHtml(inv.shipTo.phone || '') + '</div>' +
+          '<div>' + (inv.shipTo.license ? 'License Number: ' + escapeHtml(inv.shipTo.license) : '') + '</div>' +
+        '</div>' +
+        '<div class="inv-party">' +
+          '<div class="inv-heading">Bill To:</div>' +
+          '<div>' + escapeHtml(inv.billTo.name || '') + '</div>' +
+          '<div>' + escapeHtml(inv.billTo.address || '') + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<table class="inv-items">' +
+        '<thead><tr><th>Item</th><th>Item Number</th><th>UPC</th><th class="num">Quantity</th><th class="num">Unit Price</th><th class="num">Total</th></tr></thead>' +
+        '<tbody>' + rowsHtml + '</tbody>' +
+      '</table>' +
+      '<div class="inv-totals-wrap"><div class="inv-totals">' + totalsHtml + '</div></div>' +
+      '<div class="inv-signatures">' +
+        '<div class="inv-sig"><div class="inv-sig-line"></div><div class="inv-sig-label">The Leopard Mark Brewing Company<br/>Representative</div></div>' +
+        '<div class="inv-sig"><div class="inv-sig-line"></div><div class="inv-sig-label">' + escapeHtml(inv.shipTo.name || '') + ' Representative</div></div>' +
+      '</div>' +
+      '<div class="inv-footer-note">For new purchase orders, please email orders@theleopardmark.com</div>' +
+      '<div class="inv-terms-note">' +
+        '<b>Keg Deposit:</b> A refundable deposit is assessed on each keg delivered and credited upon return of each empty keg.<br/>' +
+        '<b>Terms:</b> Net 30 from delivery (Cal. B&amp;P Code &sect; 25509) unless otherwise stated above, paid via seller-initiated EFT per &sect; 25509.1.' +
+      '</div>'
+    );
+  }
+
+  function renderInvoice(inv) {
+    document.getElementById('invoice-doc').innerHTML = buildInvoiceHtml(inv);
+  }
+
+  document.getElementById('invoice-print-btn').addEventListener('click', function () {
+    window.print();
+  });
+
+  // ---------- Accounts map ----------
+  // Sales sheet rep names ("Thomas Gilbert") and Customer Accounts rep names
+  // ("T. Gilbert") aren't written consistently, so match by last name rather
+  // than requiring an exact string match.
+  function repLastName(name) {
+    var parts = String(name || '').trim().split(/[\s.]+/).filter(Boolean);
+    return (parts[parts.length - 1] || '').toLowerCase();
+  }
+
+  function myMappedAccounts() {
+    var mine = repLastName(state.rep);
+    if (!mine) return [];
+    return state.customers.filter(function (c) {
+      return c.lat && c.lng && repLastName(c.salesRep) === mine;
+    });
+  }
+
+  function updateMyMapButton() {
+    var btn = document.getElementById('btn-my-map');
+    btn.style.display = myMappedAccounts().length ? 'flex' : 'none';
+  }
+
+  document.getElementById('btn-my-map').addEventListener('click', openAccountsMap);
+  document.getElementById('back-map-to-home').addEventListener('click', function () { showScreen('screen-home'); });
+
+  var accountsMapInstance = null;
+
+  function openAccountsMap() {
+    showScreen('screen-map');
+    var accounts = myMappedAccounts();
+
+    document.getElementById('map-account-list').innerHTML = accounts.map(function (c, i) {
+      return '<div class="order-row clickable" data-map-idx="' + i + '">' +
+        '<div><div class="oname">' + escapeHtml(c.establishmentName) + '</div>' +
+        '<div class="osub">' + escapeHtml(c.address || '') + '</div></div>' +
+        '<span>→</span>' +
+        '</div>';
+    }).join('') || '<div class="empty-note">No mapped accounts yet.</div>';
+
+    setTimeout(function () {
+      if (!accountsMapInstance) {
+        accountsMapInstance = L.map('accounts-map');
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+          maxZoom: 19,
+          subdomains: 'abcd',
+          attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; OpenStreetMap contributors'
+        }).addTo(accountsMapInstance);
+      } else {
+        accountsMapInstance.eachLayer(function (layer) {
+          if (layer instanceof L.Marker) accountsMapInstance.removeLayer(layer);
+        });
+      }
+
+      var pinIcon = function (color) {
+        return L.divIcon({
+          className: '',
+          html: '<div class="lm-pin" style="background:' + color + ';"></div>',
+          iconSize: [26, 26],
+          iconAnchor: [13, 26],
+          popupAnchor: [0, -26]
+        });
+      };
+      var orangeIcon = pinIcon('#ff7a30');
+      var pinkIcon = pinIcon('#ff2d78');
+
+      var markers = [];
+      accounts.forEach(function (c, i) {
+        var marker = L.marker([c.lat, c.lng], { icon: i % 2 === 0 ? orangeIcon : pinkIcon }).addTo(accountsMapInstance);
+        marker.bindPopup(
+          '<strong>' + escapeHtml(c.establishmentName) + '</strong><br/>' + escapeHtml(c.address || '') +
+          '<br/><a href="#" class="popup-view-orders" data-map-idx="' + i + '">View Orders →</a>'
+        );
+        markers.push(marker);
+      });
+
+      if (markers.length) {
+        accountsMapInstance.fitBounds(L.featureGroup(markers).getBounds(), { padding: [24, 24] });
+      } else {
+        accountsMapInstance.setView([37.77, -122.42], 11);
+      }
+
+      accountsMapInstance.off('popupopen').on('popupopen', function (e) {
+        var link = e.popup._contentNode.querySelector('.popup-view-orders');
+        if (!link) return;
+        link.addEventListener('click', function (evt) {
+          evt.preventDefault();
+          openAccountDetail(accounts[parseInt(link.getAttribute('data-map-idx'), 10)]);
+        });
+      });
+
+      document.getElementById('map-account-list').querySelectorAll('[data-map-idx]').forEach(function (row) {
+        row.addEventListener('click', function () {
+          var idx = parseInt(row.getAttribute('data-map-idx'), 10);
+          openAccountDetail(accounts[idx]);
+        });
+      });
+
+      accountsMapInstance.invalidateSize();
+    }, 50);
+  }
+
+  // ---------- Admin: all orders ----------
+  var adminOrdersCache = [];
+
+  document.getElementById('btn-admin-orders').addEventListener('click', openAdminOrders);
+  document.getElementById('back-admin-to-home').addEventListener('click', function () { showScreen('screen-home'); });
+
+  function openAdminOrders() {
+    showScreen('screen-admin-orders');
+    document.getElementById('admin-order-search').value = '';
+    document.getElementById('admin-order-list').innerHTML = '<div class="empty-note">Loading…</div>';
+
+    apiGet({ action: 'allOrders' })
+      .then(function (res) {
+        if (!res.ok) {
+          document.getElementById('admin-order-list').innerHTML = '<div class="empty-note">' + escapeHtml(res.error || 'Could not load orders.') + '</div>';
+          return;
+        }
+        adminOrdersCache = res.orders || [];
+        document.getElementById('admin-stat-orders').textContent = res.totalOrders || 0;
+        document.getElementById('admin-stat-value').textContent = '$' + (res.totalLineValue || 0).toFixed(0);
+        renderAdminOrders('');
+      })
+      .catch(function (err) {
+        document.getElementById('admin-order-list').innerHTML = '<div class="empty-note">' + escapeHtml(friendlyApiError(err)) + '</div>';
+      });
+  }
+
+  function renderAdminOrders(query) {
+    var host = document.getElementById('admin-order-list');
+    var q = (query || '').trim().toLowerCase();
+    var list = !q ? adminOrdersCache : adminOrdersCache.filter(function (o) {
+      return (String(o.customer || '') + ' ' + String(o.rep || '')).toLowerCase().indexOf(q) !== -1;
+    });
+
+    if (!list.length) {
+      host.innerHTML = '<div class="empty-note">No orders found.</div>';
+      return;
+    }
+
+    host.innerHTML = list.map(function (o) {
+      var statusClass = String(o.status || 'pending').toLowerCase().replace(/\s+/g, '-');
+      var lines = o.lines || [];
+      var sub = (lines.length === 1
+        ? escapeHtml(lines[0].product || '') + ' · ' + escapeHtml(lines[0].packaging || '') + ' · Qty ' + lines[0].qty
+        : lines.length + ' item' + (lines.length === 1 ? '' : 's') + ' · Qty ' + o.qty) + ' · ' + escapeHtml(o.rep || '');
+      var clickable = !!o.invoiceNumber;
+      return '<div class="order-row' + (clickable ? ' clickable' : '') + '"' + (clickable ? ' data-invoice="' + escapeHtml(o.invoiceNumber) + '"' : '') + '>' +
+        '<div><div class="oname">' + escapeHtml(o.customer || 'Unknown account') + '</div>' +
+        '<div class="osub">' + sub + '</div></div>' +
+        '<span class="pill ' + statusClass + '">' + escapeHtml(o.status || 'Pending') + '</span>' +
+        '</div>';
+    }).join('');
+  }
+
+  document.getElementById('admin-order-search').addEventListener('input', function (e) {
+    renderAdminOrders(e.target.value);
+  });
+
+  document.getElementById('admin-order-list').addEventListener('click', function (e) {
+    var row = e.target.closest('.order-row[data-invoice]');
+    if (!row) return;
+    openInvoice(row.getAttribute('data-invoice'));
+  });
+
+  // ---------- Account detail ----------
+  document.getElementById('back-account-to-map').addEventListener('click', function () { showScreen('screen-map'); });
+
+  function openAccountDetail(customer) {
+    showScreen('screen-account');
+    state.currentAccount = customer;
+    state.currentAccountOrders = [];
+    document.getElementById('account-edit-form').style.display = 'none';
+    document.getElementById('account-name').textContent = customer.establishmentName || '';
+    document.getElementById('account-address').textContent = customer.address || '';
+    document.getElementById('account-total-orders').textContent = '0';
+    document.getElementById('account-total-value').textContent = '$0';
+    document.getElementById('account-order-list').innerHTML = '<div class="empty-note">Loading…</div>';
+
+    apiGet({ action: 'customerOrders', customer: customer.establishmentName })
+      .then(function (res) {
+        if (!res.ok) {
+          document.getElementById('account-order-list').innerHTML = '<div class="empty-note">' + escapeHtml(res.error || 'Could not load orders.') + '</div>';
+          return;
+        }
+        state.currentAccountOrders = res.orders;
+        document.getElementById('account-total-orders').textContent = res.totalOrders;
+        document.getElementById('account-total-value').textContent = '$' + (res.totalLineValue || 0).toFixed(0);
+
+        var host = document.getElementById('account-order-list');
+        if (!res.orders.length) {
+          host.innerHTML = '<div class="empty-note">No orders yet for this account.</div>';
+          return;
+        }
+        host.innerHTML = res.orders.map(function (o) {
+          var statusClass = String(o.status || 'pending').toLowerCase().replace(/\s+/g, '-');
+          var lines = o.lines || [];
+          var sub = lines.length === 1
+            ? escapeHtml(lines[0].product || '') + ' · ' + escapeHtml(lines[0].packaging || '') + ' · Qty ' + lines[0].qty
+            : lines.length + ' items · Qty ' + o.qty;
+          var clickable = !!o.invoiceNumber;
+          return '<div class="order-row' + (clickable ? ' clickable' : '') + '"' + (clickable ? ' data-invoice="' + escapeHtml(o.invoiceNumber) + '"' : '') + '>' +
+            '<div><div class="oname">' + fmtDate(o.poDate) + '</div>' +
+            '<div class="osub">' + sub + '</div></div>' +
+            '<span class="pill ' + statusClass + '">' + escapeHtml(o.status || 'Pending') + '</span>' +
+            '</div>';
+        }).join('');
+      })
+      .catch(function (err) {
+        document.getElementById('account-order-list').innerHTML = '<div class="empty-note">' + escapeHtml(friendlyApiError(err)) + '</div>';
+      });
+  }
+
+  document.getElementById('account-order-list').addEventListener('click', function (e) {
+    var row = e.target.closest('.order-row[data-invoice]');
+    if (!row) return;
+    openInvoice(row.getAttribute('data-invoice'));
+  });
+
+  // ---------- Account edit ----------
+  document.getElementById('btn-edit-account').addEventListener('click', function () {
+    var c = state.currentAccount;
+    if (!c) return;
+    document.getElementById('ea-contact').value = c.orderingContact || '';
+    document.getElementById('ea-phone').value = c.phone || '';
+    document.getElementById('ea-email').value = c.email || '';
+    document.getElementById('ea-address').value = c.address || '';
+    document.getElementById('ea-billing-address').value = c.deliveryAddress || '';
+    document.getElementById('ea-delivery-instructions').value = c.deliveryInstructions || '';
+    document.getElementById('ea-region').value = c.region || '';
+    document.getElementById('ea-license').value = c.licenseNumber || '';
+    document.getElementById('ea-payment-method').value = c.paymentMethod || '';
+    document.getElementById('ea-terms').value = c.terms || '';
+    setYnToggle('ea-tap-handle', c.tapHandleRequested === 'Yes' ? 'Yes' : 'No');
+    document.getElementById('account-edit-error').textContent = '';
+    document.getElementById('account-edit-form').style.display = 'flex';
+  });
+
+  document.getElementById('btn-cancel-edit-account').addEventListener('click', function () {
+    document.getElementById('account-edit-form').style.display = 'none';
+  });
+
+  document.getElementById('account-edit-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var c = state.currentAccount;
+    if (!c) return;
+    var errEl = document.getElementById('account-edit-error');
+    var btn = document.getElementById('btn-save-account');
+    var updates = {
+      establishmentName: c.establishmentName,
+      orderingContact: document.getElementById('ea-contact').value.trim(),
+      phone: document.getElementById('ea-phone').value.trim(),
+      email: document.getElementById('ea-email').value.trim(),
+      address: document.getElementById('ea-address').value.trim(),
+      deliveryAddress: document.getElementById('ea-billing-address').value.trim(),
+      deliveryInstructions: document.getElementById('ea-delivery-instructions').value.trim(),
+      region: document.getElementById('ea-region').value.trim(),
+      licenseNumber: document.getElementById('ea-license').value.trim(),
+      paymentMethod: document.getElementById('ea-payment-method').value.trim(),
+      terms: document.getElementById('ea-terms').value.trim(),
+      tapHandleRequested: getYnToggle('ea-tap-handle')
+    };
+
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+
+    apiPost({ action: 'updateCustomer', customer: updates })
+      .then(function (res) {
+        btn.disabled = false;
+        btn.textContent = 'Save Changes';
+        if (!res.ok) { errEl.textContent = res.error || 'Could not save changes.'; return; }
+        Object.assign(c, updates);
+        var idx = state.customers.findIndex(function (x) { return x.establishmentName === c.establishmentName; });
+        if (idx !== -1) Object.assign(state.customers[idx], updates);
+        cacheCustomers(state.customers);
+        document.getElementById('account-address').textContent = c.address || '';
+        document.getElementById('account-edit-form').style.display = 'none';
+        toast('Account updated');
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        btn.textContent = 'Save Changes';
+        errEl.textContent = friendlyApiError(err);
+      });
+  });
+
+  // ---------- Batch invoice generation ----------
+  document.getElementById('btn-generate-all-invoices').addEventListener('click', function () {
+    var orders = (state.currentAccountOrders || []).filter(function (o) { return !!o.invoiceNumber; });
+    if (!orders.length) { toast('No invoices to generate for this account', true); return; }
+
+    var btn = document.getElementById('btn-generate-all-invoices');
+    btn.disabled = true;
+
+    Promise.all(orders.map(function (o) {
+      return apiGet({ action: 'invoiceDetail', invoiceNumber: o.invoiceNumber }).catch(function () { return null; });
+    }))
+      .then(function (results) {
+        btn.disabled = false;
+        var valid = results.filter(function (r) { return r && r.ok; });
+        if (!valid.length) { toast('Could not load any invoices', true); return; }
+
+        var sheet = document.getElementById('batch-print-sheet');
+        sheet.innerHTML = valid.map(function (inv) {
+          return '<div class="invoice-doc">' + buildInvoiceHtml(inv) + '</div>';
+        }).join('');
+
+        sheet.classList.add('printing');
+        window.print();
+      })
+      .catch(function () {
+        btn.disabled = false;
+        toast('Could not generate invoices', true);
+      });
+  });
+
+  window.addEventListener('afterprint', function () {
+    var sheet = document.getElementById('batch-print-sheet');
+    sheet.classList.remove('printing');
+    sheet.innerHTML = '';
+  });
 
   function escapeHtml(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -241,7 +834,6 @@
     showScreen('screen-customers');
   });
   document.getElementById('back-customers-to-order').addEventListener('click', function () { showScreen('screen-order'); });
-  document.getElementById('back-newcustomer-to-customers').addEventListener('click', function () { showScreen('screen-customers'); });
 
   document.getElementById('customer-search').addEventListener('input', function (e) {
     renderCustomerList(e.target.value);
@@ -292,9 +884,46 @@
   });
 
   document.getElementById('btn-add-customer').addEventListener('click', function () {
+    openNewCustomerForm('screen-customers');
+  });
+
+  // The home screen's "Add Account" button skips straight to this form --
+  // no order in progress, so there's no customer to pick it into.
+  document.getElementById('btn-add-account').addEventListener('click', function () {
+    openNewCustomerForm('screen-home');
+  });
+
+  function openNewCustomerForm(returnTo) {
     document.getElementById('new-customer-form').reset();
     document.getElementById('new-customer-error').textContent = '';
+    setYnToggle('nc-tap-handle', 'No');
+    state.newCustomerReturnTo = returnTo;
     showScreen('screen-new-customer');
+  }
+
+  document.getElementById('back-newcustomer-to-customers').addEventListener('click', function () {
+    showScreen(state.newCustomerReturnTo || 'screen-customers');
+  });
+
+  // ---------- Yes/No toggle fields (e.g. Tap Handle Requested) ----------
+  function setYnToggle(id, value) {
+    var wrap = document.getElementById(id);
+    wrap.setAttribute('data-value', value);
+    wrap.querySelectorAll('.yn-btn').forEach(function (b) {
+      b.classList.toggle('selected', b.getAttribute('data-value') === value);
+    });
+  }
+
+  function getYnToggle(id) {
+    return document.getElementById(id).getAttribute('data-value') || 'No';
+  }
+
+  document.querySelectorAll('.yn-toggle').forEach(function (wrap) {
+    wrap.addEventListener('click', function (e) {
+      var btn = e.target.closest('.yn-btn');
+      if (!btn) return;
+      setYnToggle(wrap.id, btn.getAttribute('data-value'));
+    });
   });
 
   document.getElementById('new-customer-form').addEventListener('submit', function (e) {
@@ -311,6 +940,7 @@
       deliveryInstructions: val('nc-delivery-instructions'),
       region: val('nc-region'),
       licenseNumber: val('nc-license'),
+      tapHandleRequested: getYnToggle('nc-tap-handle'),
       salesRep: state.rep || '',
       addedBy: state.rep || '',
       // New accounts have no payment arrangement yet -- never leave this blank
@@ -327,13 +957,19 @@
     btn.disabled = true;
     btn.textContent = 'Saving...';
 
+    var addedFromHome = state.newCustomerReturnTo === 'screen-home';
+
     var finish = function () {
       state.customers.unshift(newCustomer);
-      setCustomer(newCustomer);
       btn.disabled = false;
       btn.textContent = 'Save Customer';
-      toast('Customer added');
-      showScreen('screen-order');
+      toast('Account added');
+      if (addedFromHome) {
+        showScreen('screen-home');
+      } else {
+        setCustomer(newCustomer);
+        showScreen('screen-order');
+      }
     };
 
     if (!apiConfigured()) { finish(); return; }
@@ -475,13 +1111,14 @@
       lines: lines
     };
 
-    var finish = function (ok, msg) {
+    var finish = function (ok, msg, invoiceNumber) {
       btn.disabled = false;
       label.textContent = 'Submit Order';
       toast(msg, !ok);
       if (ok) {
         loadStats();
-        showScreen('screen-home');
+        if (invoiceNumber) openInvoice(invoiceNumber);
+        else showScreen('screen-home');
       }
     };
 
@@ -492,7 +1129,7 @@
 
     apiPost(payload)
       .then(function (res) {
-        if (res.ok) finish(true, lines.length + ' line item(s) sent to the order sheet');
+        if (res.ok) finish(true, lines.length + ' line item(s) sent to the order sheet', res.invoiceNumber);
         else finish(false, res.error || 'Order failed to submit');
       })
       .catch(function (err) { finish(false, friendlyApiError(err)); });
@@ -502,7 +1139,10 @@
   var existing = loadSession();
   if (existing) {
     state.rep = existing;
+    state.repRole = loadRole();
     enterHome();
+  } else {
+    loadRepPicker();
   }
 
   if ('serviceWorker' in navigator) {

@@ -99,6 +99,75 @@ a { color: var(--accent); }
 }
 .brand-sub { color: var(--silver-dim); font-size: 13px; text-transform: uppercase; letter-spacing: 0.18em; font-weight: 600; }
 
+.login-step { width: 100%; display: flex; flex-direction: column; gap: 14px; }
+.login-alt-link { display: block; text-align: center; margin-top: 4px; font-size: 13px; }
+
+.rep-picker {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  width: 100%;
+}
+.rep-tile {
+  background: linear-gradient(180deg, var(--navy-800), var(--navy-900));
+  border: 1px solid var(--navy-600);
+  border-radius: var(--radius);
+  color: var(--white);
+  padding: 20px 10px;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.rep-tile:active { transform: scale(0.97); border-color: var(--accent); }
+
+#login-step-pin .back-link { display: block; text-align: center; margin-bottom: 4px; }
+.pin-dots { display: flex; justify-content: center; gap: 14px; margin: 6px 0; }
+.pin-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--navy-600);
+  background: var(--navy-950);
+}
+.pin-dot.filled { background: var(--accent); border-color: var(--accent); }
+.pin-dot.error { border-color: #e35b5b; }
+#login-step-pin .error-text { text-align: center; }
+
+.pin-pad {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+  width: 100%;
+}
+.pin-pad button {
+  background: var(--navy-800);
+  border: 1px solid var(--navy-600);
+  color: var(--white);
+  border-radius: var(--radius);
+  padding: 18px 0;
+  font-size: 22px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pin-pad button:active { border-color: var(--accent); transform: scale(0.97); }
+.pin-pad .pin-key-back { font-size: 16px; color: var(--silver-dim); background: transparent; border-color: transparent; }
+
+.yn-toggle { display: flex; gap: 10px; }
+.yn-btn {
+  flex: 1;
+  background: var(--navy-950);
+  border: 1px solid var(--navy-600);
+  color: var(--silver);
+  border-radius: 10px;
+  padding: 12px 0;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.yn-btn.selected { background: var(--accent); border-color: var(--accent); color: white; }
+
+.cta-btn.admin { background: linear-gradient(135deg, #6a3fb5, #3a2270); border: none; }
+
 .login-card {
   width: 100%;
   background: linear-gradient(180deg, var(--navy-800), var(--navy-900));
@@ -235,6 +304,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); }
 }
 .order-row .oname { font-weight: 600; }
 .order-row .osub { color: var(--silver-dim); font-size: 12px; }
+.order-row.clickable { cursor: pointer; transition: border-color 0.15s ease; }
+.order-row.clickable:active { border-color: var(--accent); }
 .pill {
   font-size: 11px;
   padding: 3px 8px;
@@ -433,3 +504,188 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); }
   .stat-grid { gap: 8px; }
   .stat-card { padding: 12px; }
 }
+
+/* ---------- Invoice ---------- */
+.invoice-doc {
+  background: #fff;
+  color: #000;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 10.5px;
+  border-radius: 10px;
+  padding: 18px 16px;
+  margin-bottom: 20px;
+}
+.inv-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+.inv-logo { width: 130px; }
+.inv-doc-label { font-size: 13px; color: #808080; margin-top: 2px; }
+
+.inv-info-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 18px;
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+.inv-meta-block { text-align: left; }
+
+.inv-parties {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 18px;
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+.inv-heading { font-weight: 700; }
+
+/* On-screen: each row renders as a stacked card (thead hidden, td becomes a
+   label:value line via data-label) so nothing needs horizontal scrolling on
+   a phone. @media print below switches this back to a real table. */
+table.inv-items {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 16px;
+  font-size: 12px;
+  display: block;
+}
+table.inv-items thead { display: none; }
+table.inv-items tbody { display: block; }
+table.inv-items tr {
+  display: block;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+table.inv-items td {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 3px 0;
+  border: none;
+}
+table.inv-items td::before {
+  content: attr(data-label);
+  color: #8b8c94;
+  font-size: 10.5px;
+  flex-shrink: 0;
+}
+table.inv-items td:first-child {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+table.inv-items td:first-child::before { content: none; }
+
+.inv-totals-wrap { display: flex; justify-content: flex-end; margin-bottom: 30px; }
+.inv-totals { width: 100%; max-width: 250px; font-size: 10.5px; }
+.inv-totals .row { display: flex; justify-content: space-between; padding: 2.5px 0; }
+.inv-totals .row.bold { font-weight: 700; }
+
+.inv-signatures {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+.inv-sig-line { border-top: 1px solid #000; margin-bottom: 4px; }
+.inv-sig-label { font-size: 10px; }
+
+.inv-footer-note { text-align: center; font-size: 10.5px; margin-bottom: 14px; }
+.inv-terms-note {
+  border-top: 1px solid #ccc;
+  padding-top: 8px;
+  font-size: 9px;
+  font-style: italic;
+  color: #444;
+  text-align: center;
+  line-height: 1.5;
+}
+
+/* Print target wrapper -- shared by the single-invoice screen (#invoice-print-sheet,
+   always in the DOM around #invoice-doc) and the batch print run (#batch-print-sheet,
+   populated with one .invoice-doc per order right before printing). Only
+   .print-sheet content is visible in print; each child .invoice-doc gets its
+   own page via page-break-after, so a batch of N orders prints as N pages. */
+#batch-print-sheet { display: none; }
+
+@media print {
+  body * { visibility: hidden; }
+  .print-sheet, .print-sheet * { visibility: visible; }
+  .print-sheet {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+  #batch-print-sheet.printing { display: block; }
+  .print-sheet .invoice-doc {
+    border-radius: 0;
+    padding: 0.4in;
+    margin: 0;
+    page-break-after: always;
+  }
+  .print-sheet .invoice-doc:last-child { page-break-after: auto; }
+  .inv-info-row, .inv-parties { flex-direction: row; justify-content: space-between; }
+  .inv-meta-block { text-align: left; }
+  .inv-signatures { flex-direction: row; justify-content: space-between; gap: 60px; }
+  table.inv-items { display: table; font-size: 10.5px; }
+  table.inv-items thead { display: table-header-group; }
+  table.inv-items thead tr { border-top: 1px solid #999; border-bottom: 1px solid #999; }
+  table.inv-items th { text-align: left; font-weight: 700; padding: 5px 6px; }
+  table.inv-items th.num, table.inv-items td.num { text-align: right; }
+  table.inv-items tbody { display: table-row-group; }
+  table.inv-items tr { display: table-row; border: none; padding: 0; margin: 0; border-radius: 0; }
+  table.inv-items td {
+    display: table-cell;
+    padding: 5px 6px;
+    border: none;
+    border-bottom: 1px solid #ccc;
+    vertical-align: top;
+  }
+  table.inv-items td::before { content: none; }
+  table.inv-items td:first-child { font-weight: 400; margin-bottom: 0; }
+  .no-print { display: none !important; }
+}
+
+/* ---------- Accounts map ---------- */
+.accounts-map {
+  width: 100%;
+  height: 320px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--navy-600);
+}
+.lm-pin {
+  width: 24px;
+  height: 24px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  border: 2px solid rgba(255,255,255,0.9);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+  position: relative;
+}
+.lm-pin::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  background: #fff;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+.leaflet-popup-content-wrapper, .leaflet-popup-tip {
+  background: var(--navy-800);
+  color: var(--white);
+  border-radius: 8px;
+}
+.leaflet-popup-content { font-size: 13px; color: var(--white); }

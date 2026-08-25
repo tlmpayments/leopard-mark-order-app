@@ -14,7 +14,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.7936809,
+    "lng": -122.3932147
   },
   {
     "establishmentName": "19 Broadway",
@@ -31,7 +33,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.9869,
+    "lng": -122.5879861
   },
   {
     "establishmentName": "Anna's Pizza Joint",
@@ -65,7 +69,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "High",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.8071875,
+    "lng": -122.4202487
   },
   {
     "establishmentName": "Barrio - Ghirardelli",
@@ -82,7 +88,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.8061057,
+    "lng": -122.4223354
   },
   {
     "establishmentName": "Beelman's Pub",
@@ -116,7 +124,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.7601904,
+    "lng": -122.4172713
   },
   {
     "establishmentName": "BiergartenLA",
@@ -167,7 +177,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.8085224,
+    "lng": -122.4148966
   },
   {
     "establishmentName": "Blue Palms Brewhouse",
@@ -371,7 +383,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.8085224,
+    "lng": -122.4148966
   },
   {
     "establishmentName": "Brewport Tap House",
@@ -405,7 +419,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 38.2371921,
+    "lng": -122.6420088
   },
   {
     "establishmentName": "Bus Stop",
@@ -422,7 +438,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.7975368,
+    "lng": -122.4305847
   },
   {
     "establishmentName": "Capo's",
@@ -439,7 +457,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.7984368,
+    "lng": -122.4084486
   },
   {
     "establishmentName": "Chowder Hut",
@@ -456,7 +476,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.8087843,
+    "lng": -122.4156392
   },
   {
     "establishmentName": "Cioppino's",
@@ -473,7 +495,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.8080152,
+    "lng": -122.4193323
   },
   {
     "establishmentName": "Columbus Cafe",
@@ -490,7 +514,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.7997453,
+    "lng": -122.4084277
   },
   {
     "establishmentName": "Comstock Saloon, LLC",
@@ -507,7 +533,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.7969638,
+    "lng": -122.4056426
   },
   {
     "establishmentName": "Connecticut Yankee",
@@ -524,7 +552,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.764943,
+    "lng": -122.397829
   },
   {
     "establishmentName": "Corked - Rehondo Beach",
@@ -558,7 +588,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.9758808,
+    "lng": -122.5625795
   },
   {
     "establishmentName": "Cucina sa",
@@ -575,7 +607,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.9746307,
+    "lng": -122.5623715
   },
   {
     "establishmentName": "Foghorn Taproom",
@@ -583,7 +617,7 @@ window.LM_CUSTOMERS = [
     "region": "San Francisco",
     "licenseNumber": "596833",
     "legalEntity": "Nitty Gritty LLC.",
-    "orderingContact": "Andre \u00a0Sanchez",
+    "orderingContact": "Andre  Sanchez",
     "phone": "(415) 235-3748",
     "email": "dre.sanchez.sf@gmail.com",
     "address": "450 Balboa St., San Francisco, CA 94118",
@@ -592,7 +626,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.7773463,
+    "lng": -122.4637808
   },
   {
     "establishmentName": "Franciscan Crab Restaurant",
@@ -609,7 +645,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.8101195,
+    "lng": -122.4177169
   },
   {
     "establishmentName": "Frankie's",
@@ -626,7 +664,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.7996768,
+    "lng": -122.4394868
   },
   {
     "establishmentName": "Franks's Wine and Spirits",
@@ -660,7 +700,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.8497176,
+    "lng": -122.4809484
   },
   {
     "establishmentName": "Guerrero Hill Market",
@@ -677,7 +719,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.755278,
+    "lng": -122.4230438
   },
   {
     "establishmentName": "HiDive",
@@ -694,7 +738,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.8077232,
+    "lng": -122.42078
   },
   {
     "establishmentName": "Holly Main",
@@ -728,7 +774,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.9060368,
+    "lng": -122.5449763
   },
   {
     "establishmentName": "Joe's Taco Lounge & Salsaria",
@@ -745,7 +793,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.8972018,
+    "lng": -122.5371028
   },
   {
     "establishmentName": "Karma",
@@ -753,7 +803,7 @@ window.LM_CUSTOMERS = [
     "region": "Los Angeles",
     "licenseNumber": "664546",
     "legalEntity": "Karma Bar LLC",
-    "orderingContact": "Jessica\u00a0Vazquez",
+    "orderingContact": "Jessica Vazquez",
     "phone": "(562) 382-0200",
     "email": "jwvazquez11@yahoo.com",
     "address": "9067 Imperial Hwy., Downey, CA, 90242",
@@ -813,7 +863,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.858986,
+    "lng": -122.483715
   },
   {
     "establishmentName": "Lvjupara / El Viejon Mariscos and Sushi",
@@ -824,7 +876,7 @@ window.LM_CUSTOMERS = [
     "orderingContact": "Alberto Escamill",
     "phone": "(562)274-8767",
     "email": "alberto@elviejonms.com",
-    "address": "201 E Broadway Long Beach, CA\u00a0 90802",
+    "address": "201 E Broadway Long Beach, CA  90802",
     "deliveryInstructions": "Can be delivered Wed-Fri",
     "paymentMethod": "Fintech",
     "terms": "",
@@ -847,7 +899,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.9895066,
+    "lng": -122.5917614
   },
   {
     "establishmentName": "Mario's Bohemian Cigar Store",
@@ -864,7 +918,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.8002133,
+    "lng": -122.4098057
   },
   {
     "establishmentName": "Matteuccis",
@@ -881,7 +937,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.976176,
+    "lng": -122.558797
   },
   {
     "establishmentName": "Mayflower Pub",
@@ -898,7 +956,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.9737297,
+    "lng": -122.5349655
   },
   {
     "establishmentName": "Merkado SF",
@@ -915,7 +975,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.7801929,
+    "lng": -122.3913571
   },
   {
     "establishmentName": "Mulberry Street Pizzeria",
@@ -932,7 +994,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 38.019779,
+    "lng": -122.533814
   },
   {
     "establishmentName": "Naves Sports and Spirits Inc",
@@ -949,7 +1013,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.9867847,
+    "lng": -122.5891539
   },
   {
     "establishmentName": "Next Door SF",
@@ -966,7 +1032,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "High",
     "deliveryAddress": "2745 Octavia St , San Francisco , CA, 94123",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.7998126,
+    "lng": -122.4085726
   },
   {
     "establishmentName": "Nickie's Irish Pub",
@@ -983,7 +1051,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.7722801,
+    "lng": -122.4298226
   },
   {
     "establishmentName": "Original Joe's",
@@ -995,12 +1065,14 @@ window.LM_CUSTOMERS = [
     "phone": "(415)728-6579",
     "email": "jim@originaljoes.com",
     "address": "601 Union Street, San Francisco, CA, 94133",
-    "deliveryInstructions": "Receiving door is location on Stockton Street. \u00a0If you are standing in front of the restaurant (corner, 601 Union); the door is to your left; halfway up the block. If the door is not open; or the restaurant is closed; please go through the kitchen door (right of restaurant on Union Street; we always have staff prepping in the kitchen and they may help with the delivery).",
+    "deliveryInstructions": "Receiving door is location on Stockton Street.  If you are standing in front of the restaurant (corner, 601 Union); the door is to your left; halfway up the block. If the door is not open; or the restaurant is closed; please go through the kitchen door (right of restaurant on Union Street; we always have staff prepping in the kitchen and they may help with the delivery).",
     "paymentMethod": "",
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.800326,
+    "lng": -122.409326
   },
   {
     "establishmentName": "Oshea Brewing Company",
@@ -1025,16 +1097,18 @@ window.LM_CUSTOMERS = [
     "region": "North Bay",
     "licenseNumber": "664588",
     "legalEntity": "Paper Mill Creek Saloon LLC",
-    "orderingContact": "Jared \u00a0Litwing",
+    "orderingContact": "Jared  Litwing",
     "phone": "(415) 226-8745",
     "email": "bryanhendon@gmail.com",
     "address": "1 Castro St, Forest Knolls, CA 94933",
-    "deliveryInstructions": "Tuesday delivery after 3 (bar opens at 3) delivery can be before just use the code if no one is there. If bar is closed- to the right of the bar is gray door with a code where full kegs can be dropped and empty\u2019s can be picked up \nCode- 196",
+    "deliveryInstructions": "Tuesday delivery after 3 (bar opens at 3) delivery can be before just use the code if no one is there. If bar is closed- to the right of the bar is gray door with a code where full kegs can be dropped and empty’s can be picked up \nCode- 196",
     "paymentMethod": "Fintech",
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 38.0152007,
+    "lng": -122.6885967
   },
   {
     "establishmentName": "Parkers Lighthouse",
@@ -1068,7 +1142,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.973894,
+    "lng": -122.5372168
   },
   {
     "establishmentName": "Press Club",
@@ -1085,7 +1161,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.7859991,
+    "lng": -122.4044428
   },
   {
     "establishmentName": "Redondo Beach Grill",
@@ -1153,7 +1231,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.8089477,
+    "lng": -122.4184344
   },
   {
     "establishmentName": "Selma's Chicago Pizzeria",
@@ -1187,7 +1267,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "High",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.7946031,
+    "lng": -122.395902
   },
   {
     "establishmentName": "Southern Pacific Brewing",
@@ -1204,7 +1286,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.7601311,
+    "lng": -122.4139896
   },
   {
     "establishmentName": "The 4th Horseman",
@@ -1272,7 +1356,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.760427,
+    "lng": -122.4146631
   },
   {
     "establishmentName": "The Hub",
@@ -1289,7 +1375,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.9801363,
+    "lng": -122.5654766
   },
   {
     "establishmentName": "The Irish Times",
@@ -1306,7 +1394,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.7940403,
+    "lng": -122.4015526
   },
   {
     "establishmentName": "The Mucky Duck",
@@ -1323,7 +1413,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.7637154,
+    "lng": -122.4664518
   },
   {
     "establishmentName": "The Regal Seagull",
@@ -1357,7 +1449,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.798655,
+    "lng": -122.407017
   },
   {
     "establishmentName": "The Standard Station Sports Bar and Grill",
@@ -1408,7 +1502,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.751541,
+    "lng": -122.4331428
   },
   {
     "establishmentName": "Howells",
@@ -1425,7 +1521,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": true
+    "importedToEkos": true,
+    "lat": 37.7998424,
+    "lng": -122.442344
   },
   {
     "establishmentName": "El Pescador",
@@ -1595,7 +1693,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": false
+    "importedToEkos": false,
+    "lat": 37.7900735,
+    "lng": -122.411377
   },
   {
     "establishmentName": "Sam's Grill and Seafood Restaurant",
@@ -1612,7 +1712,9 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": false
+    "importedToEkos": false,
+    "lat": 37.791277,
+    "lng": -122.3998804
   },
   {
     "establishmentName": "Frank Grizzly LLC",
@@ -1624,12 +1726,14 @@ window.LM_CUSTOMERS = [
     "phone": "(510) 326-1520",
     "email": "kim@frankgrizzly.com",
     "address": "5698 3rd St., San Francisco, CA, 94124",
-    "deliveryInstructions": "Call (415)624-6031 upon arrival so that we can let you in. \u00a0If you can\u2019t get thru, call (510)326-1520.",
+    "deliveryInstructions": "Call (415)624-6031 upon arrival so that we can let you in.  If you can’t get thru, call (510)326-1520.",
     "paymentMethod": "",
     "terms": "",
     "priority": "",
     "deliveryAddress": "5800 3rd St. Unit 1304, San Francisco, CA, 94124",
-    "importedToEkos": false
+    "importedToEkos": false,
+    "lat": 37.726432,
+    "lng": -122.393981
   },
   {
     "establishmentName": "Sam's Chowder House L-Pship",
@@ -1646,7 +1750,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "PO Box 2496, El Granada, CA, 94019",
-    "importedToEkos": false
+    "importedToEkos": false,
+    "lat": 37.4812265,
+    "lng": -122.4445698
   },
   {
     "establishmentName": "540 SF",
@@ -1663,7 +1769,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": false
+    "importedToEkos": false,
+    "lat": 37.7831616,
+    "lng": -122.4648901
   },
   {
     "establishmentName": "Victory Hall and Parlor",
@@ -1680,7 +1788,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": false
+    "importedToEkos": false,
+    "lat": 37.7788297,
+    "lng": -122.3940803
   },
   {
     "establishmentName": "Sabor a Mexico",
@@ -1697,7 +1807,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": false
+    "importedToEkos": false,
+    "lat": 37.9737823,
+    "lng": -122.5354911
   },
   {
     "establishmentName": "The Black Cat",
@@ -1705,7 +1817,7 @@ window.LM_CUSTOMERS = [
     "region": "Los Angeles",
     "licenseNumber": "521963",
     "legalEntity": "Evi Enterprises L-Pship",
-    "orderingContact": "Ben \u00a0Schwartz",
+    "orderingContact": "Ben  Schwartz",
     "phone": "(164)633-4233",
     "email": "benjamin@theblackcatla.com",
     "address": "3909 Sunset Blvd, Los Angeles , California, 90029",
@@ -1722,7 +1834,7 @@ window.LM_CUSTOMERS = [
     "region": "Burlingame",
     "licenseNumber": "523154",
     "legalEntity": "New England Lobster Co., Inc.",
-    "orderingContact": "Danny \u00a0Rosa",
+    "orderingContact": "Danny  Rosa",
     "phone": "(925)872-6686",
     "email": "danny@newenglandlobster.net",
     "address": "824 Cowan Road, Burlingame, CA, 94010",
@@ -1731,7 +1843,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": false
+    "importedToEkos": false,
+    "lat": 37.6026685,
+    "lng": -122.3747744
   },
   {
     "establishmentName": "Norcina",
@@ -1748,7 +1862,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": false
+    "importedToEkos": false,
+    "lat": 37.8001092,
+    "lng": -122.4397003
   },
   {
     "establishmentName": "Villa Catrina Mexican Restauarant and Cantina",
@@ -1756,11 +1872,11 @@ window.LM_CUSTOMERS = [
     "region": "Arcadia",
     "licenseNumber": "543521",
     "legalEntity": "Villa Catrina Restaurants LLC",
-    "orderingContact": "Genaro \u00a0Padilla",
+    "orderingContact": "Genaro  Padilla",
     "phone": "(323)363-1370",
     "email": "Villacatrinarestaurant@gmail.com",
     "address": "251 N Santa Anita Ave., Arcadia , CA, 91006",
-    "deliveryInstructions": "Thursday delivery days. Check in with Chuy the bar manager before any delivery\u2019s.",
+    "deliveryInstructions": "Thursday delivery days. Check in with Chuy the bar manager before any delivery’s.",
     "paymentMethod": "",
     "terms": "",
     "priority": "",
@@ -1773,7 +1889,7 @@ window.LM_CUSTOMERS = [
     "region": "San Francisco",
     "licenseNumber": "592222",
     "legalEntity": "Originalplan LLC",
-    "orderingContact": "John \u00a0Dampeer",
+    "orderingContact": "John  Dampeer",
     "phone": "(415) 745-5928",
     "email": "john@foolserrandsf.com",
     "address": "639A Divisadero St., San Francisco , CA, 94117",
@@ -1782,7 +1898,9 @@ window.LM_CUSTOMERS = [
     "terms": "",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": false
+    "importedToEkos": false,
+    "lat": 37.7755565,
+    "lng": -122.4380591
   },
   {
     "establishmentName": "Irish Times LA",
@@ -1816,6 +1934,8 @@ window.LM_CUSTOMERS = [
     "terms": "Net 30",
     "priority": "",
     "deliveryAddress": "",
-    "importedToEkos": false
+    "importedToEkos": false,
+    "lat": 37.7994832,
+    "lng": -122.4104494
   }
 ];

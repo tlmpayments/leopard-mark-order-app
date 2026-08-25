@@ -9,6 +9,7 @@
   <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png" />
   <link rel="icon" href="assets/icons/icon-192.png" />
   <link rel="stylesheet" href="assets/css/app.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 </head>
 <body>
 
@@ -19,7 +20,39 @@
     <img class="login-logo" src="assets/icons/brand/logo-alt.svg" alt="The Leopard Mark Brewing Co." />
     <div class="brand-sub">Sales Rep Orders</div>
 
-    <form class="login-card" id="login-form">
+    <!-- Step 1: tap your name -->
+    <div class="login-step" id="login-step-pick">
+      <div class="rep-picker" id="rep-picker">
+        <div class="empty-note">Loading reps…</div>
+      </div>
+      <a href="#" class="back-link login-alt-link" id="login-use-form-link">Log in a different way</a>
+    </div>
+
+    <!-- Step 2: PIN pad -->
+    <div class="login-step" id="login-step-pin" style="display:none;">
+      <a href="#" class="back-link" id="pin-back-link">← Not <span id="pin-rep-name"></span>?</a>
+      <div class="pin-dots" id="pin-dots">
+        <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
+      </div>
+      <div class="error-text" id="pin-error"></div>
+      <div class="pin-pad" id="pin-pad">
+        <button type="button" data-key="1">1</button>
+        <button type="button" data-key="2">2</button>
+        <button type="button" data-key="3">3</button>
+        <button type="button" data-key="4">4</button>
+        <button type="button" data-key="5">5</button>
+        <button type="button" data-key="6">6</button>
+        <button type="button" data-key="7">7</button>
+        <button type="button" data-key="8">8</button>
+        <button type="button" data-key="9">9</button>
+        <span></span>
+        <button type="button" data-key="0">0</button>
+        <button type="button" class="pin-key-back" data-key="back">⌫</button>
+      </div>
+    </div>
+
+    <!-- Fallback: original typed name/PIN form -->
+    <form class="login-card" id="login-form" style="display:none;">
       <div class="field">
         <label for="login-name">Your Name</label>
         <input id="login-name" name="name" autocomplete="username" required />
@@ -58,6 +91,18 @@
     <div class="cta-row">
       <button class="cta-btn" id="btn-new-order">
         <span>Place Order<small>Start a new order for an account</small></span>
+        <span>→</span>
+      </button>
+      <button class="cta-btn secondary" id="btn-add-account">
+        <span>Add Account<small>Set up a new customer</small></span>
+        <span>→</span>
+      </button>
+      <button class="cta-btn secondary" id="btn-my-map" style="display:none;">
+        <span>My Accounts<small>See your accounts, list and map</small></span>
+        <span>→</span>
+      </button>
+      <button class="cta-btn admin" id="btn-admin-orders" style="display:none;">
+        <span>Admin: All Orders<small>See every incoming order and its status</small></span>
         <span>→</span>
       </button>
     </div>
@@ -126,11 +171,123 @@
       <div class="field"><label>Delivery Instructions *</label><textarea id="nc-delivery-instructions" rows="2" required></textarea></div>
       <div class="field"><label>Region *</label><input id="nc-region" required /></div>
       <div class="field"><label>License Number (if known)</label><input id="nc-license" /></div>
+      <div class="field">
+        <label>Tap Handle Requested?</label>
+        <div class="yn-toggle" id="nc-tap-handle" data-value="No">
+          <button type="button" class="yn-btn" data-value="Yes">Yes</button>
+          <button type="button" class="yn-btn selected" data-value="No">No</button>
+        </div>
+      </div>
       <div class="error-text" id="new-customer-error"></div>
       <button class="btn btn-primary btn-block" type="submit" id="nc-submit">Save Customer</button>
     </form>
   </section>
 
+  <!-- ACCOUNTS MAP -->
+  <section id="screen-map" class="screen">
+    <a class="back-link" id="back-map-to-home">← Back</a>
+    <div class="section-title">My Accounts Map</div>
+    <div id="accounts-map" class="accounts-map"></div>
+    <div id="map-account-list" class="order-history" style="margin-top:14px;"></div>
+  </section>
+
+  <!-- ACCOUNT DETAIL -->
+  <section id="screen-account" class="screen">
+    <a class="back-link" id="back-account-to-map">← Back</a>
+    <div class="rep-block" style="margin-bottom:14px; display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+      <div>
+        <div class="name" id="account-name" style="font-size:22px;">—</div>
+        <div class="rep-label" id="account-address" style="text-transform:none; letter-spacing:normal; font-weight:400;">—</div>
+      </div>
+      <button class="btn btn-ghost" id="btn-edit-account" type="button" style="flex-shrink:0; padding:8px 14px; min-height:auto; font-size:13px;">Edit</button>
+    </div>
+
+    <!-- Edit form (hidden until "Edit" is tapped) -->
+    <form id="account-edit-form" style="display:none; flex-direction:column; gap:14px; margin-bottom:22px; background:var(--navy-800); border:1px solid var(--navy-600); border-radius:var(--radius); padding:16px;">
+      <div class="field"><label>Ordering Contact</label><input id="ea-contact" /></div>
+      <div class="field"><label>Phone Number</label><input id="ea-phone" type="tel" /></div>
+      <div class="field"><label>Email</label><input id="ea-email" type="email" /></div>
+      <div class="field"><label>Delivery Address (Ship To)</label><input id="ea-address" /></div>
+      <div class="field"><label>Billing Address (if different)</label><input id="ea-billing-address" /></div>
+      <div class="field"><label>Delivery Instructions</label><textarea id="ea-delivery-instructions" rows="2"></textarea></div>
+      <div class="field"><label>Region</label><input id="ea-region" /></div>
+      <div class="field"><label>License Number</label><input id="ea-license" /></div>
+      <div class="field"><label>Payment Method</label><input id="ea-payment-method" /></div>
+      <div class="field"><label>Terms</label><input id="ea-terms" placeholder="e.g. Net 30" /></div>
+      <div class="field">
+        <label>Tap Handle Requested?</label>
+        <div class="yn-toggle" id="ea-tap-handle" data-value="No">
+          <button type="button" class="yn-btn" data-value="Yes">Yes</button>
+          <button type="button" class="yn-btn selected" data-value="No">No</button>
+        </div>
+      </div>
+      <div class="error-text" id="account-edit-error"></div>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-ghost" type="button" id="btn-cancel-edit-account" style="flex:1;">Cancel</button>
+        <button class="btn btn-primary" type="submit" id="btn-save-account" style="flex:1;">Save Changes</button>
+      </div>
+    </form>
+
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="value" id="account-total-orders">0</div>
+        <div class="label">Total Orders</div>
+      </div>
+      <div class="stat-card">
+        <div class="value" id="account-total-value">$0</div>
+        <div class="label">Lifetime Value</div>
+      </div>
+    </div>
+
+    <button class="cta-btn secondary" id="btn-generate-all-invoices" type="button" style="margin-bottom:18px; width:100%;">
+      <span>Generate All Invoices<small>Print/save every order below as one PDF</small></span>
+      <span>🖨</span>
+    </button>
+
+    <div class="section-title">All Orders</div>
+    <div class="order-history" id="account-order-list">
+      <div class="empty-note">Loading…</div>
+    </div>
+  </section>
+
+  <!-- ADMIN: ALL ORDERS -->
+  <section id="screen-admin-orders" class="screen">
+    <a class="back-link" id="back-admin-to-home">← Back</a>
+    <div class="section-title">All Incoming Orders</div>
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="value" id="admin-stat-orders">0</div>
+        <div class="label">Orders</div>
+      </div>
+      <div class="stat-card">
+        <div class="value" id="admin-stat-value">$0</div>
+        <div class="label">Total Value</div>
+      </div>
+    </div>
+    <div class="field" style="margin-bottom:14px;">
+      <input id="admin-order-search" placeholder="Search by customer or rep" />
+    </div>
+    <div id="admin-order-list" class="order-history">
+      <div class="empty-note">Loading…</div>
+    </div>
+    <div class="section-title" style="margin-top:26px;">Admin Tools</div>
+    <div class="empty-note">More admin-only functions coming soon.</div>
+  </section>
+
+  <!-- INVOICE -->
+  <section id="screen-invoice" class="screen">
+    <a class="back-link" id="back-invoice-to-home">← Back</a>
+    <div id="invoice-loading" class="empty-note">Loading invoice…</div>
+    <div id="invoice-print-sheet" class="print-sheet">
+    <div id="invoice-doc" class="invoice-doc" style="display:none;"></div>
+    </div>
+    <button class="btn btn-primary btn-block no-print" id="invoice-print-btn" style="display:none; margin-top:20px;">Print / Save as PDF</button>
+  </section>
+
+  <!-- Batch invoice print target (never shown on screen, only used for window.print()) -->
+  <div id="batch-print-sheet" class="print-sheet"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="assets/js/config.js"></script>
   <script src="assets/js/products.js"></script>
   <script src="assets/js/customers.js"></script>
