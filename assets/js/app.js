@@ -1017,6 +1017,7 @@
     document.getElementById('new-customer-form').reset();
     document.getElementById('new-customer-error').textContent = '';
     setYnToggle('nc-tap-handle', 'No');
+    setYnToggle('nc-payment-method', '');
     document.getElementById('new-customer-form').style.display = 'flex';
     document.getElementById('nc-success').style.display = 'none';
     document.getElementById('back-newcustomer-to-customers').style.display = 'block';
@@ -1049,7 +1050,7 @@
   }
 
   function getYnToggle(id) {
-    return document.getElementById(id).getAttribute('data-value') || 'No';
+    return document.getElementById(id).getAttribute('data-value') || '';
   }
 
   document.querySelectorAll('.yn-toggle').forEach(function (wrap) {
@@ -1077,13 +1078,10 @@
       tapHandleRequested: getYnToggle('nc-tap-handle'),
       salesRep: state.rep || '',
       addedBy: state.rep || '',
-      // New accounts have no payment arrangement yet -- never leave this blank
-      // (blank could be misread as "no charge" or a data gap), and never guess
-      // a real payment method for an account that hasn't been set up.
-      paymentMethod: 'Not Set Up'
+      paymentMethod: getYnToggle('nc-payment-method')
     };
 
-    var required = ['establishmentName', 'address', 'orderingContact', 'phone', 'email', 'deliveryAddress', 'deliveryInstructions'];
+    var required = ['establishmentName', 'address', 'orderingContact', 'phone', 'email', 'deliveryAddress', 'deliveryInstructions', 'paymentMethod'];
     var missing = required.filter(function (k) { return !newCustomer[k]; });
     if (missing.length) { errEl.textContent = 'Please fill in all required fields.'; return; }
 
