@@ -186,19 +186,40 @@ model Order {
   confirmedAt   DateTime?    @map("confirmed_at")
   scheduledFor  DateTime?    @map("scheduled_for")
   salesRepId    String?      @map("sales_rep_id")
+  // Order-content field, same as customer/lines/etc — DB-owned, written once
+  // at order creation. Sheet edits to the Notes cell AFTER that are a
+  // separate, deliberate exception: they're allowed to sync back and
+  // overwrite this field (see invoiceStatus below for why that's safe) even
+  // though Notes started life as a DB-owned value.
   notes         String?
   sheetSyncedAt DateTime?    @map("sheet_synced_at")
 
-  // Fulfillment/accounting fields synced back FROM the Sheet — the Sheet
-  // owns these, DB never writes them except via the sheet-sync job. See
-  // plan's "Sheet sync architecture" ownership split.
-  invoiceNumber   String?   @map("invoice_number")
-  deliveryDate    DateTime? @map("delivery_date")
-  bolNumber       String?   @map("bol_number")
-  invoiceStatus   String?   @map("invoice_status")
-  paymentMethod   String?   @map("payment_method")
-  achRef          String?   @map("ach_ref")
-  inventorySource String?   @map("inventory_source")
+  // DB-owned, computed/assigned at order-creation time by the same logic
+  // Code.gs's handleOrder already uses today (nextInvoiceNumber ->
+  // Postgres-side locked sequence instead; warehouseForRegion for
+  // inventorySource; the account's on-file paymentMethod) — verified against
+  // the live handleOrder, not assumed from the original spec's data model,
+  // which incorrectly implied these were ops-filled. A Sheet edit to any of
+  // these is a conflict: DB wins, sync corrects the Sheet.
+  invoiceNumber   String? @map("invoice_number")
+  paymentMethod   String? @map("payment_method")
+  inventorySource String? @map("inventory_source")
+  // DB writes ONE initial value at order-creation time (e.g. "Pending") and
+  // never touches this column again — every value after that is an ops
+  // edit and syncs back from the Sheet. Because that first write is a
+  // script-driven appendRow (invisible to onEdit by construction, see the
+  // sync architecture doc), there's no special-casing needed to tell
+  // "the initial DB value" apart from "a later ops edit": by the time onEdit
+  // can possibly fire for this column, it's already a real ops change.
+  invoiceStatus   String? @map("invoice_status")
+
+  // Sheet-owned — ops fills these in after fulfillment; DB never writes them.
+  // deliveryDate is Sheet-owned only until a later phase's delivery
+  // scheduling logic exists (orders.scheduledFor) and starts computing it —
+  // flip this to the DB-owned group above once that ships.
+  deliveryDate DateTime? @map("delivery_date")
+  bolNumber    String?   @map("bol_number")
+  achRef       String?   @map("ach_ref")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
