@@ -14,6 +14,7 @@ function doGet(e) {
     if (action === 'invoiceDetail') return respond(handleInvoiceDetail(e.parameter.invoiceNumber));
     if (action === 'customerOrders') return respond(handleCustomerOrders(e.parameter.customer));
     if (action === 'allOrders') return respond(handleAllOrders());
+    if (action === 'lastOrder') return respond(handleLastOrder(e.parameter.customer));
     return respond({ ok: false, error: 'Unknown action' });
   } catch (err) {
     return respond({ ok: false, error: err.message });
@@ -395,6 +396,74 @@ function handleCustomerOrders(customerName) {
     totalQty: totalQty,
     totalLineValue: totalLine,
     orders: orders
+  };
+}
+
+// Powers the "Reorder Last Order" shortcut: the most recent order for one
+// customer, with productCode per line (handleCustomerOrders omits it --
+// fine for a history list, not enough to reconstruct a re-orderable
+// selection). Same invoice-grouping/sort as handleCustomerOrders, just
+// narrowed to the single newest group and one extra field per line.
+function handleLastOrder(customerName) {
+  if (!customerName) return { ok: false, error: 'Missing customer' };
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SALES_SHEET_NAME);
+  if (!sheet) return { ok: false, error: 'Sales tab not found' };
+  var hc = getSalesHeaderAndCol(sheet);
+  var header = hc.header, col = hc.col;
+  var dataStartRow = hc.headerRowNumber + 1;
+  var data = sheet.getRange(dataStartRow, 1, Math.max(0, sheet.getLastRow() - hc.headerRowNumber), sheet.getLastColumn()).getValues();
+
+  var customerIdx = salesCol(col, header, 'Customer', ['customer']);
+  var qtyIdx = salesCol(col, header, 'Qty', ['qty']);
+  var productIdx = salesCol(col, header, 'Product Name', ['product', 'name']);
+  var packagingIdx = salesCol(col, header, 'Packaging Format', ['packaging']);
+  var productCodeIdx = salesCol(col, header, 'Product Code', ['product', 'code']);
+  var poDateIdx = salesCol(col, header, 'PO Date', ['po', 'date']);
+  var invoiceIdx = salesCol(col, header, 'Invoice #', ['invoice', '#']);
+  var notesIdx = salesCol(col, header, 'Notes', ['notes']);
+
+  var target = String(customerName).trim().toLowerCase();
+  var invoiceMap = {};
+  var invoiceOrder = [];
+
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    if (customerIdx === -1) continue;
+    if (!customerMatches(row[customerIdx], target)) continue;
+
+    var invoiceNumber = invoiceIdx === -1 ? '' : String(row[invoiceIdx] || '');
+    var poDate = poDateIdx === -1 ? '' : row[poDateIdx];
+    var groupKey = invoiceNumber || ('__noinv_' + i);
+
+    if (!invoiceMap[groupKey]) {
+      invoiceMap[groupKey] = {
+        invoiceNumber: invoiceNumber,
+        poDate: poDate,
+        notes: notesIdx === -1 ? '' : row[notesIdx],
+        lines: []
+      };
+      invoiceOrder.push(groupKey);
+    }
+    invoiceMap[groupKey].lines.push({
+      product: productIdx === -1 ? '' : row[productIdx],
+      packaging: packagingIdx === -1 ? '' : row[packagingIdx],
+      productCode: productCodeIdx === -1 ? '' : row[productCodeIdx],
+      qty: Number(qtyIdx === -1 ? 0 : row[qtyIdx]) || 0
+    });
+  }
+
+  if (!invoiceOrder.length) return { ok: true, hasOrder: false };
+
+  var orders = invoiceOrder.map(function (k) { return invoiceMap[k]; });
+  orders.sort(function (a, b) { return new Date(b.poDate) - new Date(a.poDate); });
+  var last = orders[0];
+
+  return {
+    ok: true,
+    hasOrder: true,
+    poDate: last.poDate,
+    notes: last.notes,
+    lines: last.lines.filter(function (l) { return l.productCode && l.qty > 0; })
   };
 }
 

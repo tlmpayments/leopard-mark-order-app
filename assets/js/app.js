@@ -924,12 +924,77 @@
     renderProductList();
     renderPickedCustomer();
     updateOrderTotal();
+    renderReorderBanner(null);
   }
 
   // ---------- Customer picker ----------
   function setCustomer(c) {
     state.customer = c;
     renderPickedCustomer();
+    loadReorderBanner(c);
+  }
+
+  // ---------- Reorder Last Order ----------
+  // As soon as a customer is picked, check for their most recent order and
+  // offer a one-tap shortcut to refill the product grid with those exact
+  // lines -- the rep still reviews/adjusts quantities and taps Submit same
+  // as any order, this just removes re-picking every beer/format from
+  // scratch every time. Best-effort: a failed lookup just hides the banner,
+  // never blocks placing a fresh order.
+  function loadReorderBanner(customer) {
+    renderReorderBanner(null);
+    if (!customer || !apiConfigured()) return;
+    apiGet({ action: 'lastOrder', customer: customer.establishmentName })
+      .then(function (res) {
+        if (res.ok && res.hasOrder && res.lines && res.lines.length) {
+          renderReorderBanner(res);
+        }
+      })
+      .catch(function () {
+        // Silent -- reorder is a convenience, not a requirement.
+      });
+  }
+
+  function renderReorderBanner(lastOrder) {
+    var host = document.getElementById('reorder-banner');
+    if (!host) return;
+    if (!lastOrder) {
+      host.style.display = 'none';
+      host.innerHTML = '';
+      return;
+    }
+    host.style.display = 'block';
+    host.innerHTML =
+      '<button type="button" class="cta-btn secondary" id="btn-reorder-last" style="width:100%;">' +
+        '<span>🔁 Reorder Last Order<small>Same ' + lastOrder.lines.length + ' item(s) as ' + fmtDate(lastOrder.poDate) + ' — review before submitting</small></span>' +
+        '<span>→</span>' +
+      '</button>';
+    document.getElementById('btn-reorder-last').addEventListener('click', function () {
+      applyReorder(lastOrder.lines);
+    });
+  }
+
+  // Maps {productCode, qty} lines back to state.selection's
+  // {productId: {formatCode: qty}} shape by matching productCode against
+  // window.LM_PRODUCTS' format codes -- the same SKU codes already used
+  // everywhere else (Sales sheet, PRICE_MAP), so this never needs its own
+  // lookup table.
+  function applyReorder(lines) {
+    var selection = {};
+    lines.forEach(function (line) {
+      window.LM_PRODUCTS.forEach(function (p) {
+        p.formats.forEach(function (f) {
+          if (f.code === line.productCode) {
+            if (!selection[p.id]) selection[p.id] = {};
+            selection[p.id][f.code] = line.qty;
+          }
+        });
+      });
+    });
+    state.selection = selection;
+    renderProductList();
+    updateOrderTotal();
+    toast('Last order applied — review quantities, then submit');
   }
 
   function renderPickedCustomer() {
