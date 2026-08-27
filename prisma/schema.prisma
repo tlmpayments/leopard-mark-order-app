@@ -201,7 +201,16 @@ model Order {
   // the live handleOrder, not assumed from the original spec's data model,
   // which incorrectly implied these were ops-filled. A Sheet edit to any of
   // these is a conflict: DB wins, sync corrects the Sheet.
-  invoiceNumber   String? @map("invoice_number")
+  // @unique (not just indexed): a plain Postgres UNIQUE constraint on a
+  // nullable column already permits multiple NULLs while enforcing
+  // uniqueness among non-null values -- exactly what's needed here, no
+  // partial index required. Added after adversarial review of Phase 2 found
+  // the webhook's invoiceNumber fallback lookup (used when a Sheet row has
+  // no Order ID yet) would silently resolve to a non-deterministic order if
+  // two ever shared an invoice number -- the same race Code.gs's legacy
+  // nextInvoiceNumber/nextBolNumber scan-and-increment approach already had
+  // no lock against. Postgres now fails loudly at insert time instead.
+  invoiceNumber   String? @unique @map("invoice_number")
   paymentMethod   String? @map("payment_method")
   inventorySource String? @map("inventory_source")
   // DB writes ONE initial value at order-creation time (e.g. "Pending") and
@@ -233,7 +242,6 @@ model Order {
   syncLogs          SyncLog[]
 
   @@index([accountId, status])
-  @@index([invoiceNumber])
   @@map("orders")
 }
 
@@ -256,17 +264,27 @@ enum OrderStatus {
 
 // ---------- Order line items ----------
 model OrderLine {
-  id        String  @id @default(cuid())
-  orderId   String  @map("order_id")
-  productId String  @map("product_id")
-  qty       Int
+  id             String  @id @default(cuid())
+  orderId        String  @map("order_id")
+  productId      String  @map("product_id")
+  qty            Int
   // Resolved + snapshotted at confirmation time (account_pricing, falling
   // back to products.list_price) — never client-supplied, never recomputed
   // later. See plan's data-model refinements.
-  unitPrice Decimal @map("unit_price") @db.Decimal(10, 2)
-  lineTotal Decimal @map("line_total") @db.Decimal(10, 2)
-  lotNumber String? @map("lot_number")
-  lineIndex Int     @map("line_index")
+  unitPrice      Decimal @map("unit_price") @db.Decimal(10, 2)
+  lineTotal      Decimal @map("line_total") @db.Decimal(10, 2)
+  lotNumber      String? @map("lot_number")
+  lineIndex      Int     @map("line_index")
+  // The exact Sales-sheet row this line lives on -- set once, either by
+  // handleSyncOrder's response (DB->Sheet) or directly by the backfill
+  // script (which already knows each historical row's number). Lets the
+  // Sheet->DB webhook target Lot # at the ONE line a Sheet row represents
+  // instead of applying one row's value to every line of the order (a real
+  // correctness gap found in adversarial review: lot/batch numbers are a
+  // per-line traceability field, unlike BOL #, which genuinely is one per
+  // shipment). Null only for a line that hasn't been synced to the Sheet
+  // yet at all.
+  sheetRowNumber Int?    @map("sheet_row_number")
 
   order   Order   @relation(fields: [orderId], references: [id])
   product Product @relation(fields: [productId], references: [id])
