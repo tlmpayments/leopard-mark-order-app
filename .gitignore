@@ -2,3 +2,13 @@ apps-script/clasp-project/
 .DS_Store
 .vercel
 .env*
+
+# next.js
+/node_modules
+/.next/
+/out/
+/build
+*.tsbuildinfo
+next-env.d.ts
+
+/app/generated/prisma

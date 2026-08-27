@@ -1,0 +1,207 @@
+/* Shared brand layer for the Next.js app (admin, and later the customer
+   portal). Reuses the exact tokens/classes from the rep app's
+   public/rep-app/assets/css/app.css — fonts and logos are referenced from
+   that same static path rather than duplicated, since Next.js already
+   serves it unchanged at /rep-app/. Phase 4 (customer portal) is where this
+   grows into full screen designs; for now it just covers what /admin needs. */
+
+@font-face {
+  font-family: "Bowery Lane";
+  src: url("/rep-app/assets/fonts/BoweryLane-Medium.woff") format("woff");
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Tomato Grotesk";
+  src: url("/rep-app/assets/fonts/TomatoGrotesk-Regular.woff") format("woff");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Tomato Grotesk";
+  src: url("/rep-app/assets/fonts/TomatoGrotesk-Medium.woff") format("woff");
+  font-weight: 600;
+  font-display: swap;
+}
+
+:root {
+  --navy-950: #050b18;
+  --navy-900: #0a1730;
+  --navy-800: #10203f;
+  --navy-700: #182d4e;
+  --navy-600: #223c63;
+  --silver: #b9c4d6;
+  --silver-dim: #7c8aa3;
+  --white: #f4f6fa;
+  --good: #199e70;
+  --warn: #c98500;
+  --accent: #3987e5;
+  --radius: 14px;
+  --font-body: "Tomato Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, sans-serif;
+  --font-display: "Bowery Lane", var(--font-body);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--navy-950);
+  color: var(--white);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background: radial-gradient(
+    circle at 20% -10%,
+    var(--navy-700),
+    var(--navy-950) 60%
+  );
+  min-height: 100vh;
+}
+
+button {
+  font-family: inherit;
+}
+
+a {
+  color: var(--accent);
+}
+
+.brand-logo {
+  width: min(220px, 70%);
+  height: auto;
+  filter: brightness(0) invert(1);
+}
+
+.brand-sub {
+  color: var(--silver-dim);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-weight: 600;
+}
+
+.auth-screen {
+  max-width: 360px;
+  margin: 0 auto;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  text-align: center;
+  padding: 24px 20px;
+}
+
+.login-card {
+  width: 100%;
+  background: linear-gradient(180deg, var(--navy-800), var(--navy-900));
+  border: 1px solid var(--navy-600);
+  border-radius: var(--radius);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 8px;
+  text-align: left;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+label {
+  font-size: 12px;
+  color: var(--silver);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+input {
+  background: var(--navy-950);
+  border: 1px solid var(--navy-600);
+  color: var(--white);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 16px;
+  width: 100%;
+}
+input:focus {
+  outline: 2px solid var(--accent);
+}
+
+.btn {
+  border: none;
+  border-radius: 10px;
+  padding: 14px 18px;
+  min-height: 48px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.05s ease, opacity 0.15s ease;
+}
+.btn:active {
+  transform: scale(0.98);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--accent);
+  color: white;
+}
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--navy-600);
+  color: var(--white);
+}
+.btn-block {
+  width: 100%;
+}
+
+.error-text {
+  color: #e35b5b;
+  font-size: 13px;
+  min-height: 16px;
+}
+
+.admin-shell {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: max(24px, env(safe-area-inset-top)) 20px 40px;
+}
+
+.rep-block {
+  margin-bottom: 24px;
+}
+.rep-block .name {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 32px;
+  line-height: 1.08;
+}
+.rep-block .rep-label {
+  color: var(--silver-dim);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.admin-note {
+  color: var(--silver-dim);
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 24px;
+}
