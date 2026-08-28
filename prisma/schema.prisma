@@ -1,0 +1,383 @@
+// The Leopard Mark ordering platform — system-of-record schema.
+// See /Users/jackbegley/.claude/plans/jazzy-pondering-rivest.md for the full
+// design rationale (Sheet sync architecture, compliance gates, phase plan).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------- Reps (mirrors the Sheet's "Reps" tab: Name | PIN | Active | Role) ----------
+// Not in the original spec's table list, but sales_rep_id below needs a real
+// entity to reference, and Phase 3 (rep app cutover) has to reimplement
+// Code.gs's handleLogin/handleReps/handleSetPin against this table. PINs are
+// hashed here (bcrypt) even though the Sheet stores them in plaintext today —
+// a strict security improvement with no UX change (reps still type a 4-digit
+// PIN), not a behavior change worth a sign-off round.
+model Rep {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  pinHash   String?  @map("pin_hash")
+  active    Boolean  @default(true)
+  role      RepRole  @default(rep)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  accounts Account[]
+  orders   Order[]
+
+  @@map("reps")
+}
+
+enum RepRole {
+  rep
+  admin
+}
+
+// ---------- Accounts ----------
+model Account {
+  id                   String        @id @default(cuid())
+  businessName         String        @map("business_name")
+  legalEntity          String?       @map("legal_entity")
+  licenseNumber        String?       @map("license_number")
+  licenseState         String?       @map("license_state")
+  licenseStatus        LicenseStatus @default(unknown) @map("license_status")
+  licenseExpiry        DateTime?     @map("license_expiry")
+  salesRepId           String?       @map("sales_rep_id")
+  region               String?
+  address              String?
+  deliveryAddress      String?       @map("delivery_address")
+  deliveryInstructions String?       @map("delivery_instructions")
+  deliveryWindow       String?       @map("delivery_window")
+  paymentMethod        String?       @map("payment_method")
+  terms                String?
+  creditHold           Boolean       @default(false) @map("credit_hold")
+  priority             String?
+  importedToEkos       Boolean       @default(false) @map("imported_to_ekos")
+  lat                  Float?
+  lng                  Float?
+  // Pins this account to its row in the "Customer Accounts" tab for the
+  // reconciliation job. Business Name is the initial-import join key (what
+  // Code.gs's handleUpdateCustomer already matches on today), but a
+  // display-name edit shouldn't orphan the row once imported — see plan's
+  // "Data model" section.
+  sheetRowRef          Int?          @map("sheet_row_ref")
+  createdAt            DateTime      @default(now()) @map("created_at")
+  updatedAt            DateTime      @updatedAt @map("updated_at")
+
+  salesRep       Rep?             @relation(fields: [salesRepId], references: [id])
+  contacts       Contact[]
+  accountPricing AccountPricing[]
+  orders         Order[]
+  messages       Message[]
+
+  @@index([salesRepId])
+  @@map("accounts")
+}
+
+enum LicenseStatus {
+  active
+  expired
+  suspended
+  unknown
+}
+
+// ---------- Contacts (ordering contacts, some of whom are SMS-authorized) ----------
+model Contact {
+  id                 String   @id @default(cuid())
+  accountId          String   @map("account_id")
+  name               String?
+  email              String?
+  phoneE164          String?  @map("phone_e164")
+  role               String?
+  isAuthorizedSender Boolean  @default(false) @map("is_authorized_sender")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  account  Account   @relation(fields: [accountId], references: [id])
+  consents Consent[]
+  orders   Order[]
+  messages Message[]
+
+  @@index([phoneE164])
+  @@map("contacts")
+}
+
+// ---------- Consents (SMS opt-in/opt-out history — append per change, never overwritten) ----------
+model Consent {
+  id                String           @id @default(cuid())
+  contactId         String           @map("contact_id")
+  phoneE164         String           @map("phone_e164")
+  channel           MessagingChannel
+  status            ConsentStatus
+  termsVersion      String           @map("terms_version")
+  termsTextSnapshot String           @map("terms_text_snapshot")
+  consentedAt       DateTime?        @map("consented_at")
+  revokedAt         DateTime?        @map("revoked_at")
+  sourceMessageId   String?          @map("source_message_id")
+  createdAt         DateTime         @default(now()) @map("created_at")
+
+  contact Contact @relation(fields: [contactId], references: [id])
+
+  @@index([phoneE164, channel])
+  @@map("consents")
+}
+
+enum MessagingChannel {
+  sms
+  // WhatsApp deliberately excluded — Meta's alcohol-vertical policy rules
+  // out US mainland accounts (see plan's Context section). Re-add only if
+  // a Solution Provider confirms otherwise in writing for a non-mainland
+  // account.
+}
+
+enum ConsentStatus {
+  opted_in
+  opted_out
+}
+
+// ---------- Products ----------
+model Product {
+  id           String   @id @default(cuid())
+  skuCode      String   @unique @map("sku_code")
+  productName  String   @map("product_name")
+  formatLabel  String   @map("format_label")
+  formatDetail String   @map("format_detail")
+  unit         String
+  listPrice    Decimal  @map("list_price") @db.Decimal(10, 2)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  accountPricing AccountPricing[]
+  orderLines     OrderLine[]
+
+  @@map("products")
+}
+
+// ---------- Per-account pricing overrides ----------
+model AccountPricing {
+  id        String  @id @default(cuid())
+  accountId String  @map("account_id")
+  productId String  @map("product_id")
+  price     Decimal @db.Decimal(10, 2)
+
+  account Account @relation(fields: [accountId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([accountId, productId])
+  @@map("account_pricing")
+}
+
+// ---------- Orders ----------
+// id is NOT DB-autogenerated: Prisma has no native ulid() default, so a ULID
+// is generated in application code at creation time (via the `ulid` package)
+// and passed in explicitly. Still sortable, still collision-resistant, still
+// requires no coordination with the Sheet — same properties the plan called
+// for, generated one layer up from where the plan assumed.
+model Order {
+  id            String       @id
+  accountId     String       @map("account_id")
+  contactId     String?      @map("contact_id")
+  channel       OrderChannel
+  status        OrderStatus  @default(draft)
+  submittedAt   DateTime?    @map("submitted_at")
+  confirmedAt   DateTime?    @map("confirmed_at")
+  scheduledFor  DateTime?    @map("scheduled_for")
+  salesRepId    String?      @map("sales_rep_id")
+  // Order-content field, same as customer/lines/etc — DB-owned, written once
+  // at order creation. Sheet edits to the Notes cell AFTER that are a
+  // separate, deliberate exception: they're allowed to sync back and
+  // overwrite this field (see invoiceStatus below for why that's safe) even
+  // though Notes started life as a DB-owned value.
+  notes         String?
+  sheetSyncedAt DateTime?    @map("sheet_synced_at")
+
+  // DB-owned, computed/assigned at order-creation time by the same logic
+  // Code.gs's handleOrder already uses today (nextInvoiceNumber ->
+  // Postgres-side locked sequence instead; warehouseForRegion for
+  // inventorySource; the account's on-file paymentMethod) — verified against
+  // the live handleOrder, not assumed from the original spec's data model,
+  // which incorrectly implied these were ops-filled. A Sheet edit to any of
+  // these is a conflict: DB wins, sync corrects the Sheet.
+  invoiceNumber   String? @map("invoice_number")
+  paymentMethod   String? @map("payment_method")
+  inventorySource String? @map("inventory_source")
+  // DB writes ONE initial value at order-creation time (e.g. "Pending") and
+  // never touches this column again — every value after that is an ops
+  // edit and syncs back from the Sheet. Because that first write is a
+  // script-driven appendRow (invisible to onEdit by construction, see the
+  // sync architecture doc), there's no special-casing needed to tell
+  // "the initial DB value" apart from "a later ops edit": by the time onEdit
+  // can possibly fire for this column, it's already a real ops change.
+  invoiceStatus   String? @map("invoice_status")
+
+  // Sheet-owned — ops fills these in after fulfillment; DB never writes them.
+  // deliveryDate is Sheet-owned only until a later phase's delivery
+  // scheduling logic exists (orders.scheduledFor) and starts computing it —
+  // flip this to the DB-owned group above once that ships.
+  deliveryDate DateTime? @map("delivery_date")
+  bolNumber    String?   @map("bol_number")
+  achRef       String?   @map("ach_ref")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  account           Account            @relation(fields: [accountId], references: [id])
+  contact           Contact?           @relation(fields: [contactId], references: [id])
+  salesRep          Rep?               @relation(fields: [salesRepId], references: [id])
+  lines             OrderLine[]
+  events            OrderEvent[]
+  aiInterpretations AiInterpretation[]
+  syncLogs          SyncLog[]
+
+  @@index([accountId, status])
+  @@index([invoiceNumber])
+  @@map("orders")
+}
+
+enum OrderChannel {
+  portal
+  sms
+  rep_app
+}
+
+enum OrderStatus {
+  draft
+  pending_confirmation
+  confirmed
+  scheduled
+  fulfilled
+  cancelled
+  rejected
+  expired
+}
+
+// ---------- Order line items ----------
+model OrderLine {
+  id        String  @id @default(cuid())
+  orderId   String  @map("order_id")
+  productId String  @map("product_id")
+  qty       Int
+  // Resolved + snapshotted at confirmation time (account_pricing, falling
+  // back to products.list_price) — never client-supplied, never recomputed
+  // later. See plan's data-model refinements.
+  unitPrice Decimal @map("unit_price") @db.Decimal(10, 2)
+  lineTotal Decimal @map("line_total") @db.Decimal(10, 2)
+  lotNumber String? @map("lot_number")
+  lineIndex Int     @map("line_index")
+
+  order   Order   @relation(fields: [orderId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([orderId, lineIndex])
+  @@map("order_lines")
+}
+
+// ---------- Messages (raw inbound/outbound SMS — append-only) ----------
+model Message {
+  id                String           @id @default(cuid())
+  accountId         String?          @map("account_id")
+  contactId         String?          @map("contact_id")
+  direction         MessageDirection
+  channel           MessagingChannel
+  fromNumber        String           @map("from_number")
+  toNumber          String           @map("to_number")
+  bodyRaw           String           @map("body_raw")
+  providerMessageId String?          @map("provider_message_id")
+  createdAt         DateTime         @default(now()) @map("created_at")
+
+  account           Account?           @relation(fields: [accountId], references: [id])
+  contact           Contact?           @relation(fields: [contactId], references: [id])
+  aiInterpretations AiInterpretation[]
+
+  @@index([fromNumber, createdAt])
+  @@map("messages")
+}
+
+enum MessageDirection {
+  inbound
+  outbound
+}
+
+// ---------- AI interpretations (append-only) ----------
+model AiInterpretation {
+  id               String   @id @default(cuid())
+  messageId        String   @map("message_id")
+  orderId          String?  @map("order_id")
+  model            String
+  promptVersion    String   @map("prompt_version")
+  parsedJson       Json     @map("parsed_json")
+  confidence       Float
+  needsHumanReview Boolean  @default(false) @map("needs_human_review")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  message Message @relation(fields: [messageId], references: [id])
+  order   Order?  @relation(fields: [orderId], references: [id])
+
+  @@index([orderId])
+  @@map("ai_interpretations")
+}
+
+// ---------- Order events (append-only audit trail) ----------
+model OrderEvent {
+  id          String          @id @default(cuid())
+  orderId     String          @map("order_id")
+  eventType   String          @map("event_type")
+  actor       OrderEventActor
+  payloadJson Json            @map("payload_json")
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([orderId, createdAt])
+  @@map("order_events")
+}
+
+enum OrderEventActor {
+  customer
+  ai
+  rep
+  ops
+  system
+}
+
+// ---------- States (multi-state compliance seam) ----------
+model State {
+  code                        String   @id // e.g. "CA"
+  selfDistributionCap         String?  @map("self_distribution_cap")
+  requiresLicenseVerification Boolean  @default(true) @map("requires_license_verification")
+  recordRetentionYears        Int?     @map("record_retention_years")
+  notes                       String?
+  updatedAt                   DateTime @updatedAt @map("updated_at")
+
+  @@map("states")
+}
+
+// ---------- Sheet sync log ----------
+// The (order_id, direction) WHERE status='success' partial unique index that
+// makes this the primary idempotency guard is a Phase 2 (Sheet sync) task —
+// Prisma's schema DSL has no partial/filtered unique index support, so it
+// needs a hand-authored raw-SQL migration once Phase 2 actually builds the
+// sync job. This table's shape is Phase 1 scope; that constraint isn't.
+model SyncLog {
+  id            String        @id @default(cuid())
+  direction     SyncDirection
+  orderId       String        @map("order_id")
+  rowRef        String?       @map("row_ref")
+  fieldsChanged Json?         @map("fields_changed")
+  status        String        @default("success")
+  conflict      Boolean       @default(false)
+  createdAt     DateTime      @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([orderId, direction])
+  @@map("sync_log")
+}
+
+enum SyncDirection {
+  db_to_sheet
+  sheet_to_db
+}
