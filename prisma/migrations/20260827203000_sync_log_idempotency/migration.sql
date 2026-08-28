@@ -1,0 +1,14 @@
+-- Phase 2 (Sheet <-> Postgres sync): idempotency guard for DB->Sheet syncs.
+--
+-- Prisma's schema DSL has no partial/filtered unique index support, so this
+-- is hand-authored on top of the 20260827202505_init migration rather than
+-- expressed in prisma/schema.prisma. See SyncLog's model comment there.
+--
+-- A successful sync (direction, order_id) must be unique so a retried
+-- syncOrder call for the same order/direction can be detected as a replay
+-- (see Code.gs's handleSyncOrder idempotency check against the Order ID
+-- column, which this index backs on the Postgres side). Only status='success'
+-- rows are constrained -- a prior 'error' attempt must never block a later
+-- successful retry for the same (order_id, direction), so the partial
+-- predicate is required, not just a convenience.
+CREATE UNIQUE INDEX "sync_log_order_id_direction_success_idx" ON "sync_log" ("order_id", "direction") WHERE "status" = 'success';

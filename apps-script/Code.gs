@@ -2,6 +2,44 @@ var SALES_SHEET_NAME = 'Sales';
 var REPS_SHEET_NAME = 'Reps';
 var CUSTOMERS_SHEET_NAME = 'Customer Accounts';
 
+// ---- Phase 2 (Sheet <-> Postgres sync) column ownership ----
+// See /Users/jackbegley/.claude/plans/jazzy-pondering-rivest.md, "Sheet sync
+// architecture" -> "Ownership split". Postgres decides DB-owned columns --
+// a human edit to one of these in the Sheet is a conflict (logged, never
+// applied, corrected back onto the Sheet by the DB). Ops fills in
+// Sheet-owned columns after order creation -- Postgres never touches them
+// again once the initial appendRow lands. Every Sales-sheet column must be
+// in exactly one of these two lists; classifySyncColumn() below is the single
+// place that decides which.
+var DB_OWNED_COLUMNS = [
+  'Customer', 'License Number', 'PO Date', 'Product Name', 'Packaging Format',
+  'Product Code', 'Qty', 'Price (ea)', 'Line Total', 'Sales Rep', 'Invoice #',
+  'Order ID', 'Inventory Source', 'Payment Method'
+];
+var SHEET_OWNED_COLUMNS = [
+  'Delivery (Invoice) Date', 'Lot #', 'BOL #', 'ACH Invoice REF #',
+  'Invoice Status', 'TLM Tap Handle', 'SGB Tap Handle', 'CNT Tap Handle',
+  'MicroStar 1/2 Empty', 'MicroStar 1/6 Empty', 'Notes'
+];
+
+// Single source of truth for "can this column sync Sheet -> DB". Three
+// states, matching lib/sheetColumns.ts's classifyColumn on the Next.js side
+// exactly (an earlier version of this function only had two states,
+// collapsing 'unknown' into 'db_owned' -- fine for the webhook, which
+// treats both as a conflict either way, but wrong for onEditInstallable's
+// decision of whether to track an edit AT ALL: a genuinely unrecognized
+// column (not part of this sync design) shouldn't be dirty-marked and sent
+// anywhere, while a recognized DB-owned column SHOULD be, so it can be
+// flagged as a conflict). Callers that only care about "is this safe to
+// sync Sheet -> DB" still just check `=== 'sheet_owned'`; callers deciding
+// whether to track an edit at all should treat 'sheet_owned' and 'db_owned'
+// as "yes, tracked" and only 'unknown' as "no, ignore".
+function classifySyncColumn(headerName) {
+  if (SHEET_OWNED_COLUMNS.indexOf(headerName) !== -1) return 'sheet_owned';
+  if (DB_OWNED_COLUMNS.indexOf(headerName) !== -1) return 'db_owned';
+  return 'unknown';
+}
+
 function doGet(e) {
   try {
     var action = e.parameter.action;
@@ -14,6 +52,7 @@ function doGet(e) {
     if (action === 'invoiceDetail') return respond(handleInvoiceDetail(e.parameter.invoiceNumber));
     if (action === 'customerOrders') return respond(handleCustomerOrders(e.parameter.customer));
     if (action === 'allOrders') return respond(handleAllOrders());
+    if (action === 'allSalesRows') return respond(handleAllSalesRows());
     return respond({ ok: false, error: 'Unknown action' });
   } catch (err) {
     return respond({ ok: false, error: err.message });
@@ -27,6 +66,8 @@ function doPost(e) {
     if (body.action === 'addCustomer') return respond(handleAddCustomer(body.customer));
     if (body.action === 'updateCustomer') return respond(handleUpdateCustomer(body.customer));
     if (body.action === 'setPin') return respond(handleSetPin(body.name, body.pin));
+    if (body.action === 'syncOrder') return respond(handleSyncOrder(body));
+    if (body.action === 'writeOrderIds') return respond(handleWriteOrderIds(body));
     return respond({ ok: false, error: 'Unknown action' });
   } catch (err) {
     return respond({ ok: false, error: err.message });
@@ -963,4 +1004,560 @@ function handleUpdateCustomer(customer) {
   }
 
   return { ok: true };
+}
+
+// =====================================================================
+// Phase 2 -- Sheet <-> Postgres sync
+// See /Users/jackbegley/.claude/plans/jazzy-pondering-rivest.md ("Sheet sync
+// architecture") for the full design. Two directions:
+//   DB -> Sheet:  Next.js POSTs action:'syncOrder'   -> handleSyncOrder
+//   Sheet -> DB:  this project POSTs to a Next.js webhook, driven by
+//                 onEditInstallable (near-real-time) and
+//                 hourlyReconcileSyncRows (backstop), via drainDirtySyncRows.
+// Script Properties this section depends on (set once via the Apps Script
+// editor's Project Settings, never hardcoded here):
+//   SYNC_SHARED_SECRET  -- shared secret, both directions
+//   NEXTJS_WEBHOOK_URL  -- POST target for the Sheet -> DB direction
+// =====================================================================
+
+// notifySlackForOrder buckets purely by isBayAreaRegion(region) doing a
+// keyword search on a region label -- this endpoint doesn't get a region,
+// but warehouseForRegion already pairs EWD with the Bay Area and everything
+// else with WLA Warehouse, so inventorySource is a fair proxy for the same
+// bucket without asking the wire protocol to carry a redundant region field.
+function regionHintForInventorySource(inventorySource) {
+  return inventorySource === 'EWD' ? 'san francisco' : '';
+}
+
+// Same shape as customerHasPriorOrder -- scans the Order ID column directly
+// (not sync_log) so a retry self-heals even if Postgres crashed between
+// "Sheet write succeeded" and "sync_log write succeeded".
+function orderIdAlreadySynced(sheet, orderIdColIdx, headerRowNumber, orderId) {
+  if (orderIdColIdx === -1 || !orderId) return false;
+  var lastRow = sheet.getLastRow();
+  if (lastRow <= headerRowNumber) return false;
+  var values = sheet.getRange(headerRowNumber + 1, orderIdColIdx + 1, lastRow - headerRowNumber, 1).getValues();
+  return values.some(function (r) { return String(r[0] || '').trim() === orderId; });
+}
+
+// DB -> Sheet. Wired into doPost as action:'syncOrder'. Appends one row per
+// order line, all DB-owned columns filled from the request (never derived
+// here -- Postgres already decided invoice number/pricing/warehouse/payment
+// method by the time this runs). Idempotent: replaying the same orderId is
+// a no-op, not a duplicate append.
+function handleSyncOrder(body) {
+  var secret = PropertiesService.getScriptProperties().getProperty('SYNC_SHARED_SECRET');
+  if (!secret || body.secret !== secret) return { ok: false, error: 'Unauthorized' };
+  if (!body.orderId) return { ok: false, error: 'Missing orderId' };
+
+  var lines = body.lines || [];
+  if (!lines.length) return { ok: false, error: 'No line items in order' };
+
+  var outcome = handleSyncOrderLocked(body, lines);
+
+  // Best-effort Slack ping, deliberately outside the lock -- a Slack POST
+  // has no business holding up other concurrent syncOrder requests waiting
+  // on the same script lock (see notifySlackUrl's own swallow-on-failure
+  // comment for why this never affects the response either way).
+  if (outcome.ok && !outcome.alreadySynced) {
+    notifySlackForOrder(
+      regionHintForInventorySource(body.inventorySource),
+      ':link: Synced order ' + (body.invoiceNumber || body.orderId) + ' from platform'
+    );
+  }
+  return outcome;
+}
+
+// The LockService-guarded critical section of handleSyncOrder, split out so
+// the lock (and the try/finally that releases it) covers only the
+// idempotency-check + append, not the Slack notify above.
+function handleSyncOrderLocked(body, lines) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+  } catch (err) {
+    return { ok: false, error: 'Could not acquire sync lock: ' + err.message };
+  }
+
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SALES_SHEET_NAME);
+    if (!sheet) return { ok: false, error: 'Sales tab not found' };
+    var hc = getSalesHeaderAndCol(sheet);
+    var header = hc.header, col = hc.col;
+
+    var idx = {
+      orderId: salesCol(col, header, 'Order ID', ['order', 'id']),
+      invoiceNumber: salesCol(col, header, 'Invoice #', ['invoice', '#']),
+      customer: salesCol(col, header, 'Customer', ['customer']),
+      license: salesCol(col, header, 'License Number', ['license']),
+      poDate: salesCol(col, header, 'PO Date', ['po', 'date']),
+      productName: salesCol(col, header, 'Product Name', ['product', 'name']),
+      packagingFormat: salesCol(col, header, 'Packaging Format', ['packaging']),
+      productCode: salesCol(col, header, 'Product Code', ['product', 'code']),
+      qty: salesCol(col, header, 'Qty', ['qty']),
+      price: salesCol(col, header, 'Price (ea)', ['price']),
+      lineTotal: salesCol(col, header, 'Line Total', ['line', 'total']),
+      salesRep: salesCol(col, header, 'Sales Rep', ['sales', 'rep']),
+      paymentMethod: salesCol(col, header, 'Payment Method', ['payment', 'method']),
+      inventorySource: salesCol(col, header, 'Inventory Source', ['inventory', 'source']),
+      invoiceStatus: salesCol(col, header, 'Invoice Status', ['invoice', 'status']),
+      notes: salesCol(col, header, 'Notes', ['notes'])
+    };
+
+    // Order ID is the idempotency key for this whole endpoint. If the
+    // column doesn't exist yet there's nothing to dedupe against -- fail
+    // loudly instead of silently risking a duplicate append on retry.
+    if (idx.orderId === -1) return { ok: false, error: 'Order ID column not found -- add it before syncing' };
+
+    if (orderIdAlreadySynced(sheet, idx.orderId, hc.headerRowNumber, body.orderId)) {
+      return { ok: true, alreadySynced: true };
+    }
+
+    // Build every line's row array BEFORE writing anything, then write them
+    // all in ONE setValues() call. This replaced an earlier version that
+    // called sheet.appendRow() once per line in a loop -- adversarial review
+    // found that a mid-loop failure (a transient Sheets API/quota error on,
+    // say, line 3 of 5) would leave lines 1-2 permanently in the Sheet
+    // *with the orderId already stamped*, so orderIdAlreadySynced would then
+    // treat any retry as a no-op replay and never append the missing lines
+    // -- silent, permanent data loss that looked like success. A single
+    // setValues() over a contiguous range is one atomic Sheets operation:
+    // either every line lands, or (on failure) none do, and the orderId
+    // scan above still correctly sees nothing for a clean retry.
+    var startRow = sheet.getLastRow() + 1;
+    var rowsToWrite = lines.map(function (line) {
+      var row = new Array(header.length).fill('');
+      if (idx.orderId !== -1) row[idx.orderId] = body.orderId;
+      if (idx.invoiceNumber !== -1) row[idx.invoiceNumber] = body.invoiceNumber || '';
+      if (idx.customer !== -1) row[idx.customer] = body.customer || '';
+      if (idx.license !== -1) row[idx.license] = body.licenseNumber || '';
+      if (idx.poDate !== -1) row[idx.poDate] = body.poDate || '';
+      if (idx.productName !== -1) row[idx.productName] = line.productName || '';
+      if (idx.packagingFormat !== -1) row[idx.packagingFormat] = line.packagingFormat || '';
+      if (idx.productCode !== -1) row[idx.productCode] = line.productCode || '';
+      if (idx.qty !== -1) row[idx.qty] = line.qty || '';
+      if (idx.price !== -1) row[idx.price] = line.price !== undefined ? line.price : '';
+      if (idx.lineTotal !== -1) row[idx.lineTotal] = line.lineTotal !== undefined ? line.lineTotal : '';
+      if (idx.salesRep !== -1) row[idx.salesRep] = body.salesRep || '';
+      if (idx.paymentMethod !== -1) row[idx.paymentMethod] = body.paymentMethod || '';
+      if (idx.inventorySource !== -1) row[idx.inventorySource] = body.inventorySource || '';
+      if (idx.invoiceStatus !== -1) row[idx.invoiceStatus] = body.invoiceStatus || '';
+      if (idx.notes !== -1) row[idx.notes] = body.notes || '';
+      return row;
+    });
+    sheet.getRange(startRow, 1, rowsToWrite.length, header.length).setValues(rowsToWrite);
+
+    // One batched Table-range extension for the whole order, not once per
+    // line like handleOrder does -- that's fine for rep-app volume (usually
+    // 1-3 lines) but wasteful here.
+    extendTableForNewRow(sheet);
+
+    // The exact row each line landed on, same order as the request's
+    // `lines` array -- lib/sheetSync.ts persists these onto each
+    // OrderLine.sheetRowNumber so the Sheet->DB webhook can later target
+    // Lot # at the one line a given Sheet row actually represents.
+    var lineRows = rowsToWrite.map(function (_, i) { return startRow + i; });
+
+    return { ok: true, alreadySynced: false, rowsAppended: lines.length, lineRows: lineRows };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Every Sales row, fully parsed by column name, unfiltered/ungrouped --
+// powers the one-time backfill script (which needs to write an Order ID
+// back into a specific rowNumber for every historical row, not a
+// per-invoice summary the way handleStats/handleAllOrders group things).
+function handleAllSalesRows() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SALES_SHEET_NAME);
+  if (!sheet) return { ok: false, error: 'Sales tab not found' };
+  var hc = getSalesHeaderAndCol(sheet);
+  var header = hc.header, col = hc.col;
+  var dataStartRow = hc.headerRowNumber + 1;
+  var data = sheet.getRange(dataStartRow, 1, Math.max(0, sheet.getLastRow() - hc.headerRowNumber), sheet.getLastColumn()).getValues();
+
+  var idx = {
+    invoiceNumber: salesCol(col, header, 'Invoice #', ['invoice', '#']),
+    customer: salesCol(col, header, 'Customer', ['customer']),
+    license: salesCol(col, header, 'License Number', ['license']),
+    poDate: salesCol(col, header, 'PO Date', ['po', 'date']),
+    productName: salesCol(col, header, 'Product Name', ['product', 'name']),
+    packagingFormat: salesCol(col, header, 'Packaging Format', ['packaging']),
+    productCode: salesCol(col, header, 'Product Code', ['product', 'code']),
+    qty: salesCol(col, header, 'Qty', ['qty']),
+    price: salesCol(col, header, 'Price (ea)', ['price']),
+    lineTotal: salesCol(col, header, 'Line Total', ['line', 'total']),
+    salesRep: salesCol(col, header, 'Sales Rep', ['sales', 'rep']),
+    paymentMethod: salesCol(col, header, 'Payment Method', ['payment', 'method']),
+    inventorySource: salesCol(col, header, 'Inventory Source', ['inventory', 'source']),
+    invoiceStatus: salesCol(col, header, 'Invoice Status', ['invoice', 'status']),
+    notes: salesCol(col, header, 'Notes', ['notes']),
+    orderId: salesCol(col, header, 'Order ID', ['order', 'id'])
+  };
+
+  var get = function (row, i) { return i === -1 ? '' : row[i]; };
+
+  var rows = [];
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    var rowNumber = dataStartRow + i; // actual 1-based sheet row -- what the backfill script writes Order IDs back into
+    var customer = get(row, idx.customer);
+    var invoiceNumber = idx.invoiceNumber === -1 ? '' : String(row[idx.invoiceNumber] || '');
+    if (!customer && !invoiceNumber) continue; // skip fully-blank rows, same rule handleAllOrders uses
+
+    rows.push({
+      rowNumber: rowNumber,
+      invoiceNumber: invoiceNumber,
+      customer: customer,
+      licenseNumber: get(row, idx.license),
+      poDate: get(row, idx.poDate),
+      productName: get(row, idx.productName),
+      packagingFormat: get(row, idx.packagingFormat),
+      productCode: get(row, idx.productCode),
+      qty: get(row, idx.qty),
+      price: get(row, idx.price),
+      lineTotal: get(row, idx.lineTotal),
+      salesRep: get(row, idx.salesRep),
+      paymentMethod: get(row, idx.paymentMethod),
+      inventorySource: get(row, idx.inventorySource),
+      invoiceStatus: get(row, idx.invoiceStatus),
+      notes: get(row, idx.notes),
+      orderId: idx.orderId === -1 ? '' : String(row[idx.orderId] || '')
+    });
+  }
+
+  return { ok: true, rows: rows };
+}
+
+// Wired into doPost as action:'writeOrderIds'. Takes the whole body (not
+// just entries) because, like handleSyncOrder, it has to validate
+// body.secret before touching anything. Purely additive: powers the
+// one-time backfill script writing ULIDs into a previously-blank Order ID
+// column, so a cell that's already non-blank (a rerun, or a row that synced
+// live in the interim) is skipped rather than clobbered.
+function handleWriteOrderIds(body) {
+  var secret = PropertiesService.getScriptProperties().getProperty('SYNC_SHARED_SECRET');
+  if (!secret || body.secret !== secret) return { ok: false, error: 'Unauthorized' };
+  var entries = body.entries || [];
+  if (!entries.length) return { ok: false, error: 'No entries provided' };
+
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SALES_SHEET_NAME);
+  if (!sheet) return { ok: false, error: 'Sales tab not found' };
+  var hc = getSalesHeaderAndCol(sheet);
+  var header = hc.header, col = hc.col;
+  var orderIdColIdx = salesCol(col, header, 'Order ID', ['order', 'id']);
+  if (orderIdColIdx === -1) return { ok: false, error: 'Order ID column not found' };
+
+  var written = 0, skipped = 0;
+  entries.forEach(function (entry) {
+    var rowNumber = Number(entry.rowNumber);
+    if (!rowNumber || rowNumber <= hc.headerRowNumber) { skipped++; return; }
+    var cell = sheet.getRange(rowNumber, orderIdColIdx + 1);
+    var existing = String(cell.getValue() || '').trim();
+    if (existing !== '') { skipped++; return; } // never clobber a non-blank Order ID
+    cell.setValue(entry.orderId);
+    written++;
+  });
+
+  return { ok: true, written: written, skipped: skipped };
+}
+
+// ---- Sheet -> DB: onEdit dirty-marking + drain + hourly reconcile ----
+
+// Installable trigger (see setupSyncTriggers) -- simple onEdit(e) can't call
+// UrlFetchApp, which is why this has to be installed rather than defined as
+// a bare `function onEdit(e)`. Only marks rows dirty; never posts anything
+// itself (that's drainDirtySyncRows's job) so a burst of edits collapses
+// into one batched webhook call instead of one per keystroke.
+function onEditInstallable(e) {
+  try {
+    if (!e || !e.range) return;
+    var sheet = e.range.getSheet();
+    if (sheet.getName() !== SALES_SHEET_NAME) return;
+
+    var hc = getSalesHeaderAndCol(sheet);
+    var startCol = e.range.getColumn();
+    var numCols = e.range.getNumColumns();
+    var startRow = e.range.getRow();
+    var numRows = e.range.getNumRows();
+
+    // A single onEdit event can cover more than one cell (a normal paste, a
+    // drag-fill) -- walk every column actually touched, not just the first,
+    // so a paste spanning a tracked column isn't silently missed. (Some
+    // bulk/paste-special operations don't fire onEdit at all -- that's what
+    // hourlyReconcileSyncRows is the backstop for, not this.)
+    //
+    // Marks dirty for EITHER Sheet-owned OR DB-owned columns, not just
+    // Sheet-owned -- an earlier version only tracked Sheet-owned edits,
+    // which meant an edit to a DB-owned column (Customer, Price, Order ID,
+    // ...) was invisible to this whole pipeline forever, never even reaching
+    // the webhook to be flagged as a conflict. That contradicted the design
+    // itself, which says a DB-owned Sheet edit must be "flagged as a
+    // conflict... per the DB-wins-on-content rule" -- adversarial review
+    // caught this. classifySyncColumn still decides what to DO with a
+    // tracked edit later (apply vs. conflict); this check only decides
+    // whether to notice it at all.
+    var touchesTrackedColumn = false;
+    for (var c = startCol; c < startCol + numCols; c++) {
+      var headerName = String(hc.header[c - 1] || '').trim();
+      var ownership = classifySyncColumn(headerName);
+      if (ownership === 'sheet_owned' || ownership === 'db_owned') { touchesTrackedColumn = true; break; }
+    }
+    if (!touchesTrackedColumn) return;
+
+    for (var r = startRow; r < startRow + numRows; r++) {
+      addDirtySyncRow(r);
+    }
+  } catch (err) {
+    console.error('onEditInstallable failed (non-fatal): ' + err.message);
+  }
+}
+
+// Read-modify-write on a single Script Property, guarded by the same script
+// lock handleSyncOrder uses -- cheap insurance against two near-simultaneous
+// edits racing each other and one dirty row getting dropped. A missed lock
+// (5s timeout) just skips this dirty-mark rather than throwing out of
+// onEdit and breaking the user's actual edit; worst case that row waits for
+// the next hourly reconciliation instead of the 5-minute drain.
+function addDirtySyncRow(rowNumber) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(5000);
+  } catch (err) {
+    console.error('addDirtySyncRow: could not acquire lock: ' + err.message);
+    return;
+  }
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var raw = props.getProperty('DIRTY_SYNC_ROWS');
+    var rows = raw ? JSON.parse(raw) : [];
+    if (rows.indexOf(rowNumber) === -1) rows.push(rowNumber);
+    props.setProperty('DIRTY_SYNC_ROWS', JSON.stringify(rows));
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Reads every TRACKED column's current value for one row -- both
+// Sheet-owned and DB-owned, not just Sheet-owned. Uses the exact-name
+// column map directly (not salesCol's fuzzy fallback) because these are all
+// specific, unambiguous header strings -- if one of them isn't on the sheet
+// yet, it's just omitted from `fields` rather than fuzzy-matched onto the
+// wrong column.
+//
+// Sending DB-owned columns' current values too (not just Sheet-owned) is
+// deliberate, not an oversight: it's what lets the webhook's classifyColumn
+// actually flag a conflict when ops edits a DB-owned cell directly (e.g.
+// Customer, Order ID). An earlier version of this function only read
+// Sheet-owned columns, which meant a DB-owned edit was invisible end-to-end
+// -- never even reaching the point where it could be flagged -- despite the
+// design explicitly calling for exactly that. Adversarial review caught
+// this. The extra columns cost one more cell read per row; at this
+// business's order volume that's noise, not a real overhead concern.
+function readTrackedFields(header, col, row) {
+  var fields = {};
+  DB_OWNED_COLUMNS.concat(SHEET_OWNED_COLUMNS).forEach(function (name) {
+    if (col[name] === undefined) return;
+    fields[name] = row[col[name]];
+  });
+  return fields;
+}
+
+// POSTs one batched payload to the Next.js webhook. Returns true only on an
+// HTTP 200 with {ok:true} in the body -- anything else (network failure,
+// non-200, malformed JSON) is treated as "didn't land," which both callers
+// use to decide whether it's safe to clear their dirty state.
+function postSyncWebhook(payload) {
+  var props = PropertiesService.getScriptProperties();
+  var url = props.getProperty('NEXTJS_WEBHOOK_URL');
+  var secret = props.getProperty('SYNC_SHARED_SECRET');
+  if (!url || !secret) {
+    console.error('postSyncWebhook: NEXTJS_WEBHOOK_URL or SYNC_SHARED_SECRET not configured');
+    return false;
+  }
+  try {
+    var resp = UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { 'X-Sync-Secret': secret },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+    if (resp.getResponseCode() !== 200) return false;
+    var json = JSON.parse(resp.getContentText());
+    return !!(json && json.ok === true);
+  } catch (err) {
+    console.error('postSyncWebhook failed: ' + err.message);
+    return false;
+  }
+}
+
+// Time-driven, every 5 minutes (see setupSyncTriggers). Drains the dirty-row
+// set built by onEditInstallable into one batched POST. Rows with no Order
+// ID yet (an ops edit landing before the platform-side sync creates the
+// row) are kept dirty rather than dropped -- nothing to sync back to until
+// an Order ID exists, but the edit shouldn't be lost either.
+//
+// Two-phase claim/merge, not one long lock: an earlier version read
+// DIRTY_SYNC_ROWS, did all its (slow -- one getRange per dirty row, plus a
+// network POST) processing, and only THEN wrote the property back --
+// entirely without a lock. Adversarial review found this was a real,
+// repeatable lost-update bug: any addDirtySyncRow() call landing between
+// that read and that write (a real onEdit firing on some other row while
+// the drain was mid-flight, which the drain's own multi-second runtime
+// makes a live, not just theoretical, hazard) gets silently erased when the
+// drain's stale snapshot overwrites the property -- non-deterministically
+// losing a genuinely new dirty row until the next hourly reconcile catches
+// it. Fix: claim the whole dirty set under a lock (swap it for []), release
+// the lock before doing any slow work, then re-acquire the lock only to
+// merge whatever accumulated during processing back in -- correct without
+// holding the lock for the duration of a network call.
+function drainDirtySyncRows() {
+  var props = PropertiesService.getScriptProperties();
+  var claimLock = LockService.getScriptLock();
+  var rows;
+  try {
+    claimLock.waitLock(10000);
+  } catch (err) {
+    console.error('drainDirtySyncRows: could not acquire claim lock: ' + err.message);
+    return;
+  }
+  try {
+    var raw = props.getProperty('DIRTY_SYNC_ROWS');
+    rows = raw ? JSON.parse(raw) : [];
+    if (!rows.length) return;
+    props.setProperty('DIRTY_SYNC_ROWS', JSON.stringify([])); // claim them all
+  } finally {
+    claimLock.releaseLock();
+  }
+
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SALES_SHEET_NAME);
+  if (!sheet) { mergeDirtyRowsBack(rows); return; } // couldn't process -- give the whole claim back
+
+  var hc = getSalesHeaderAndCol(sheet);
+  var header = hc.header, col = hc.col;
+  var orderIdColIdx = salesCol(col, header, 'Order ID', ['order', 'id']);
+  var invoiceColIdx = salesCol(col, header, 'Invoice #', ['invoice', '#']);
+  var lastRow = sheet.getLastRow();
+
+  var edits = [];
+  var stillDirty = [];
+  rows.forEach(function (rowNumber) {
+    if (rowNumber <= hc.headerRowNumber || rowNumber > lastRow) return; // stale entry (e.g. a deleted row) -- drop it
+    var orderId = orderIdColIdx === -1 ? '' : String(sheet.getRange(rowNumber, orderIdColIdx + 1).getValue() || '').trim();
+    if (!orderId) { stillDirty.push(rowNumber); return; }
+    var invoiceNumber = invoiceColIdx === -1 ? '' : String(sheet.getRange(rowNumber, invoiceColIdx + 1).getValue() || '').trim();
+    var rowValues = sheet.getRange(rowNumber, 1, 1, sheet.getLastColumn()).getValues()[0];
+    edits.push({
+      orderId: orderId,
+      invoiceNumber: invoiceNumber,
+      rowNumber: rowNumber,
+      fields: readTrackedFields(header, col, rowValues)
+    });
+  });
+
+  if (!edits.length) {
+    // Nothing had an Order ID yet -- give stillDirty back for the next
+    // drain (stale rows dropped above are simply not re-added).
+    mergeDirtyRowsBack(stillDirty);
+    return;
+  }
+
+  var delivered = postSyncWebhook({ source: 'onedit', edits: edits });
+  // Whatever needs to go back: on success, just stillDirty (no Order ID
+  // yet); on failure, stillDirty PLUS every row we tried to send, so the
+  // next 5-minute run retries all of it, not just the no-Order-ID subset.
+  var toReturn = delivered ? stillDirty : stillDirty.concat(edits.map(function (e) { return e.rowNumber; }));
+  mergeDirtyRowsBack(toReturn);
+}
+
+// Merge-back phase of drainDirtySyncRows: re-acquires the lock only to
+// combine `rowsToReturn` with whatever addDirtySyncRow() added to
+// DIRTY_SYNC_ROWS while this drain was busy reading the sheet / calling the
+// webhook (unlocked, deliberately, so a slow network call never holds up
+// other operations waiting on the same script-wide lock).
+function mergeDirtyRowsBack(rowsToReturn) {
+  if (!rowsToReturn.length) return;
+  var props = PropertiesService.getScriptProperties();
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+  } catch (err) {
+    console.error('drainDirtySyncRows: could not acquire merge-back lock, dirty rows may be delayed to next hourly reconcile: ' + err.message);
+    return;
+  }
+  try {
+    var raw = props.getProperty('DIRTY_SYNC_ROWS');
+    var current = raw ? JSON.parse(raw) : [];
+    var merged = current.slice();
+    rowsToReturn.forEach(function (r) {
+      if (merged.indexOf(r) === -1) merged.push(r);
+    });
+    props.setProperty('DIRTY_SYNC_ROWS', JSON.stringify(merged));
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Time-driven, hourly (see setupSyncTriggers). Reconciliation backstop: an
+// unconditional full refresh of every Sheet-owned field for every
+// Order-ID'd row, sent regardless of whether anything changed. This is what
+// catches missed webhooks and the known Apps Script gotcha where
+// bulk/paste-special edits don't reliably fire onEdit per cell -- simpler
+// than this project maintaining its own diff state to detect that.
+function hourlyReconcileSyncRows() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SALES_SHEET_NAME);
+  if (!sheet) return;
+  var hc = getSalesHeaderAndCol(sheet);
+  var header = hc.header, col = hc.col;
+  var orderIdColIdx = salesCol(col, header, 'Order ID', ['order', 'id']);
+  if (orderIdColIdx === -1) return; // no Order ID column yet -- nothing to reconcile
+  var invoiceColIdx = salesCol(col, header, 'Invoice #', ['invoice', '#']);
+
+  var dataStartRow = hc.headerRowNumber + 1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < dataStartRow) return;
+  var data = sheet.getRange(dataStartRow, 1, lastRow - hc.headerRowNumber, sheet.getLastColumn()).getValues();
+
+  var edits = [];
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    var orderId = String(row[orderIdColIdx] || '').trim();
+    if (!orderId) continue; // not synced from Postgres yet -- nothing to reconcile for this row
+    var rowNumber = dataStartRow + i;
+    var invoiceNumber = invoiceColIdx === -1 ? '' : String(row[invoiceColIdx] || '');
+    edits.push({
+      orderId: orderId,
+      invoiceNumber: invoiceNumber,
+      rowNumber: rowNumber,
+      fields: readTrackedFields(header, col, row)
+    });
+  }
+
+  if (!edits.length) return;
+  postSyncWebhook({ source: 'reconcile', edits: edits });
+  // Unconditional full refresh -- no local dirty-state to update either way,
+  // success or failure. A failed POST just gets fully resent next hour;
+  // there's no per-row "still dirty" concept here the way
+  // drainDirtySyncRows has one.
+}
+
+// ---- One-time manual setup -- NOT auto-invoked ----
+// Run this exactly once from the Apps Script editor's Run menu (select
+// setupSyncTriggers, click Run) after deploying this file and setting the
+// SYNC_SHARED_SECRET / NEXTJS_WEBHOOK_URL Script Properties. It is
+// deliberately never called from doGet/doPost or any trigger.
+// Re-running it creates a SECOND, duplicate set of triggers -- Apps Script
+// happily lets the same function have multiple identical triggers attached,
+// which would fire onEditInstallable/drainDirtySyncRows/
+// hourlyReconcileSyncRows multiple times per event. If that happens, clean
+// up from the Apps Script editor: ScriptApp.getProjectTriggers() lists every
+// trigger on the project, ScriptApp.deleteTrigger(trigger) removes one --
+// delete the duplicates, leave one of each, don't re-run this function
+// afterward.
+function setupSyncTriggers() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  ScriptApp.newTrigger('onEditInstallable').forSpreadsheet(ss).onEdit().create();
+  ScriptApp.newTrigger('drainDirtySyncRows').timeBased().everyMinutes(5).create();
+  ScriptApp.newTrigger('hourlyReconcileSyncRows').timeBased().everyHours(1).create();
 }
