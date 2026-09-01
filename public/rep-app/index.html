@@ -256,6 +256,22 @@
           </div>
         </div>
         <div class="field"><label>Zip Code *</label><input id="nc-address-zip" inputmode="numeric" required /></div>
+        <div class="field">
+          <label>Region *</label>
+          <select id="nc-region" required>
+            <option value="">Select region</option>
+            <option value="San Rafael">San Rafael</option>
+            <option value="Burlingame">Burlingame</option>
+            <option value="North Bay">North Bay</option>
+            <option value="San Francisco">San Francisco</option>
+            <option value="Arcadia">Arcadia</option>
+            <option value="Long Beach">Long Beach</option>
+            <option value="Orange County">Orange County</option>
+            <option value="San Diego">San Diego</option>
+            <option value="Los Angeles">Los Angeles</option>
+          </select>
+          <div class="field-hint">Pre-filled from the city when possible -- please confirm it's correct.</div>
+        </div>
         <div class="field"><label>License Number (if known)</label><input id="nc-license" /></div>
       </div>
 
@@ -403,7 +419,21 @@
       <div class="field"><label>Delivery Address (Ship To)</label><input id="ea-address" /></div>
       <div class="field"><label>Billing Address (if different)</label><input id="ea-billing-address" /></div>
       <div class="field"><label>Delivery Instructions</label><textarea id="ea-delivery-instructions" rows="2"></textarea></div>
-      <div class="field"><label>Region</label><input id="ea-region" /></div>
+      <div class="field">
+        <label>Region</label>
+        <select id="ea-region">
+          <option value="">Select region</option>
+          <option value="San Rafael">San Rafael</option>
+          <option value="Burlingame">Burlingame</option>
+          <option value="North Bay">North Bay</option>
+          <option value="San Francisco">San Francisco</option>
+          <option value="Arcadia">Arcadia</option>
+          <option value="Long Beach">Long Beach</option>
+          <option value="Orange County">Orange County</option>
+          <option value="San Diego">San Diego</option>
+          <option value="Los Angeles">Los Angeles</option>
+        </select>
+      </div>
       <div class="field"><label>License Number</label><input id="ea-license" /></div>
       <div class="field"><label>Payment Method</label><input id="ea-payment-method" /></div>
       <div class="field"><label>Terms</label><input id="ea-terms" placeholder="e.g. Net 30" /></div>

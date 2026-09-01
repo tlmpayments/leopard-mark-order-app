@@ -908,31 +908,91 @@
     return (parts[parts.length - 1] || '').toLowerCase();
   }
 
-  // Region is inferred, never typed by the rep: an establishment's address is
-  // the most reliable signal (it's an exact place, not a rep's general
-  // territory), so city/area keywords are checked first. Only when the
-  // address doesn't match anything recognized do we fall back to the
-  // logged-in rep's territory, via the same last-name matching used for
-  // "My Accounts" above (Sales sheet rep names and Customer Accounts sales
-  // person names aren't written consistently).
+  // Region is suggested from the establishment's CITY (an exact place, not a
+  // rep's general territory) -- but per Jack Begley 2026-09-01, after a La
+  // Mirada account got silently misfiled under a rep's default (San
+  // Francisco) because "la mirada" matched nothing, this is now only ever a
+  // pre-fill: the rep confirms or corrects it in the Region dropdown on the
+  // new-customer form (see nc-region), never submitted un-reviewed.
+  //
+  // Matching is against the city field ALONE, and by exact name (not
+  // substring-in-the-whole-address) -- that's what makes it safe to list
+  // "la mirada", "la mesa", and "la habra" in three different regions
+  // without any of them colliding: a bare "la" substring search would have
+  // misfired on all of them, which is why the old version avoided it
+  // entirely and just left Los Angeles as a single bare city name.
   var REGION_KEYWORDS = [
-    { region: 'San Rafael', match: ['san rafael'] },
-    { region: 'Burlingame', match: ['burlingame'] },
-    { region: 'North Bay', match: ['north bay', 'santa rosa', 'napa', 'sonoma', 'petaluma', 'novato', 'marin'] },
-    { region: 'San Francisco', match: ['san francisco', 'oakland', 'berkeley', 'daly city', ' sf ', ' sf,', ' sf.'] },
-    { region: 'Arcadia', match: ['arcadia'] },
-    { region: 'Long Beach', match: ['long beach'] },
-    { region: 'Orange County', match: ['orange county', 'anaheim', 'irvine', 'santa ana', 'huntington beach', 'costa mesa'] },
-    { region: 'San Diego', match: ['san diego'] },
-    // No bare "la" token here -- real CA cities like La Mesa, La Jolla, and
-    // La Habra all contain it and would be misclassified as Los Angeles.
-    { region: 'Los Angeles', match: ['los angeles'] }
+    { region: 'San Rafael', cities: [
+      'san rafael', 'san anselmo', 'fairfax', 'ross', 'kentfield', 'larkspur',
+      'corte madera', 'mill valley', 'sausalito', 'tiburon', 'greenbrae'
+    ] },
+    { region: 'Burlingame', cities: [
+      'burlingame', 'san mateo', 'millbrae', 'hillsborough', 'foster city',
+      'belmont', 'san bruno'
+    ] },
+    { region: 'North Bay', cities: [
+      'north bay', 'santa rosa', 'napa', 'sonoma', 'petaluma', 'novato',
+      'marin', 'rohnert park', 'windsor', 'healdsburg', 'cotati',
+      'sebastopol', 'vallejo', 'fairfield', 'american canyon',
+      'st. helena', 'saint helena', 'calistoga', 'yountville'
+    ] },
+    { region: 'San Francisco', cities: [
+      'san francisco', 'sf', 'oakland', 'berkeley', 'daly city', 'emeryville',
+      'alameda', 'san leandro', 'richmond', 'el cerrito', 'albany',
+      'south san francisco', 'brisbane', 'colma', 'pacifica'
+    ] },
+    { region: 'Arcadia', cities: [
+      'arcadia', 'monrovia', 'sierra madre', 'temple city', 'san marino'
+    ] },
+    { region: 'Long Beach', cities: [
+      'long beach', 'signal hill', 'lakewood'
+    ] },
+    { region: 'Orange County', cities: [
+      'orange county', 'anaheim', 'anaheim hills', 'irvine', 'santa ana',
+      'huntington beach', 'costa mesa', 'fullerton', 'orange',
+      'garden grove', 'westminster', 'fountain valley', 'newport beach',
+      'laguna beach', 'laguna niguel', 'laguna hills', 'mission viejo',
+      'lake forest', 'tustin', 'buena park', 'la habra', 'yorba linda',
+      'placentia', 'brea', 'cypress', 'los alamitos', 'seal beach',
+      'san clemente', 'dana point', 'aliso viejo',
+      'rancho santa margarita', 'stanton', 'la palma'
+    ] },
+    { region: 'San Diego', cities: [
+      'san diego', 'chula vista', 'oceanside', 'escondido', 'carlsbad',
+      'el cajon', 'vista', 'san marcos', 'encinitas', 'national city',
+      'la mesa', 'santee', 'poway', 'coronado', 'imperial beach',
+      'lemon grove', 'solana beach', 'del mar'
+    ] },
+    { region: 'Los Angeles', cities: [
+      'los angeles', 'la mirada', 'la puente', 'la verne',
+      'la canada flintridge', 'la cañada flintridge', 'la crescenta',
+      'whittier', 'pico rivera', 'downey', 'norwalk', 'santa fe springs',
+      'bellflower', 'paramount', 'south gate', 'lynwood', 'compton',
+      'hawthorne', 'gardena', 'torrance', 'carson', 'inglewood',
+      'el segundo', 'culver city', 'santa monica', 'west hollywood',
+      'beverly hills', 'pasadena', 'glendale', 'burbank',
+      'north hollywood', 'van nuys', 'sherman oaks', 'studio city',
+      'encino', 'woodland hills', 'northridge', 'reseda', 'canoga park',
+      'chatsworth', 'san fernando', 'sylmar', 'sun valley',
+      'panorama city', 'granada hills', 'porter ranch', 'west covina',
+      'covina', 'baldwin park', 'el monte', 'south el monte', 'rosemead',
+      'san gabriel', 'alhambra', 'monterey park', 'montebello', 'pomona',
+      'claremont', 'san dimas', 'glendora', 'azusa', 'duarte', 'bell',
+      'bell gardens', 'cudahy', 'huntington park', 'vernon', 'maywood',
+      'south pasadena', 'walnut', 'diamond bar',
+      'rowland heights', 'hacienda heights', 'cerritos', 'artesia',
+      'lawndale', 'lomita', 'palos verdes estates', 'rancho palos verdes',
+      'rolling hills', 'malibu', 'calabasas', 'agoura hills',
+      'westlake village', 'hidden hills'
+    ] }
   ];
 
   // Reps whose territory we know from historical order data -- keyed by last
   // name so "T. Gilbert" and "Thomas Gilbert" both resolve. Reps not listed
   // here have no reliable default yet; for them, region only fills in when
-  // the address itself gives a match.
+  // the city itself gives a match. Only used as a LAST resort now (see
+  // inferRegion) -- it's what put a real La Mirada account under San
+  // Francisco before the city list covered it.
   var REP_DEFAULT_REGION = {
     'gilbert': 'San Francisco',
     'williams': 'Los Angeles',
@@ -940,13 +1000,10 @@
     'sprague': 'Orange County'
   };
 
-  function inferRegion(rep, address) {
-    var addr = ' ' + String(address || '').toLowerCase() + ' ';
+  function inferRegion(rep, city) {
+    var normalized = String(city || '').trim().toLowerCase();
     for (var i = 0; i < REGION_KEYWORDS.length; i++) {
-      var rule = REGION_KEYWORDS[i];
-      for (var j = 0; j < rule.match.length; j++) {
-        if (addr.indexOf(rule.match[j]) !== -1) return rule.region;
-      }
+      if (REGION_KEYWORDS[i].cities.indexOf(normalized) !== -1) return REGION_KEYWORDS[i].region;
     }
     return REP_DEFAULT_REGION[repLastName(rep)] || '';
   }
@@ -1399,6 +1456,17 @@
     showScreen(state.newCustomerReturnTo || 'screen-customers');
   });
 
+  // Suggests a region as soon as the rep leaves the City field, but only
+  // while the dropdown is still on its placeholder -- once the rep has
+  // picked (or corrected) a region themselves, typing in City again won't
+  // silently overwrite that choice.
+  document.getElementById('nc-address-city').addEventListener('blur', function (e) {
+    var regionSelect = document.getElementById('nc-region');
+    if (regionSelect.value) return;
+    var suggested = inferRegion(state.rep, e.target.value);
+    if (suggested) regionSelect.value = suggested;
+  });
+
   document.getElementById('nc-place-order-btn').addEventListener('click', function () {
     if (!state.lastAddedCustomer) return;
     resetOrderForm();
@@ -1470,7 +1538,11 @@
       // as shipping)", left blank when it matches the business address.
       deliveryAddress: billingDiffers ? formatAddress(val('nc-billing-street'), val('nc-billing-2'), val('nc-billing-city'), val('nc-billing-state'), val('nc-billing-zip')) : '',
       deliveryInstructions: val('nc-delivery-instructions'),
-      region: inferRegion(state.rep, businessAddress),
+      // Rep-confirmed, not re-inferred here -- see the nc-address-city blur
+      // handler below for the pre-fill. Submitting whatever the dropdown
+      // actually shows (rather than recomputing) is what makes this a real
+      // fix and not just a hidden default with extra steps.
+      region: val('nc-region'),
       licenseNumber: val('nc-license'),
       tapHandleRequested: getYnToggle('nc-tap-handle'),
       salesRep: state.rep || '',
@@ -1486,6 +1558,10 @@
     }
     if (!val('nc-contact-first') || !val('nc-contact-last')) {
       errEl.textContent = 'Please fill in the ordering contact’s first and last name.';
+      return;
+    }
+    if (!val('nc-region')) {
+      errEl.textContent = 'Please select a region.';
       return;
     }
     if (billingDiffers && (!val('nc-billing-street') || !val('nc-billing-city') || !val('nc-billing-state') || !val('nc-billing-zip'))) {
