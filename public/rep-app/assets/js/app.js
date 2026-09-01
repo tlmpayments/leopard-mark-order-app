@@ -550,7 +550,10 @@
       salesRep: inv.salesRep,
       shipTo: inv.shipTo,
       billTo: inv.billTo,
-      kegReturnQty: 0,
+      // Pre-filled from what the rep flagged at order time (Expected Empty
+      // Kegs on the order form) -- still editable here since the actual
+      // pickup count won't be confirmed until delivery.
+      kegReturnQty: Number(inv.expectedEmptyKegs) || 0,
       lines: (inv.lines || []).map(function (l) {
         var match = l.productCode && findCatalogFormat(l.productCode);
         if (match) return catalogEditLine(l.productCode, l.qty);
@@ -1280,6 +1283,7 @@
     state.selection = {};
     state.customer = null;
     document.getElementById('order-notes').value = '';
+    document.getElementById('order-expected-empties').value = '';
     renderProductList();
     renderPickedCustomer();
     updateOrderTotal();
@@ -1587,6 +1591,7 @@
 
   document.getElementById('footer-submit').addEventListener('click', function () {
     var notes = document.getElementById('order-notes').value.trim();
+    var expectedEmptyKegs = Math.max(0, Number(document.getElementById('order-expected-empties').value) || 0);
     var lines = collectLineItems();
 
     if (!state.customer) { toast('Select a customer account', true); return; }
@@ -1606,6 +1611,7 @@
       paymentMethod: state.customer.paymentMethod || '',
       poDate: new Date().toISOString().slice(0, 10),
       notes: notes,
+      expectedEmptyKegs: expectedEmptyKegs,
       lines: lines
     };
 
