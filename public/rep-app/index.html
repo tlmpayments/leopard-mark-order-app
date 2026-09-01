@@ -2,6 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <!-- Next.js's router normalizes /rep-app/ -> /rep-app (no trailing slash,
+       its trailingSlash:false default) once this app is served through
+       Next.js instead of Vercel's old bare static hosting. Every asset
+       reference below is a relative path (deliberately, so this bundle can
+       live at any subpath -- see the plan's PWA migration notes), and a
+       relative path resolves against /rep-app's PARENT (the site root) when
+       the URL has no trailing slash, not against /rep-app/ itself -- so
+       every CSS/JS/icon 404s silently and the page renders unstyled with
+       every .screen visible at once (no CSS means no display:none). Pinning
+       the base here makes resolution correct regardless of which URL form
+       (with or without the slash) a rep actually lands on. -->
+  <base href="/rep-app/" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Leopard Mark — Rep Orders</title>
   <meta name="theme-color" content="#0a1730" />
