@@ -585,6 +585,51 @@ table.inv-items td:first-child {
 }
 table.inv-items td:first-child::before { content: none; }
 
+/* Editable invoice fields (screen-invoice only -- batch printing always uses
+   the static buildInvoiceHtml markup). Each editable value renders both a
+   `.print-only` span (shown only in the printed/PDF output, via the
+   @media print rule below) and its live `.no-print` input/select -- see
+   editableLineRowHtml() etc. in app.js. */
+.print-only { display: none; }
+.inv-input {
+  font: inherit;
+  color: inherit;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 3px 6px;
+  background: #fff;
+}
+.inv-line-select { display: block; width: 100%; margin-bottom: 4px; }
+.inv-line-name { display: block; width: 100%; }
+.inv-num { width: 64px; text-align: right; }
+.inv-date-input { width: auto; }
+.inv-hint { font-size: 9px; font-weight: 400; color: #8b8c94; margin-top: 2px; }
+.inv-line-remove-cell { justify-content: flex-end !important; }
+.inv-line-remove {
+  border: 1px solid #ccc;
+  background: #fff;
+  color: #a00;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  line-height: 1;
+  font-size: 14px;
+  cursor: pointer;
+}
+.inv-add-line-btn {
+  display: block;
+  width: 100%;
+  border: 1px dashed #999;
+  background: #fff;
+  border-radius: 6px;
+  padding: 9px 12px;
+  margin-bottom: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #333;
+  cursor: pointer;
+}
+
 .inv-totals-wrap { display: flex; justify-content: flex-end; margin-bottom: 30px; }
 .inv-totals { width: 100%; max-width: 250px; font-size: 10.5px; }
 .inv-totals .row { display: flex; justify-content: space-between; padding: 2.5px 0; }
@@ -654,6 +699,7 @@ table.inv-items td:first-child::before { content: none; }
   table.inv-items td::before { content: none; }
   table.inv-items td:first-child { font-weight: 400; margin-bottom: 0; }
   .no-print { display: none !important; }
+  .print-only { display: inline; }
 }
 
 /* ---------- Accounts map ---------- */

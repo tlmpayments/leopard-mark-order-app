@@ -4,6 +4,7 @@
     rep: null,
     stats: null,
     selection: {}, // productId -> { formatCode: qty }
+    invoiceEdit: null, // working copy of the invoice currently on screen-invoice, see openInvoice()
     customer: null,
     customers: loadCachedCustomers() || (window.LM_CUSTOMERS || []).slice()
   };
@@ -429,7 +430,8 @@
     apiGet({ action: 'invoiceDetail', invoiceNumber: invoiceNumber })
       .then(function (res) {
         if (!res.ok) { document.getElementById('invoice-loading').textContent = res.error || 'Could not load invoice.'; return; }
-        renderInvoice(res);
+        state.invoiceEdit = cloneInvoiceForEdit(res);
+        renderEditableInvoice();
         document.getElementById('invoice-loading').style.display = 'none';
         document.getElementById('invoice-doc').style.display = 'block';
         document.getElementById('invoice-print-btn').style.display = 'block';
@@ -439,15 +441,164 @@
       });
   }
 
+  // A bare YYYY-MM-DD (from an editable date field) is parsed locally via
+  // parseDateInputValue -- `new Date('2026-08-21')` parses as UTC midnight
+  // and would then display a day early in a negative-UTC-offset timezone.
+  // Anything else (a sheet's raw ISO timestamp, or a Date instance) goes
+  // through the regular constructor, unchanged from before.
   function fmtDate(v) {
     if (!v) return '—';
-    var d = new Date(v);
-    if (isNaN(d.getTime())) return String(v);
+    var d = /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? parseDateInputValue(v) : new Date(v);
+    if (!d || isNaN(d.getTime())) return String(v);
     return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
   }
 
   function fmtMoney(n) {
     return '$' + (Number(n) || 0).toFixed(2);
+  }
+
+  // Negative amounts (the keg deposit return credit) render as "-$35.00"
+  // rather than fmtMoney's bare "$-35.00".
+  function fmtMoneySigned(n) {
+    n = Number(n) || 0;
+    return (n < 0 ? '-$' : '$') + Math.abs(n).toFixed(2);
+  }
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  // <input type="date"> wants a plain YYYY-MM-DD. Built from local getters
+  // (like fmtDate above) so a sheet timestamp of, say, midnight UTC doesn't
+  // read back as the previous day in a negative-UTC-offset timezone.
+  function toDateInputValue(v) {
+    if (!v) return '';
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return '';
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+  }
+
+  // Parses an <input type="date"> value (YYYY-MM-DD) as a LOCAL date rather
+  // than `new Date(str)`, which the spec parses as UTC midnight and which
+  // would then shift a day when displayed with fmtDate's local getters.
+  function parseDateInputValue(v) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v || ''));
+    if (!m) return null;
+    var d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  function termsToDaysClient(terms) {
+    var m = /(\d+)/.exec(String(terms || ''));
+    return m ? parseInt(m[1], 10) : 30;
+  }
+
+  // Mirrors Code.gs' KEG_DEPOSIT_PER_UNIT -- confirmed by Jack Begley
+  // 2026-08-24. Keep both in sync by hand; Code.gs can't read this file.
+  var KEG_DEPOSIT_PER_UNIT = 35.00;
+
+  // Finds the catalog product+format for a SKU code, across all products.
+  function findCatalogFormat(code) {
+    for (var i = 0; i < window.LM_PRODUCTS.length; i++) {
+      var p = window.LM_PRODUCTS[i];
+      for (var j = 0; j < p.formats.length; j++) {
+        if (p.formats[j].code === code) return { product: p, format: p.formats[j] };
+      }
+    }
+    return null;
+  }
+
+  // Builds an editable line from a catalog SKU -- used both when an existing
+  // invoice line matches a known product and when the rep adds a new line.
+  function catalogEditLine(code, qty) {
+    var match = findCatalogFormat(code);
+    if (!match) return null;
+    return {
+      mode: 'catalog',
+      formatCode: code,
+      productName: match.product.name,
+      packagingFormat: match.format.label + ' (' + match.format.detail + ')',
+      productCode: code,
+      upc: match.format.upc || '',
+      qty: qty,
+      unitPrice: match.format.price,
+      unit: match.format.unit
+    };
+  }
+
+  function blankCustomLine() {
+    return {
+      mode: 'custom',
+      formatCode: '',
+      productName: '',
+      packagingFormat: '',
+      productCode: '',
+      upc: '',
+      qty: 1,
+      unitPrice: 0,
+      unit: ''
+    };
+  }
+
+  // Working copy of a loaded invoice -- edits here never write back to the
+  // Sales sheet (nothing in Code.gs persists post-hoc invoice edits), they
+  // only reshape what gets printed/saved as a PDF from this screen.
+  function cloneInvoiceForEdit(inv) {
+    return {
+      invoiceNumber: inv.invoiceNumber,
+      poDate: toDateInputValue(inv.poDate),
+      deliveryDate: toDateInputValue(inv.invoiceDate),
+      paymentTerms: inv.paymentTerms,
+      salesRep: inv.salesRep,
+      shipTo: inv.shipTo,
+      billTo: inv.billTo,
+      kegReturnQty: 0,
+      lines: (inv.lines || []).map(function (l) {
+        var match = l.productCode && findCatalogFormat(l.productCode);
+        if (match) return catalogEditLine(l.productCode, l.qty);
+        return {
+          mode: 'custom',
+          formatCode: '',
+          productName: l.productName || '',
+          packagingFormat: l.packagingFormat || '',
+          productCode: l.productCode || '',
+          upc: l.upc || '',
+          qty: l.qty,
+          unitPrice: l.unitPrice,
+          unit: l.unit || ''
+        };
+      })
+    };
+  }
+
+  // Pure: derives every computed total from state.invoiceEdit without
+  // mutating it, so it's safe to call on every keystroke/re-render.
+  function computeInvoiceEdit(inv) {
+    var subtotal = 0, kegDepositQty = 0;
+    inv.lines.forEach(function (l) {
+      var qty = Number(l.qty) || 0;
+      var price = Number(l.unitPrice) || 0;
+      subtotal += qty * price;
+      if (l.unit === 'keg') kegDepositQty += qty;
+    });
+    subtotal = Math.round(subtotal * 100) / 100;
+    var kegDepositTotal = Math.round(kegDepositQty * KEG_DEPOSIT_PER_UNIT * 100) / 100;
+    var kegReturnQty = Number(inv.kegReturnQty) || 0;
+    var kegReturnTotal = Math.round(kegReturnQty * -KEG_DEPOSIT_PER_UNIT * 100) / 100;
+    var invoiceTotal = Math.round((subtotal + kegDepositTotal + kegReturnTotal) * 100) / 100;
+    var deliveryDate = parseDateInputValue(inv.deliveryDate);
+    var dueDate = null;
+    if (deliveryDate) {
+      dueDate = new Date(deliveryDate.getTime());
+      dueDate.setDate(dueDate.getDate() + termsToDaysClient(inv.paymentTerms));
+    }
+    return {
+      subtotal: subtotal,
+      kegDepositQty: kegDepositQty,
+      kegDepositTotal: kegDepositTotal,
+      kegReturnQty: kegReturnQty,
+      kegReturnTotal: kegReturnTotal,
+      invoiceTotal: invoiceTotal,
+      dueDate: dueDate
+    };
   }
 
   // Builds the full inner markup for one invoice. Used both for the
@@ -529,9 +680,217 @@
     );
   }
 
-  function renderInvoice(inv) {
-    document.getElementById('invoice-doc').innerHTML = buildInvoiceHtml(inv);
+  function catalogOptionsHtml(selectedValue) {
+    var html = '';
+    window.LM_PRODUCTS.forEach(function (p) {
+      html += '<optgroup label="' + escapeHtml(p.name) + '">';
+      p.formats.forEach(function (f) {
+        html += '<option value="' + f.code + '"' + (f.code === selectedValue ? ' selected' : '') + '>' +
+          escapeHtml(f.label + ' (' + f.detail + ')') + '</option>';
+      });
+      html += '</optgroup>';
+    });
+    html += '<option value="__custom__"' + (selectedValue === '__custom__' ? ' selected' : '') + '>Custom item…</option>';
+    return html;
   }
+
+  function editableLineItemLabel(l) {
+    if (l.mode === 'custom') return l.productName || 'Custom item';
+    return (l.productName + ' ' + l.packagingFormat).trim();
+  }
+
+  // Every editable cell renders both a `.print-only` span (the static text
+  // that shows up in the printed/PDF invoice) and a `.no-print` control (the
+  // input/select the rep actually edits on screen) -- see the `.print-only`
+  // / `.no-print` rules in app.css. Kept as two nodes rather than one live
+  // element because Chrome prints a <select>'s chrome/arrows and a date
+  // input's calendar icon, which looks wrong on a finished invoice.
+  function editableLineRowHtml(l, idx) {
+    var qty = Number(l.qty) || 0;
+    var price = Number(l.unitPrice) || 0;
+    var total = Math.round(qty * price * 100) / 100;
+    var isCustom = l.mode === 'custom';
+    return '<tr data-line-idx="' + idx + '">' +
+      '<td data-label="Item">' +
+        '<span class="print-only">' + escapeHtml(editableLineItemLabel(l)) + '</span>' +
+        '<span class="no-print">' +
+          '<select class="inv-input inv-line-select" data-field="formatCode" data-idx="' + idx + '">' +
+            catalogOptionsHtml(isCustom ? '__custom__' : l.formatCode) +
+          '</select>' +
+          (isCustom ? '<input type="text" class="inv-input inv-line-name" data-field="productName" data-idx="' + idx + '" placeholder="Item description" value="' + escapeHtml(l.productName) + '">' : '') +
+        '</span>' +
+      '</td>' +
+      '<td data-label="Item Number">' + escapeHtml(l.productCode || '—') + '</td>' +
+      '<td data-label="UPC">' + escapeHtml(l.upc || '—') + '</td>' +
+      '<td class="num" data-label="Quantity">' +
+        '<span class="print-only">' + qty.toFixed(2) + '</span>' +
+        '<input class="inv-input inv-num no-print" type="number" min="0" step="1" data-field="qty" data-idx="' + idx + '" value="' + qty + '">' +
+      '</td>' +
+      '<td class="num" data-label="Unit Price">' +
+        '<span class="print-only">' + fmtMoney(price) + '</span>' +
+        '<input class="inv-input inv-num no-print" type="number" min="0" step="0.01" data-field="unitPrice" data-idx="' + idx + '" value="' + price.toFixed(2) + '">' +
+      '</td>' +
+      '<td class="num" data-label="Total">' + fmtMoney(total) + '</td>' +
+      '<td class="no-print inv-line-remove-cell"><button type="button" class="inv-line-remove" data-idx="' + idx + '" aria-label="Remove line item">×</button></td>' +
+      '</tr>';
+  }
+
+  function kegDepositRowHtml(kegDepositQty, kegDepositTotal) {
+    if (kegDepositQty <= 0) return '';
+    return '<tr>' +
+      '<td data-label="Item">Keg Deposit</td>' +
+      '<td data-label="Item Number">—</td>' +
+      '<td data-label="UPC">—</td>' +
+      '<td class="num" data-label="Quantity">' + kegDepositQty.toFixed(2) + '</td>' +
+      '<td class="num" data-label="Unit Price">' + fmtMoney(KEG_DEPOSIT_PER_UNIT) + '</td>' +
+      '<td class="num" data-label="Total">' + fmtMoney(kegDepositTotal) + '</td>' +
+      '<td class="no-print"></td>' +
+      '</tr>';
+  }
+
+  // Credit line for kegs picked up empty on this delivery -- kept as its own
+  // row (rather than folded into the Keg Deposit row above) so it's always
+  // visible while editing, even at qty 0, and only drops out of the printed
+  // invoice (via the row-level no-print class) once it has nothing to show.
+  function kegReturnRowHtml(kegReturnQty, kegReturnTotal) {
+    var qty = Number(kegReturnQty) || 0;
+    return '<tr class="' + (qty > 0 ? '' : 'no-print') + '">' +
+      '<td data-label="Item">Keg Deposit Returned<div class="inv-hint no-print">Empty kegs picked up on this delivery</div></td>' +
+      '<td data-label="Item Number">—</td>' +
+      '<td data-label="UPC">—</td>' +
+      '<td class="num" data-label="Quantity">' +
+        '<span class="print-only">' + qty.toFixed(2) + '</span>' +
+        '<input class="inv-input inv-num no-print" type="number" min="0" step="1" data-field="kegReturnQty" value="' + qty + '">' +
+      '</td>' +
+      '<td class="num" data-label="Unit Price">' + fmtMoneySigned(-KEG_DEPOSIT_PER_UNIT) + '</td>' +
+      '<td class="num" data-label="Total">' + fmtMoneySigned(kegReturnTotal) + '</td>' +
+      '<td class="no-print"></td>' +
+      '</tr>';
+  }
+
+  // Editable counterpart to buildInvoiceHtml above, for the single-invoice
+  // screen only (batch printing keeps using the static, server-values-only
+  // version). Renders from state.invoiceEdit + its live-computed totals;
+  // every add/remove/edit calls renderEditableInvoice() again to rebuild it.
+  function buildEditableInvoiceHtml() {
+    var inv = state.invoiceEdit;
+    var computed = computeInvoiceEdit(inv);
+
+    var rowsHtml = inv.lines.map(function (l, idx) { return editableLineRowHtml(l, idx); }).join('') +
+      kegDepositRowHtml(computed.kegDepositQty, computed.kegDepositTotal) +
+      kegReturnRowHtml(computed.kegReturnQty, computed.kegReturnTotal);
+
+    var totalsHtml =
+      '<div class="row"><span class="label">SUBTOTAL</span><span class="value">' + fmtMoney(computed.subtotal) + '</span></div>' +
+      (computed.kegDepositQty > 0 ? '<div class="row"><span class="label">KEG DEPOSIT</span><span class="value">' + fmtMoney(computed.kegDepositTotal) + '</span></div>' : '') +
+      (computed.kegReturnQty > 0 ? '<div class="row"><span class="label">KEG DEPOSIT RETURNED</span><span class="value">' + fmtMoneySigned(computed.kegReturnTotal) + '</span></div>' : '') +
+      '<div class="row"><span class="label">TAX: Exempt (0.0000%)</span><span class="value">$0.00</span></div>' +
+      '<div class="row bold"><span class="label">INVOICE TOTAL</span><span class="value">' + fmtMoney(computed.invoiceTotal) + '</span></div>';
+
+    return (
+      '<div class="inv-header">' +
+        '<img class="inv-logo" src="assets/icons/brand/logo-alt.svg" alt="The Leopard Mark Brewing Co." />' +
+        '<div class="inv-doc-label">Invoice</div>' +
+      '</div>' +
+      '<div class="inv-info-row">' +
+        '<div class="inv-company-block">' +
+          'The Leopard Mark Brewing Company<br/>(707) 261-0200<br/>ar@theleopardmark.com<br/>' +
+          'Sales Rep : ' + escapeHtml(inv.salesRep || '') +
+        '</div>' +
+        '<div class="inv-meta-block">' +
+          'Invoice: ' + escapeHtml(inv.invoiceNumber || '') + '<br/>' +
+          'PO Date: ' +
+            '<span class="print-only">' + fmtDate(inv.poDate) + '</span>' +
+            '<input type="date" class="inv-input inv-date-input no-print" data-field="poDate" value="' + inv.poDate + '">' +
+            '<br/>' +
+          'Delivery Date: ' +
+            '<span class="print-only">' + fmtDate(inv.deliveryDate) + '</span>' +
+            '<input type="date" class="inv-input inv-date-input no-print" data-field="deliveryDate" value="' + inv.deliveryDate + '">' +
+            '<br/>' +
+          'Payment Terms: ' + escapeHtml(inv.paymentTerms || '') + '<br/>' +
+          'Due Date: ' + fmtDate(computed.dueDate) +
+        '</div>' +
+      '</div>' +
+      '<div class="inv-parties">' +
+        '<div class="inv-party">' +
+          '<div class="inv-heading">Ship To:</div>' +
+          '<div>' + escapeHtml(inv.shipTo.name || '') + '</div>' +
+          '<div>' + escapeHtml(inv.shipTo.address || '') + '</div>' +
+          '<div>' + escapeHtml(inv.shipTo.phone || '') + '</div>' +
+          '<div>' + (inv.shipTo.license ? 'License Number: ' + escapeHtml(inv.shipTo.license) : '') + '</div>' +
+        '</div>' +
+        '<div class="inv-party">' +
+          '<div class="inv-heading">Bill To:</div>' +
+          '<div>' + escapeHtml(inv.billTo.name || '') + '</div>' +
+          '<div>' + escapeHtml(inv.billTo.address || '') + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<table class="inv-items">' +
+        '<thead><tr><th>Item</th><th>Item Number</th><th>UPC</th><th class="num">Quantity</th><th class="num">Unit Price</th><th class="num">Total</th></tr></thead>' +
+        '<tbody>' + rowsHtml + '</tbody>' +
+      '</table>' +
+      '<div class="no-print"><button type="button" class="inv-add-line-btn" id="inv-add-line-btn">+ Add Line Item</button></div>' +
+      '<div class="inv-totals-wrap"><div class="inv-totals">' + totalsHtml + '</div></div>' +
+      '<div class="inv-signatures">' +
+        '<div class="inv-sig"><div class="inv-sig-line"></div><div class="inv-sig-label">The Leopard Mark Brewing Company<br/>Representative</div></div>' +
+        '<div class="inv-sig"><div class="inv-sig-line"></div><div class="inv-sig-label">' + escapeHtml(inv.shipTo.name || '') + ' Representative</div></div>' +
+      '</div>' +
+      '<div class="inv-footer-note">For new purchase orders, please email orders@theleopardmark.com</div>' +
+      '<div class="inv-terms-note">' +
+        '<b>Keg Deposit:</b> A refundable deposit is assessed on each keg delivered and credited upon return of each empty keg.<br/>' +
+        '<b>Terms:</b> Net 30 from delivery (Cal. B&amp;P Code &sect; 25509) unless otherwise stated above, paid via seller-initiated EFT per &sect; 25509.1.' +
+      '</div>'
+    );
+  }
+
+  function renderEditableInvoice() {
+    document.getElementById('invoice-doc').innerHTML = buildEditableInvoiceHtml();
+  }
+
+  // Delegated on the container (rather than bound per-control) because every
+  // add/remove/edit fully rebuilds #invoice-doc's innerHTML -- per-node
+  // listeners would be destroyed on each rebuild.
+  document.getElementById('invoice-doc').addEventListener('click', function (e) {
+    if (e.target.closest('#inv-add-line-btn')) {
+      state.invoiceEdit.lines.push(catalogEditLine(window.LM_PRODUCTS[0].formats[0].code, 1));
+      renderEditableInvoice();
+      return;
+    }
+    var removeBtn = e.target.closest('.inv-line-remove');
+    if (removeBtn) {
+      state.invoiceEdit.lines.splice(Number(removeBtn.getAttribute('data-idx')), 1);
+      renderEditableInvoice();
+    }
+  });
+
+  // 'change' (fires on blur/Enter, not every keystroke) so totals settle
+  // once the rep leaves a field instead of re-rendering -- and stealing
+  // focus -- on every character typed.
+  document.getElementById('invoice-doc').addEventListener('change', function (e) {
+    var field = e.target.getAttribute('data-field');
+    if (!field) return;
+    var inv = state.invoiceEdit;
+
+    if (field === 'kegReturnQty') {
+      inv.kegReturnQty = Math.max(0, Number(e.target.value) || 0);
+    } else if (field === 'poDate' || field === 'deliveryDate') {
+      inv[field] = e.target.value;
+    } else {
+      var idx = Number(e.target.getAttribute('data-idx'));
+      var line = inv.lines[idx];
+      if (!line) return;
+      if (field === 'formatCode') {
+        inv.lines[idx] = e.target.value === '__custom__' ? blankCustomLine() : catalogEditLine(e.target.value, line.qty || 1);
+      } else if (field === 'productName') {
+        line.productName = e.target.value;
+      } else if (field === 'qty') {
+        line.qty = Math.max(0, Number(e.target.value) || 0);
+      } else if (field === 'unitPrice') {
+        line.unitPrice = Math.max(0, Number(e.target.value) || 0);
+      }
+    }
+    renderEditableInvoice();
+  });
 
   document.getElementById('invoice-print-btn').addEventListener('click', function () {
     window.print();
