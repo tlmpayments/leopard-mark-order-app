@@ -1535,8 +1535,8 @@
     var tiles = window.LM_PRODUCTS.map(function (p) {
       var selected = !!state.selection[p.id];
       return (
-        '<button type="button" class="product-tile' + (selected ? ' selected' : '') + '" data-toggle="' + p.id + '">' +
-          (selected ? '<span class="tile-check">✓</span>' : '') +
+        '<button type="button" class="product-tile' + (selected ? ' selected' : '') + '" data-toggle="' + p.id + '" style="--tile-accent:' + p.accent + ';">' +
+          '<span class="tile-check">' + (selected ? '✓' : '+') + '</span>' +
           '<span class="tile-logo"><img src="' + p.image + '" alt="' + escapeHtml(p.name) + ' can" /></span>' +
           '<span class="tile-name">' + escapeHtml(p.name) + '</span>' +
           '<span class="tile-sub">' + escapeHtml(p.subtitle) + '</span>' +

@@ -194,6 +194,10 @@ input, select, textarea {
   border-radius: 10px;
   padding: 14px;
   font-size: 16px;
+  /* form controls don't inherit font-family from the page by default --
+     without this, textareas in particular fall back to the browser's
+     UA monospace font. */
+  font-family: inherit;
   width: 100%;
 }
 input::placeholder, textarea::placeholder { color: var(--silver-dim); }
@@ -377,36 +381,46 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); bo
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
 }
 .product-tile:active { transform: scale(0.97); }
+/* Each product carries its own brand accent (products.js) into --tile-accent
+   -- selecting a beer glows in that beer's own color instead of every tile
+   lighting up the same generic blue, which read as more distinctive/on-brand. */
 .product-tile.selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(57, 135, 229, 0.35);
+  border-color: var(--tile-accent, var(--accent));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--tile-accent, var(--accent)) 40%, transparent);
 }
 .tile-check {
   position: absolute;
   top: 8px;
   right: 8px;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
-  background: var(--accent);
-  color: var(--white);
-  font-size: 13px;
+  background: var(--navy-950);
+  border: 1px solid var(--navy-500);
+  color: var(--silver);
+  font-size: 14px;
   font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.product-tile.selected .tile-check {
+  background: var(--tile-accent, var(--accent));
+  border-color: var(--tile-accent, var(--accent));
+  color: var(--white);
 }
 .tile-logo {
   width: 100%;
   aspect-ratio: 1 / 1;
   border-radius: 12px;
   background-color: var(--navy-900);
-  background-image: radial-gradient(circle at 50% 30%, var(--navy-700), var(--navy-900) 70%);
+  background-image: radial-gradient(circle at 50% 28%, color-mix(in srgb, var(--tile-accent, var(--accent)) 30%, var(--navy-700)), var(--navy-900) 72%);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 .tile-logo img {
   width: 100%;
@@ -414,8 +428,11 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); bo
   object-fit: contain;
   padding: 10px;
 }
-.tile-name { font-size: 15px; font-weight: 700; text-align: center; line-height: 1.2; }
-.tile-sub { color: var(--silver-dim); font-size: 11px; text-align: center; }
+/* Reserves 2 lines so a short name (Cantinesca) and a long one (Sunlight
+   Groove -- Bay Area) produce the same tile height instead of the grid
+   looking lopsided. */
+.tile-name { font-size: 15px; font-weight: 700; text-align: center; line-height: 1.25; min-height: 2.5em; display: flex; align-items: center; justify-content: center; }
+.tile-sub { color: var(--silver-dim); font-size: 11px; text-align: center; margin-top: 2px; }
 
 .product-details-card {
   border-radius: var(--radius);
@@ -452,16 +469,18 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); bo
 .format-row .flabel { font-size: 13px; font-weight: 600; }
 .format-row .fdetail { font-size: 11px; color: var(--silver-dim); }
 .format-row .fcode { font-size: 10px; color: var(--silver-dim); font-family: ui-monospace, SFMono-Regular, monospace; }
-.qty-stepper { display: flex; align-items: center; gap: 8px; }
+.qty-stepper { display: flex; align-items: center; gap: 10px; }
 .qty-stepper button {
-  width: 30px; height: 30px;
+  width: 32px; height: 32px;
   border-radius: 8px;
-  border: 1px solid var(--navy-600);
-  background: var(--navy-800);
+  border: 1px solid var(--navy-500);
+  background: var(--navy-700);
   color: var(--white);
-  font-size: 16px;
+  font-size: 18px;
+  font-weight: 600;
   cursor: pointer;
 }
+.qty-stepper button:active { transform: scale(0.93); border-color: var(--accent); }
 .qty-stepper .qty-val { width: 24px; text-align: center; font-weight: 700; }
 
 /* ---------- Order form ---------- */
