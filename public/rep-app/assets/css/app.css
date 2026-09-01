@@ -35,6 +35,7 @@
   --navy-800: #10203f;
   --navy-700: #182d4e;
   --navy-600: #223c63;
+  --navy-500: #2f4f7f;
   --silver: #b9c4d6;
   --silver-dim: #7c8aa3;
   --white: #f4f6fa;
@@ -156,11 +157,11 @@ a { color: var(--accent); }
 .yn-toggle { display: flex; gap: 10px; }
 .yn-btn {
   flex: 1;
-  background: var(--navy-950);
-  border: 1px solid var(--navy-600);
+  background: var(--navy-600);
+  border: 1px solid var(--navy-500);
   color: var(--silver);
   border-radius: 10px;
-  padding: 12px 0;
+  padding: 14px 0;
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
@@ -183,18 +184,52 @@ a { color: var(--accent); }
 
 label { font-size: 12px; color: var(--silver); text-transform: uppercase; letter-spacing: 0.08em; text-align: left; }
 
+/* Lighter than the page background (navy-950) and its own visible border --
+   on a dark theme, a field the same shade as the page it sits on all but
+   disappears, which is what made this hard to read/tap on mobile. */
 input, select, textarea {
-  background: var(--navy-950);
-  border: 1px solid var(--navy-600);
+  background: var(--navy-600);
+  border: 1px solid var(--navy-500);
   color: var(--white);
   border-radius: 10px;
-  padding: 12px 14px;
+  padding: 14px;
   font-size: 16px;
   width: 100%;
 }
-input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); }
+input::placeholder, textarea::placeholder { color: var(--silver-dim); }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); border-color: var(--accent); }
 
-.field { display: flex; flex-direction: column; gap: 6px; text-align: left; }
+.field { display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.field-hint { font-size: 12px; color: var(--silver-dim); margin-top: -2px; }
+
+/* Two fields side by side (e.g. First/Last Name, City/State) -- stacks on
+   very narrow screens instead of squeezing. */
+.field-row { display: flex; gap: 12px; }
+.field-row .field { flex: 1; min-width: 0; }
+.field-row .field-narrow { flex: 0 0 40%; }
+
+/* Groups a form into distinct, clearly-bounded sections -- same elevated
+   look as .login-card, reused here so a long form (new customer, etc.)
+   doesn't read as one undifferentiated wall of fields. */
+.form-card {
+  background: linear-gradient(180deg, var(--navy-800), var(--navy-900));
+  border: 1px solid var(--navy-600);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.form-card-title {
+  font-family: var(--font-display);
+  font-size: 19px;
+  color: var(--white);
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--navy-600);
+}
+.form-card > .field-hint { margin-top: -8px; }
+#nc-billing-fields { flex-direction: column; gap: 16px; }
 
 .btn {
   border: none;
@@ -504,6 +539,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); }
   .topbar-logo { height: 72px; }
   .stat-grid { gap: 8px; }
   .stat-card { padding: 12px; }
+  .field-row { flex-direction: column; }
+  .field-row .field-narrow { flex: 1; }
 }
 
 /* ---------- Invoice ---------- */

@@ -1380,7 +1380,8 @@
     document.getElementById('new-customer-form').reset();
     document.getElementById('new-customer-error').textContent = '';
     setYnToggle('nc-tap-handle', 'No');
-    setYnToggle('nc-payment-method', '');
+    setYnToggle('nc-billing-same', 'Yes');
+    updateBillingFieldsVisibility();
     document.getElementById('new-customer-form').style.display = 'flex';
     document.getElementById('nc-success').style.display = 'none';
     document.getElementById('back-newcustomer-to-customers').style.display = 'block';
@@ -1421,30 +1422,70 @@
       var btn = e.target.closest('.yn-btn');
       if (!btn) return;
       setYnToggle(wrap.id, btn.getAttribute('data-value'));
+      if (wrap.id === 'nc-billing-same') updateBillingFieldsVisibility();
     });
   });
+
+  // Billing Address fields only need to exist (and be required) when the
+  // billing address differs from the business address -- otherwise they'd
+  // block submission of a form the rep has no reason to fill in twice.
+  function updateBillingFieldsVisibility() {
+    var differs = getYnToggle('nc-billing-same') === 'No';
+    document.getElementById('nc-billing-fields').style.display = differs ? 'flex' : 'none';
+    ['nc-billing-street', 'nc-billing-city', 'nc-billing-state', 'nc-billing-zip'].forEach(function (id) {
+      document.getElementById(id).required = differs;
+    });
+  }
+
+  // Joins street/line2/city/state/zip into the single formatted line the
+  // Sheet's address columns have always stored (neither "Delivery Address"
+  // nor "Billing Address" is split into parts on that side) -- e.g.
+  // "123 Main St, Suite 2, San Francisco, CA 94103". Blank parts (address
+  // line 2 is optional) are dropped rather than leaving stray ", ,".
+  function formatAddress(street, line2, city, stateCode, zip) {
+    var cityStateZip = [city, [stateCode, zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+    return [street, line2, cityStateZip].filter(Boolean).join(', ');
+  }
 
   document.getElementById('new-customer-form').addEventListener('submit', function (e) {
     e.preventDefault();
     var errEl = document.getElementById('new-customer-error');
     var val = function (id) { return document.getElementById(id).value.trim(); };
+    var billingDiffers = getYnToggle('nc-billing-same') === 'No';
+    var businessAddress = formatAddress(val('nc-address-street'), val('nc-address-2'), val('nc-address-city'), val('nc-address-state'), val('nc-address-zip'));
     var newCustomer = {
       establishmentName: val('nc-name'),
-      address: val('nc-address'),
-      orderingContact: val('nc-contact'),
+      address: businessAddress,
+      orderingContact: [val('nc-contact-first'), val('nc-contact-last')].filter(Boolean).join(' '),
       phone: val('nc-phone'),
       email: val('nc-email'),
-      deliveryAddress: val('nc-delivery-address'),
+      // Confusingly named on the Sheet side (see handleAddCustomer in
+      // Code.gs): this actually lands in "Billing Address (If not the same
+      // as shipping)", left blank when it matches the business address.
+      deliveryAddress: billingDiffers ? formatAddress(val('nc-billing-street'), val('nc-billing-2'), val('nc-billing-city'), val('nc-billing-state'), val('nc-billing-zip')) : '',
       deliveryInstructions: val('nc-delivery-instructions'),
-      region: inferRegion(state.rep, val('nc-address')),
+      region: inferRegion(state.rep, businessAddress),
       licenseNumber: val('nc-license'),
       tapHandleRequested: getYnToggle('nc-tap-handle'),
       salesRep: state.rep || '',
       addedBy: state.rep || '',
-      paymentMethod: getYnToggle('nc-payment-method')
+      // No more Fintech/ACH choice -- every account goes on Stripe now.
+      paymentMethod: 'ACH / Stripe ACH'
     };
 
-    var required = ['establishmentName', 'address', 'orderingContact', 'phone', 'email', 'deliveryAddress', 'deliveryInstructions', 'paymentMethod'];
+    var required = ['establishmentName', 'phone', 'email'];
+    if (!val('nc-address-street') || !val('nc-address-city') || !val('nc-address-state') || !val('nc-address-zip')) {
+      errEl.textContent = 'Please fill in the full business address.';
+      return;
+    }
+    if (!val('nc-contact-first') || !val('nc-contact-last')) {
+      errEl.textContent = 'Please fill in the ordering contact’s first and last name.';
+      return;
+    }
+    if (billingDiffers && (!val('nc-billing-street') || !val('nc-billing-city') || !val('nc-billing-state') || !val('nc-billing-zip'))) {
+      errEl.textContent = 'Please fill in the full billing address, or select "Yes" if it matches the business address.';
+      return;
+    }
     var missing = required.filter(function (k) { return !newCustomer[k]; });
     if (missing.length) { errEl.textContent = 'Please fill in all required fields.'; return; }
 
