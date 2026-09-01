@@ -1284,6 +1284,7 @@
     state.customer = null;
     document.getElementById('order-notes').value = '';
     document.getElementById('order-expected-empties').value = '';
+    setYnToggle('order-tap-handle', 'No');
     renderProductList();
     renderPickedCustomer();
     updateOrderTotal();
@@ -1293,6 +1294,11 @@
   function setCustomer(c) {
     state.customer = c;
     renderPickedCustomer();
+    // Defaults from the account's own "Does this location use tap
+    // handles?" setting -- the rep can still flip it for this specific
+    // delivery (e.g. this order isn't adding a new tap, or it's a repeat
+    // order for a location that just got its first one).
+    setYnToggle('order-tap-handle', c && c.tapHandleRequested === 'Yes' ? 'Yes' : 'No');
   }
 
   function renderPickedCustomer() {
@@ -1653,6 +1659,7 @@
       poDate: new Date().toISOString().slice(0, 10),
       notes: notes,
       expectedEmptyKegs: expectedEmptyKegs,
+      tapHandleNeeded: getYnToggle('order-tap-handle'),
       lines: lines
     };
 
