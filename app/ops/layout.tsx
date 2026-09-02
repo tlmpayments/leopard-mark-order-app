@@ -2,6 +2,7 @@ import Link from "next/link";
 import "./ops.css";
 import { db } from "@/lib/db";
 import { requireOpsUser } from "@/lib/ops/session";
+import { isPublicAccess } from "@/lib/ops/publicAccess";
 import { healthChips } from "@/lib/ops/queries";
 import { initials } from "@/lib/ops/format";
 import { NavIcon } from "./_components/icons";
@@ -19,6 +20,7 @@ export const metadata = { title: "Leopard Mark — Ops" };
  */
 export default async function OpsLayout({ children }: LayoutProps<"/ops">) {
   const user = await requireOpsUser();
+  const publicAccess = isPublicAccess();
 
   const [openOrders, needsSetup, deadJobs, failedInvoices, chips] = await Promise.all([
     db.order.count({
@@ -91,6 +93,16 @@ export default async function OpsLayout({ children }: LayoutProps<"/ops">) {
               {initials(user.name)}
             </div>
           </div>
+          {publicAccess ? (
+            <div className="openbar" role="status">
+              <b>No login required.</b>
+              <span>
+                This hub is currently reachable by anyone with the link, and every visitor acts as an admin —
+                including Mark delivered, Issue invoice and the automation toggles. Unset{" "}
+                <span className="mono">OPS_PUBLIC_ACCESS</span> to restore sign-in.
+              </span>
+            </div>
+          ) : null}
           <main className="page">{children}</main>
         </div>
       </div>

@@ -20,6 +20,7 @@ import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import type { UserRole } from "@/app/generated/prisma/enums";
 import { ADMIN_ROLES, DOCS_ROLES, HUB_ROLES, LEDGER_ROLES, canActOnLocation } from "./roles";
+import { PUBLIC_ACCESS_USER, isPublicAccess } from "./publicAccess";
 
 // Re-exported so call sites import the policy and the "who is this" helpers
 // from one place, while the policy itself stays loadable without NextAuth.
@@ -35,6 +36,13 @@ export interface OpsUser {
 
 
 export async function currentOpsUser(): Promise<OpsUser | null> {
+  // TEMPORARY: see lib/ops/publicAccess.ts. Short-circuits before auth() is
+  // consulted, so the hub works with no session at all. Every downstream check
+  // (requireOpsUser, assertRole, canActOnLocation) is left exactly as it is and
+  // simply sees an admin -- which is what makes removing the flag sufficient to
+  // restore the real gating.
+  if (isPublicAccess()) return { ...PUBLIC_ACCESS_USER, locationIds: [] };
+
   const session = await auth();
   const repId = session?.repId;
   if (!repId) return null;

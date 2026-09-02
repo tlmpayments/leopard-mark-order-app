@@ -520,6 +520,24 @@
 .empty { padding: 28px 18px; text-align: center; color: var(--ink-3); font-size: 13px; }
 .empty b { display: block; color: var(--ink); font-family: var(--font-display); font-size: 18px; margin-bottom: 4px; }
 
+/* Open-access warning. Deliberately loud and un-dismissable: the hub is
+   showing real customer data to anyone with the link, and a banner nobody
+   notices is the same as no banner. Uses --critical, which is reserved for
+   compliance-grade problems, because this is one. */
+.openbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 28px;
+  background: var(--critical-soft);
+  border-bottom: 1px solid var(--critical);
+  color: var(--critical-ink);
+  font-size: 13px;
+}
+.openbar b { color: var(--ink); font-weight: 600; }
+
 /* Design-intent callouts. These are spec notes, not product chrome. */
 .spec {
   border: 1px dashed rgba(143, 189, 245, 0.45); border-radius: var(--r-sm);

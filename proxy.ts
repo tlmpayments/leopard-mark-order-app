@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { isPublicAccess } from "@/lib/ops/publicAccess";
 import type { UserRole } from "@/app/generated/prisma/enums";
 
 // Next.js 16 renamed middleware.ts -> proxy.ts (same signature, same
@@ -71,11 +72,18 @@ export default auth((req) => {
     }
   }
 
+  // TEMPORARY: OPS_PUBLIC_ACCESS=1 drops the gate on /ops and /docs. The
+  // /admin block above deliberately keeps its own gate -- approving an account
+  // there creates a Stripe customer and emails a payment-setup link to a real
+  // retailer, which is not something an anonymous visitor should be able to do.
+  // See lib/ops/publicAccess.ts.
+  const publicHub = isPublicAccess();
+
   // The Ops Hub: admin, ops and warehouse. A `docs_only` user (the "Daniel"
   // case in §2 rule 6) exists precisely so someone can print paperwork with a
   // PIN and reach nothing else, so they are sent to /docs rather than bounced
   // to a login they have already passed.
-  if (pathname.startsWith("/ops")) {
+  if (pathname.startsWith("/ops") && !publicHub) {
     if (!req.auth) return Response.redirect(new URL("/admin/login?next=ops", req.nextUrl));
     if (!role || !HUB_ROLES.includes(role)) {
       return Response.redirect(new URL(landingFor(role), req.nextUrl));
@@ -85,7 +93,7 @@ export default auth((req) => {
   // /docs needs a session but no particular role -- that is the whole point of
   // docs_only. Server-side, lib/ops/session.ts still refuses it any ledger
   // write, which is the check that actually matters.
-  if (pathname.startsWith("/docs") && !req.auth) {
+  if (pathname.startsWith("/docs") && !req.auth && !publicHub) {
     return Response.redirect(new URL("/admin/login?next=docs", req.nextUrl));
   }
 
