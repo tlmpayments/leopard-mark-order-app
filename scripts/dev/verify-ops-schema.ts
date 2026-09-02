@@ -1,6 +1,10 @@
 import { PrismaClient } from "../../app/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
+import { config } from "dotenv";
+
+// tsx does not read .env.local the way the Prisma CLI does.
+config({ path: ".env.local", quiet: true });
 
 async function main() {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });

@@ -27,6 +27,11 @@
 import { PrismaClient } from "../app/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
+import { config } from "dotenv";
+
+// tsx does not read .env.local the way the Prisma CLI does (prisma.config.ts
+// loads it explicitly), so without this every write would go to localhost.
+config({ path: ".env.local", quiet: true });
 import { AUTOMATION_RULES, autoScheduleDefinition } from "../lib/automations";
 
 const DRY_RUN = process.argv.includes("--dry-run");
