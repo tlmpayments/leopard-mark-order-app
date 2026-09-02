@@ -282,6 +282,62 @@ truck.
 `leopard-mark-ops` project is still deployed, now reachable only at
 `leopard-mark-ops.vercel.app`, so reverting is a one-command domain move back.
 
+### Real data — imported 2026-09-02
+
+The hub was deployed and connected but **empty**, which is the same as broken:
+108 accounts at stage ① and nothing else. Reps' orders have always landed in the
+spreadsheet via Apps Script, and no order had ever been written to Postgres.
+
+Three read-only importers close that. All use the legacy Apps Script endpoints,
+which take no shared secret, and **none writes a cell back to the master file** —
+`scripts/backfill-sheet-orders.ts` does the same job but stamps an Order ID into
+every row, which the ground rule says to do against a copy.
+
+| Script | Result |
+|---|---|
+| `import-sku-catalog.ts` | 21 SKUs from the SKU Master tab (was 6). 15 created, 6 enriched. Seven unpriced ones (tap handles, experimentals) created **inactive** — usable for stock, not sellable, because guessing a price puts wrong money on a real invoice. |
+| `import-sheet-orders.ts` | **250 orders**, 199 with a mirrored invoice, 32 VOID→cancelled. |
+| `migrate-inventory-from-sheet.ts` | 9 ledger events, and the §4 step 7 proof: **9/9 SKU×location pairs agree** with what inventory.tlmbg.co shows. |
+
+The live pipeline now reads ① 17 · ② 19 ($5,247) · ⑥ 174 ($47,056) · ⑦ 25
+($5,331). ③④⑤ are empty because the Sheet's history has no scheduling or
+delivery record, and inventing one would put phantom movements in the ledger.
+
+**Two mapping problems had to be solved, and both are tested:**
+
+*Account names.* The Sheet writes Customer as `<legal entity> / <DBA>` —
+"Sutro Syndicate LLC / 540 SF" — which exists in neither column on its own, so a
+naive normalise matched nothing at all. `candidateNames` splits and tries each
+half against both `businessName` and `legalEntity`.
+
+*SKU codes.* The Sales tab spans several coding generations
+(`TLM-SGB1AKHB01-M`, `TLM.PRO.CNT-KEG.1/2`). Until `lib/sheetSkuAlias.ts`
+existed this dropped 180 of 284 orders. It refuses to guess: an ambiguous
+"Experimental Hazy I" could be XHZ variant B, C or D, so that one line is
+reported rather than imported. 22 tests cover the real codes and their live
+frequencies.
+
+**Still outstanding from the import:**
+
+- 33 orders reference customers with no Account row (including INV26277,
+  "La Sexy Michelada" — the spec's own reference invoice). The 108 accounts came
+  from the rep app's bundled `customers.js` snapshot, not the live Customer
+  Accounts tab; refreshing from that tab should close most of it.
+- One ledger event had a fractional case quantity (33.49 → 33). `qty` is an Int
+  because a third of a case cannot be delivered; the rounding is reported, not
+  silent, and is inside the parity tolerance.
+
+### Integrations wired
+
+`STRIPE_SECRET_KEY`, `SLACK_BOT_TOKEN`, `SLACK_TEAM_ID`, `SLACK_CHANNEL_BA/LA`,
+`APPS_SCRIPT_URL` and `INVENTORY_APPS_SCRIPT_URL` are now set in production.
+
+Still unset, and genuinely unconfigured rather than missed: `RESEND_API_KEY` and
+`RESEND_FROM_EMAIL` are **empty strings** in `.env.local` — Resend was never set
+up (domain verification pending), so the customer magic-link login and the
+payment-setup email cannot send anywhere yet. `STRIPE_WEBHOOK_SECRET` needs to
+come from the Stripe dashboard when the webhook endpoint is registered.
+
 ### The one thing not verified
 
 I could not log in to production: `Jack Begley`'s PIN there is the real one, not
