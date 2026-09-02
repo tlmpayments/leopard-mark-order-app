@@ -79,6 +79,13 @@ a {
   filter: brightness(0) invert(1);
 }
 
+.login-alt-link {
+  display: block;
+  text-align: center;
+  margin-top: 4px;
+  font-size: 13px;
+}
+
 .brand-sub {
   color: var(--silver-dim);
   font-size: 13px;
@@ -175,7 +182,10 @@ input:focus {
   min-height: 16px;
 }
 
-.admin-shell {
+/* Generic page shell for any signed-in Next.js screen (admin today,
+   customer portal too) -- not admin-specific despite the original name
+   suggesting otherwise when it was /admin's only consumer. */
+.app-shell {
   max-width: 480px;
   margin: 0 auto;
   padding: max(24px, env(safe-area-inset-top)) 20px 40px;
@@ -204,4 +214,12 @@ input:focus {
   font-size: 13px;
   line-height: 1.5;
   margin-bottom: 24px;
+}
+
+.section-title {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--silver-dim);
+  margin: 4px 0 10px;
 }

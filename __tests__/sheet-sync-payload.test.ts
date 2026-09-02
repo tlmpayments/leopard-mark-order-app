@@ -36,6 +36,7 @@ describe("buildSyncOrderPayload matches the syncOrder wire protocol exactly", ()
         paymentMethod: null,
       },
       { name: "T. Gilbert" },
+      false,
     );
 
     expect(payload).toEqual({
@@ -60,6 +61,7 @@ describe("buildSyncOrderPayload matches the syncOrder wire protocol exactly", ()
           lineTotal: 384.0,
         },
       ],
+      isFirstOrder: false,
     });
   });
 
@@ -77,6 +79,7 @@ describe("buildSyncOrderPayload matches the syncOrder wire protocol exactly", ()
       [],
       { businessName: "x", licenseNumber: null, paymentMethod: null },
       null,
+      false,
     );
 
     // `secret` is deliberately NOT here -- it's injected by syncOrderToSheet
@@ -89,6 +92,7 @@ describe("buildSyncOrderPayload matches the syncOrder wire protocol exactly", ()
         "invoiceNumber",
         "invoiceStatus",
         "inventorySource",
+        "isFirstOrder",
         "licenseNumber",
         "lines",
         "notes",
@@ -123,6 +127,7 @@ describe("buildSyncOrderPayload matches the syncOrder wire protocol exactly", ()
       ],
       { businessName: "x", licenseNumber: null, paymentMethod: null },
       null,
+      false,
     );
 
     expect(Object.keys(payload.lines[0]).sort()).toEqual(
@@ -144,6 +149,7 @@ describe("buildSyncOrderPayload matches the syncOrder wire protocol exactly", ()
       [],
       { businessName: "x", licenseNumber: null, paymentMethod: "ACH" },
       null,
+      false,
     );
     expect(payload.paymentMethod).toBe("ACH");
   });
@@ -162,7 +168,23 @@ describe("buildSyncOrderPayload matches the syncOrder wire protocol exactly", ()
       [],
       { businessName: "x", licenseNumber: null, paymentMethod: null },
       null,
+      false,
     );
     expect(payload.poDate).toBe("2026-01-05");
+  });
+
+  it("threads isFirstOrder through verbatim", () => {
+    const base = {
+      id: "id",
+      invoiceNumber: null,
+      paymentMethod: null,
+      inventorySource: null,
+      notes: null,
+      invoiceStatus: null,
+      poDate: null,
+    };
+    const account = { businessName: "x", licenseNumber: null, paymentMethod: null };
+    expect(buildSyncOrderPayload(base, [], account, null, true).isFirstOrder).toBe(true);
+    expect(buildSyncOrderPayload(base, [], account, null, false).isFirstOrder).toBe(false);
   });
 });

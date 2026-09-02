@@ -35,6 +35,7 @@
   --navy-800: #10203f;
   --navy-700: #182d4e;
   --navy-600: #223c63;
+  --navy-500: #2f4f7f;
   --silver: #b9c4d6;
   --silver-dim: #7c8aa3;
   --white: #f4f6fa;
@@ -156,11 +157,11 @@ a { color: var(--accent); }
 .yn-toggle { display: flex; gap: 10px; }
 .yn-btn {
   flex: 1;
-  background: var(--navy-950);
-  border: 1px solid var(--navy-600);
+  background: var(--navy-600);
+  border: 1px solid var(--navy-500);
   color: var(--silver);
   border-radius: 10px;
-  padding: 12px 0;
+  padding: 14px 0;
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
@@ -183,18 +184,56 @@ a { color: var(--accent); }
 
 label { font-size: 12px; color: var(--silver); text-transform: uppercase; letter-spacing: 0.08em; text-align: left; }
 
+/* Lighter than the page background (navy-950) and its own visible border --
+   on a dark theme, a field the same shade as the page it sits on all but
+   disappears, which is what made this hard to read/tap on mobile. */
 input, select, textarea {
-  background: var(--navy-950);
-  border: 1px solid var(--navy-600);
+  background: var(--navy-600);
+  border: 1px solid var(--navy-500);
   color: var(--white);
   border-radius: 10px;
-  padding: 12px 14px;
+  padding: 14px;
   font-size: 16px;
+  /* form controls don't inherit font-family from the page by default --
+     without this, textareas in particular fall back to the browser's
+     UA monospace font. */
+  font-family: inherit;
   width: 100%;
 }
-input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); }
+input::placeholder, textarea::placeholder { color: var(--silver-dim); }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); border-color: var(--accent); }
 
-.field { display: flex; flex-direction: column; gap: 6px; text-align: left; }
+.field { display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.field-hint { font-size: 12px; color: var(--silver-dim); margin-top: -2px; }
+
+/* Two fields side by side (e.g. First/Last Name, City/State) -- stacks on
+   very narrow screens instead of squeezing. */
+.field-row { display: flex; gap: 12px; }
+.field-row .field { flex: 1; min-width: 0; }
+.field-row .field-narrow { flex: 0 0 40%; }
+
+/* Groups a form into distinct, clearly-bounded sections -- same elevated
+   look as .login-card, reused here so a long form (new customer, etc.)
+   doesn't read as one undifferentiated wall of fields. */
+.form-card {
+  background: linear-gradient(180deg, var(--navy-800), var(--navy-900));
+  border: 1px solid var(--navy-600);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.form-card-title {
+  font-family: var(--font-display);
+  font-size: 19px;
+  color: var(--white);
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--navy-600);
+}
+.form-card > .field-hint { margin-top: -8px; }
+#nc-billing-fields { flex-direction: column; gap: 16px; }
 
 .btn {
   border: none;
@@ -342,36 +381,46 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); }
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
 }
 .product-tile:active { transform: scale(0.97); }
+/* Each product carries its own brand accent (products.js) into --tile-accent
+   -- selecting a beer glows in that beer's own color instead of every tile
+   lighting up the same generic blue, which read as more distinctive/on-brand. */
 .product-tile.selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(57, 135, 229, 0.35);
+  border-color: var(--tile-accent, var(--accent));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--tile-accent, var(--accent)) 40%, transparent);
 }
 .tile-check {
   position: absolute;
   top: 8px;
   right: 8px;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
-  background: var(--accent);
-  color: var(--white);
-  font-size: 13px;
+  background: var(--navy-950);
+  border: 1px solid var(--navy-500);
+  color: var(--silver);
+  font-size: 14px;
   font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.product-tile.selected .tile-check {
+  background: var(--tile-accent, var(--accent));
+  border-color: var(--tile-accent, var(--accent));
+  color: var(--white);
 }
 .tile-logo {
   width: 100%;
   aspect-ratio: 1 / 1;
   border-radius: 12px;
   background-color: var(--navy-900);
-  background-image: radial-gradient(circle at 50% 30%, var(--navy-700), var(--navy-900) 70%);
+  background-image: radial-gradient(circle at 50% 28%, color-mix(in srgb, var(--tile-accent, var(--accent)) 30%, var(--navy-700)), var(--navy-900) 72%);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 .tile-logo img {
   width: 100%;
@@ -379,8 +428,11 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); }
   object-fit: contain;
   padding: 10px;
 }
-.tile-name { font-size: 15px; font-weight: 700; text-align: center; line-height: 1.2; }
-.tile-sub { color: var(--silver-dim); font-size: 11px; text-align: center; }
+/* Reserves 2 lines so a short name (Cantinesca) and a long one (Sunlight
+   Groove -- Bay Area) produce the same tile height instead of the grid
+   looking lopsided. */
+.tile-name { font-size: 15px; font-weight: 700; text-align: center; line-height: 1.25; min-height: 2.5em; display: flex; align-items: center; justify-content: center; }
+.tile-sub { color: var(--silver-dim); font-size: 11px; text-align: center; margin-top: 2px; }
 
 .product-details-card {
   border-radius: var(--radius);
@@ -417,16 +469,18 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); }
 .format-row .flabel { font-size: 13px; font-weight: 600; }
 .format-row .fdetail { font-size: 11px; color: var(--silver-dim); }
 .format-row .fcode { font-size: 10px; color: var(--silver-dim); font-family: ui-monospace, SFMono-Regular, monospace; }
-.qty-stepper { display: flex; align-items: center; gap: 8px; }
+.qty-stepper { display: flex; align-items: center; gap: 10px; }
 .qty-stepper button {
-  width: 30px; height: 30px;
+  width: 32px; height: 32px;
   border-radius: 8px;
-  border: 1px solid var(--navy-600);
-  background: var(--navy-800);
+  border: 1px solid var(--navy-500);
+  background: var(--navy-700);
   color: var(--white);
-  font-size: 16px;
+  font-size: 18px;
+  font-weight: 600;
   cursor: pointer;
 }
+.qty-stepper button:active { transform: scale(0.93); border-color: var(--accent); }
 .qty-stepper .qty-val { width: 24px; text-align: center; font-weight: 700; }
 
 /* ---------- Order form ---------- */
@@ -445,6 +499,43 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); }
   border-bottom: 1px solid var(--navy-700);
 }
 .order-summary .oline:last-child { border-bottom: none; }
+
+/* ---------- Order confirmation ---------- */
+.confirm-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  padding: 28px 0 22px;
+}
+.confirm-check {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--good), #0f6b4c);
+  color: white;
+  font-size: 30px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 6px;
+  box-shadow: 0 0 0 6px rgba(25, 158, 112, 0.15);
+}
+.confirm-title {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 600;
+}
+.confirm-sub {
+  color: var(--silver-dim);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+}
+.cta-btn.slack { background: linear-gradient(135deg, #4a154b, #2d0f2e); border: none; }
 
 .sticky-footer {
   position: fixed;
@@ -504,6 +595,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); }
   .topbar-logo { height: 72px; }
   .stat-grid { gap: 8px; }
   .stat-card { padding: 12px; }
+  .field-row { flex-direction: column; }
+  .field-row .field-narrow { flex: 1; }
 }
 
 /* ---------- Invoice ---------- */
@@ -585,6 +678,51 @@ table.inv-items td:first-child {
 }
 table.inv-items td:first-child::before { content: none; }
 
+/* Editable invoice fields (screen-invoice only -- batch printing always uses
+   the static buildInvoiceHtml markup). Each editable value renders both a
+   `.print-only` span (shown only in the printed/PDF output, via the
+   @media print rule below) and its live `.no-print` input/select -- see
+   editableLineRowHtml() etc. in app.js. */
+.print-only { display: none; }
+.inv-input {
+  font: inherit;
+  color: inherit;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 3px 6px;
+  background: #fff;
+}
+.inv-line-select { display: block; width: 100%; margin-bottom: 4px; }
+.inv-line-name { display: block; width: 100%; }
+.inv-num { width: 64px; text-align: right; }
+.inv-date-input { width: auto; }
+.inv-hint { font-size: 9px; font-weight: 400; color: #8b8c94; margin-top: 2px; }
+.inv-line-remove-cell { justify-content: flex-end !important; }
+.inv-line-remove {
+  border: 1px solid #ccc;
+  background: #fff;
+  color: #a00;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  line-height: 1;
+  font-size: 14px;
+  cursor: pointer;
+}
+.inv-add-line-btn {
+  display: block;
+  width: 100%;
+  border: 1px dashed #999;
+  background: #fff;
+  border-radius: 6px;
+  padding: 9px 12px;
+  margin-bottom: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #333;
+  cursor: pointer;
+}
+
 .inv-totals-wrap { display: flex; justify-content: flex-end; margin-bottom: 30px; }
 .inv-totals { width: 100%; max-width: 250px; font-size: 10.5px; }
 .inv-totals .row { display: flex; justify-content: space-between; padding: 2.5px 0; }
@@ -654,6 +792,7 @@ table.inv-items td:first-child::before { content: none; }
   table.inv-items td::before { content: none; }
   table.inv-items td:first-child { font-weight: 400; margin-bottom: 0; }
   .no-print { display: none !important; }
+  .print-only { display: inline; }
 }
 
 /* ---------- Accounts map ---------- */

@@ -4,6 +4,7 @@
     rep: null,
     stats: null,
     selection: {}, // productId -> { formatCode: qty }
+    invoiceEdit: null, // working copy of the invoice currently on screen-invoice, see openInvoice()
     customer: null,
     customers: loadCachedCustomers() || (window.LM_CUSTOMERS || []).slice()
   };
@@ -429,7 +430,8 @@
     apiGet({ action: 'invoiceDetail', invoiceNumber: invoiceNumber })
       .then(function (res) {
         if (!res.ok) { document.getElementById('invoice-loading').textContent = res.error || 'Could not load invoice.'; return; }
-        renderInvoice(res);
+        state.invoiceEdit = cloneInvoiceForEdit(res);
+        renderEditableInvoice();
         document.getElementById('invoice-loading').style.display = 'none';
         document.getElementById('invoice-doc').style.display = 'block';
         document.getElementById('invoice-print-btn').style.display = 'block';
@@ -439,15 +441,167 @@
       });
   }
 
+  // A bare YYYY-MM-DD (from an editable date field) is parsed locally via
+  // parseDateInputValue -- `new Date('2026-08-21')` parses as UTC midnight
+  // and would then display a day early in a negative-UTC-offset timezone.
+  // Anything else (a sheet's raw ISO timestamp, or a Date instance) goes
+  // through the regular constructor, unchanged from before.
   function fmtDate(v) {
     if (!v) return '—';
-    var d = new Date(v);
-    if (isNaN(d.getTime())) return String(v);
+    var d = /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? parseDateInputValue(v) : new Date(v);
+    if (!d || isNaN(d.getTime())) return String(v);
     return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
   }
 
   function fmtMoney(n) {
     return '$' + (Number(n) || 0).toFixed(2);
+  }
+
+  // Negative amounts (the keg deposit return credit) render as "-$35.00"
+  // rather than fmtMoney's bare "$-35.00".
+  function fmtMoneySigned(n) {
+    n = Number(n) || 0;
+    return (n < 0 ? '-$' : '$') + Math.abs(n).toFixed(2);
+  }
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  // <input type="date"> wants a plain YYYY-MM-DD. Built from local getters
+  // (like fmtDate above) so a sheet timestamp of, say, midnight UTC doesn't
+  // read back as the previous day in a negative-UTC-offset timezone.
+  function toDateInputValue(v) {
+    if (!v) return '';
+    var d = new Date(v);
+    if (isNaN(d.getTime())) return '';
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+  }
+
+  // Parses an <input type="date"> value (YYYY-MM-DD) as a LOCAL date rather
+  // than `new Date(str)`, which the spec parses as UTC midnight and which
+  // would then shift a day when displayed with fmtDate's local getters.
+  function parseDateInputValue(v) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v || ''));
+    if (!m) return null;
+    var d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  function termsToDaysClient(terms) {
+    var m = /(\d+)/.exec(String(terms || ''));
+    return m ? parseInt(m[1], 10) : 30;
+  }
+
+  // Mirrors Code.gs' KEG_DEPOSIT_PER_UNIT -- confirmed by Jack Begley
+  // 2026-08-24. Keep both in sync by hand; Code.gs can't read this file.
+  var KEG_DEPOSIT_PER_UNIT = 35.00;
+
+  // Finds the catalog product+format for a SKU code, across all products.
+  function findCatalogFormat(code) {
+    for (var i = 0; i < window.LM_PRODUCTS.length; i++) {
+      var p = window.LM_PRODUCTS[i];
+      for (var j = 0; j < p.formats.length; j++) {
+        if (p.formats[j].code === code) return { product: p, format: p.formats[j] };
+      }
+    }
+    return null;
+  }
+
+  // Builds an editable line from a catalog SKU -- used both when an existing
+  // invoice line matches a known product and when the rep adds a new line.
+  function catalogEditLine(code, qty) {
+    var match = findCatalogFormat(code);
+    if (!match) return null;
+    return {
+      mode: 'catalog',
+      formatCode: code,
+      productName: match.product.name,
+      packagingFormat: match.format.label + ' (' + match.format.detail + ')',
+      productCode: code,
+      upc: match.format.upc || '',
+      qty: qty,
+      unitPrice: match.format.price,
+      unit: match.format.unit
+    };
+  }
+
+  function blankCustomLine() {
+    return {
+      mode: 'custom',
+      formatCode: '',
+      productName: '',
+      packagingFormat: '',
+      productCode: '',
+      upc: '',
+      qty: 1,
+      unitPrice: 0,
+      unit: ''
+    };
+  }
+
+  // Working copy of a loaded invoice -- edits here never write back to the
+  // Sales sheet (nothing in Code.gs persists post-hoc invoice edits), they
+  // only reshape what gets printed/saved as a PDF from this screen.
+  function cloneInvoiceForEdit(inv) {
+    return {
+      invoiceNumber: inv.invoiceNumber,
+      poDate: toDateInputValue(inv.poDate),
+      deliveryDate: toDateInputValue(inv.invoiceDate),
+      paymentTerms: inv.paymentTerms,
+      salesRep: inv.salesRep,
+      shipTo: inv.shipTo,
+      billTo: inv.billTo,
+      // Pre-filled from what the rep flagged at order time (Expected Empty
+      // Kegs on the order form) -- still editable here since the actual
+      // pickup count won't be confirmed until delivery.
+      kegReturnQty: Number(inv.expectedEmptyKegs) || 0,
+      lines: (inv.lines || []).map(function (l) {
+        var match = l.productCode && findCatalogFormat(l.productCode);
+        if (match) return catalogEditLine(l.productCode, l.qty);
+        return {
+          mode: 'custom',
+          formatCode: '',
+          productName: l.productName || '',
+          packagingFormat: l.packagingFormat || '',
+          productCode: l.productCode || '',
+          upc: l.upc || '',
+          qty: l.qty,
+          unitPrice: l.unitPrice,
+          unit: l.unit || ''
+        };
+      })
+    };
+  }
+
+  // Pure: derives every computed total from state.invoiceEdit without
+  // mutating it, so it's safe to call on every keystroke/re-render.
+  function computeInvoiceEdit(inv) {
+    var subtotal = 0, kegDepositQty = 0;
+    inv.lines.forEach(function (l) {
+      var qty = Number(l.qty) || 0;
+      var price = Number(l.unitPrice) || 0;
+      subtotal += qty * price;
+      if (l.unit === 'keg') kegDepositQty += qty;
+    });
+    subtotal = Math.round(subtotal * 100) / 100;
+    var kegDepositTotal = Math.round(kegDepositQty * KEG_DEPOSIT_PER_UNIT * 100) / 100;
+    var kegReturnQty = Number(inv.kegReturnQty) || 0;
+    var kegReturnTotal = Math.round(kegReturnQty * -KEG_DEPOSIT_PER_UNIT * 100) / 100;
+    var invoiceTotal = Math.round((subtotal + kegDepositTotal + kegReturnTotal) * 100) / 100;
+    var deliveryDate = parseDateInputValue(inv.deliveryDate);
+    var dueDate = null;
+    if (deliveryDate) {
+      dueDate = new Date(deliveryDate.getTime());
+      dueDate.setDate(dueDate.getDate() + termsToDaysClient(inv.paymentTerms));
+    }
+    return {
+      subtotal: subtotal,
+      kegDepositQty: kegDepositQty,
+      kegDepositTotal: kegDepositTotal,
+      kegReturnQty: kegReturnQty,
+      kegReturnTotal: kegReturnTotal,
+      invoiceTotal: invoiceTotal,
+      dueDate: dueDate
+    };
   }
 
   // Builds the full inner markup for one invoice. Used both for the
@@ -529,9 +683,217 @@
     );
   }
 
-  function renderInvoice(inv) {
-    document.getElementById('invoice-doc').innerHTML = buildInvoiceHtml(inv);
+  function catalogOptionsHtml(selectedValue) {
+    var html = '';
+    window.LM_PRODUCTS.forEach(function (p) {
+      html += '<optgroup label="' + escapeHtml(p.name) + '">';
+      p.formats.forEach(function (f) {
+        html += '<option value="' + f.code + '"' + (f.code === selectedValue ? ' selected' : '') + '>' +
+          escapeHtml(f.label + ' (' + f.detail + ')') + '</option>';
+      });
+      html += '</optgroup>';
+    });
+    html += '<option value="__custom__"' + (selectedValue === '__custom__' ? ' selected' : '') + '>Custom item…</option>';
+    return html;
   }
+
+  function editableLineItemLabel(l) {
+    if (l.mode === 'custom') return l.productName || 'Custom item';
+    return (l.productName + ' ' + l.packagingFormat).trim();
+  }
+
+  // Every editable cell renders both a `.print-only` span (the static text
+  // that shows up in the printed/PDF invoice) and a `.no-print` control (the
+  // input/select the rep actually edits on screen) -- see the `.print-only`
+  // / `.no-print` rules in app.css. Kept as two nodes rather than one live
+  // element because Chrome prints a <select>'s chrome/arrows and a date
+  // input's calendar icon, which looks wrong on a finished invoice.
+  function editableLineRowHtml(l, idx) {
+    var qty = Number(l.qty) || 0;
+    var price = Number(l.unitPrice) || 0;
+    var total = Math.round(qty * price * 100) / 100;
+    var isCustom = l.mode === 'custom';
+    return '<tr data-line-idx="' + idx + '">' +
+      '<td data-label="Item">' +
+        '<span class="print-only">' + escapeHtml(editableLineItemLabel(l)) + '</span>' +
+        '<span class="no-print">' +
+          '<select class="inv-input inv-line-select" data-field="formatCode" data-idx="' + idx + '">' +
+            catalogOptionsHtml(isCustom ? '__custom__' : l.formatCode) +
+          '</select>' +
+          (isCustom ? '<input type="text" class="inv-input inv-line-name" data-field="productName" data-idx="' + idx + '" placeholder="Item description" value="' + escapeHtml(l.productName) + '">' : '') +
+        '</span>' +
+      '</td>' +
+      '<td data-label="Item Number">' + escapeHtml(l.productCode || '—') + '</td>' +
+      '<td data-label="UPC">' + escapeHtml(l.upc || '—') + '</td>' +
+      '<td class="num" data-label="Quantity">' +
+        '<span class="print-only">' + qty.toFixed(2) + '</span>' +
+        '<input class="inv-input inv-num no-print" type="number" min="0" step="1" data-field="qty" data-idx="' + idx + '" value="' + qty + '">' +
+      '</td>' +
+      '<td class="num" data-label="Unit Price">' +
+        '<span class="print-only">' + fmtMoney(price) + '</span>' +
+        '<input class="inv-input inv-num no-print" type="number" min="0" step="0.01" data-field="unitPrice" data-idx="' + idx + '" value="' + price.toFixed(2) + '">' +
+      '</td>' +
+      '<td class="num" data-label="Total">' + fmtMoney(total) + '</td>' +
+      '<td class="no-print inv-line-remove-cell"><button type="button" class="inv-line-remove" data-idx="' + idx + '" aria-label="Remove line item">×</button></td>' +
+      '</tr>';
+  }
+
+  function kegDepositRowHtml(kegDepositQty, kegDepositTotal) {
+    if (kegDepositQty <= 0) return '';
+    return '<tr>' +
+      '<td data-label="Item">Keg Deposit</td>' +
+      '<td data-label="Item Number">—</td>' +
+      '<td data-label="UPC">—</td>' +
+      '<td class="num" data-label="Quantity">' + kegDepositQty.toFixed(2) + '</td>' +
+      '<td class="num" data-label="Unit Price">' + fmtMoney(KEG_DEPOSIT_PER_UNIT) + '</td>' +
+      '<td class="num" data-label="Total">' + fmtMoney(kegDepositTotal) + '</td>' +
+      '<td class="no-print"></td>' +
+      '</tr>';
+  }
+
+  // Credit line for kegs picked up empty on this delivery -- kept as its own
+  // row (rather than folded into the Keg Deposit row above) so it's always
+  // visible while editing, even at qty 0, and only drops out of the printed
+  // invoice (via the row-level no-print class) once it has nothing to show.
+  function kegReturnRowHtml(kegReturnQty, kegReturnTotal) {
+    var qty = Number(kegReturnQty) || 0;
+    return '<tr class="' + (qty > 0 ? '' : 'no-print') + '">' +
+      '<td data-label="Item">Keg Deposit Returned<div class="inv-hint no-print">Empty kegs picked up on this delivery</div></td>' +
+      '<td data-label="Item Number">—</td>' +
+      '<td data-label="UPC">—</td>' +
+      '<td class="num" data-label="Quantity">' +
+        '<span class="print-only">' + qty.toFixed(2) + '</span>' +
+        '<input class="inv-input inv-num no-print" type="number" min="0" step="1" data-field="kegReturnQty" value="' + qty + '">' +
+      '</td>' +
+      '<td class="num" data-label="Unit Price">' + fmtMoneySigned(-KEG_DEPOSIT_PER_UNIT) + '</td>' +
+      '<td class="num" data-label="Total">' + fmtMoneySigned(kegReturnTotal) + '</td>' +
+      '<td class="no-print"></td>' +
+      '</tr>';
+  }
+
+  // Editable counterpart to buildInvoiceHtml above, for the single-invoice
+  // screen only (batch printing keeps using the static, server-values-only
+  // version). Renders from state.invoiceEdit + its live-computed totals;
+  // every add/remove/edit calls renderEditableInvoice() again to rebuild it.
+  function buildEditableInvoiceHtml() {
+    var inv = state.invoiceEdit;
+    var computed = computeInvoiceEdit(inv);
+
+    var rowsHtml = inv.lines.map(function (l, idx) { return editableLineRowHtml(l, idx); }).join('') +
+      kegDepositRowHtml(computed.kegDepositQty, computed.kegDepositTotal) +
+      kegReturnRowHtml(computed.kegReturnQty, computed.kegReturnTotal);
+
+    var totalsHtml =
+      '<div class="row"><span class="label">SUBTOTAL</span><span class="value">' + fmtMoney(computed.subtotal) + '</span></div>' +
+      (computed.kegDepositQty > 0 ? '<div class="row"><span class="label">KEG DEPOSIT</span><span class="value">' + fmtMoney(computed.kegDepositTotal) + '</span></div>' : '') +
+      (computed.kegReturnQty > 0 ? '<div class="row"><span class="label">KEG DEPOSIT RETURNED</span><span class="value">' + fmtMoneySigned(computed.kegReturnTotal) + '</span></div>' : '') +
+      '<div class="row"><span class="label">TAX: Exempt (0.0000%)</span><span class="value">$0.00</span></div>' +
+      '<div class="row bold"><span class="label">INVOICE TOTAL</span><span class="value">' + fmtMoney(computed.invoiceTotal) + '</span></div>';
+
+    return (
+      '<div class="inv-header">' +
+        '<img class="inv-logo" src="assets/icons/brand/logo-alt.svg" alt="The Leopard Mark Brewing Co." />' +
+        '<div class="inv-doc-label">Invoice</div>' +
+      '</div>' +
+      '<div class="inv-info-row">' +
+        '<div class="inv-company-block">' +
+          'The Leopard Mark Brewing Company<br/>(707) 261-0200<br/>ar@theleopardmark.com<br/>' +
+          'Sales Rep : ' + escapeHtml(inv.salesRep || '') +
+        '</div>' +
+        '<div class="inv-meta-block">' +
+          'Invoice: ' + escapeHtml(inv.invoiceNumber || '') + '<br/>' +
+          'PO Date: ' +
+            '<span class="print-only">' + fmtDate(inv.poDate) + '</span>' +
+            '<input type="date" class="inv-input inv-date-input no-print" data-field="poDate" value="' + inv.poDate + '">' +
+            '<br/>' +
+          'Delivery Date: ' +
+            '<span class="print-only">' + fmtDate(inv.deliveryDate) + '</span>' +
+            '<input type="date" class="inv-input inv-date-input no-print" data-field="deliveryDate" value="' + inv.deliveryDate + '">' +
+            '<br/>' +
+          'Payment Terms: ' + escapeHtml(inv.paymentTerms || '') + '<br/>' +
+          'Due Date: ' + fmtDate(computed.dueDate) +
+        '</div>' +
+      '</div>' +
+      '<div class="inv-parties">' +
+        '<div class="inv-party">' +
+          '<div class="inv-heading">Ship To:</div>' +
+          '<div>' + escapeHtml(inv.shipTo.name || '') + '</div>' +
+          '<div>' + escapeHtml(inv.shipTo.address || '') + '</div>' +
+          '<div>' + escapeHtml(inv.shipTo.phone || '') + '</div>' +
+          '<div>' + (inv.shipTo.license ? 'License Number: ' + escapeHtml(inv.shipTo.license) : '') + '</div>' +
+        '</div>' +
+        '<div class="inv-party">' +
+          '<div class="inv-heading">Bill To:</div>' +
+          '<div>' + escapeHtml(inv.billTo.name || '') + '</div>' +
+          '<div>' + escapeHtml(inv.billTo.address || '') + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<table class="inv-items">' +
+        '<thead><tr><th>Item</th><th>Item Number</th><th>UPC</th><th class="num">Quantity</th><th class="num">Unit Price</th><th class="num">Total</th></tr></thead>' +
+        '<tbody>' + rowsHtml + '</tbody>' +
+      '</table>' +
+      '<div class="no-print"><button type="button" class="inv-add-line-btn" id="inv-add-line-btn">+ Add Line Item</button></div>' +
+      '<div class="inv-totals-wrap"><div class="inv-totals">' + totalsHtml + '</div></div>' +
+      '<div class="inv-signatures">' +
+        '<div class="inv-sig"><div class="inv-sig-line"></div><div class="inv-sig-label">The Leopard Mark Brewing Company<br/>Representative</div></div>' +
+        '<div class="inv-sig"><div class="inv-sig-line"></div><div class="inv-sig-label">' + escapeHtml(inv.shipTo.name || '') + ' Representative</div></div>' +
+      '</div>' +
+      '<div class="inv-footer-note">For new purchase orders, please email orders@theleopardmark.com</div>' +
+      '<div class="inv-terms-note">' +
+        '<b>Keg Deposit:</b> A refundable deposit is assessed on each keg delivered and credited upon return of each empty keg.<br/>' +
+        '<b>Terms:</b> Net 30 from delivery (Cal. B&amp;P Code &sect; 25509) unless otherwise stated above, paid via seller-initiated EFT per &sect; 25509.1.' +
+      '</div>'
+    );
+  }
+
+  function renderEditableInvoice() {
+    document.getElementById('invoice-doc').innerHTML = buildEditableInvoiceHtml();
+  }
+
+  // Delegated on the container (rather than bound per-control) because every
+  // add/remove/edit fully rebuilds #invoice-doc's innerHTML -- per-node
+  // listeners would be destroyed on each rebuild.
+  document.getElementById('invoice-doc').addEventListener('click', function (e) {
+    if (e.target.closest('#inv-add-line-btn')) {
+      state.invoiceEdit.lines.push(catalogEditLine(window.LM_PRODUCTS[0].formats[0].code, 1));
+      renderEditableInvoice();
+      return;
+    }
+    var removeBtn = e.target.closest('.inv-line-remove');
+    if (removeBtn) {
+      state.invoiceEdit.lines.splice(Number(removeBtn.getAttribute('data-idx')), 1);
+      renderEditableInvoice();
+    }
+  });
+
+  // 'change' (fires on blur/Enter, not every keystroke) so totals settle
+  // once the rep leaves a field instead of re-rendering -- and stealing
+  // focus -- on every character typed.
+  document.getElementById('invoice-doc').addEventListener('change', function (e) {
+    var field = e.target.getAttribute('data-field');
+    if (!field) return;
+    var inv = state.invoiceEdit;
+
+    if (field === 'kegReturnQty') {
+      inv.kegReturnQty = Math.max(0, Number(e.target.value) || 0);
+    } else if (field === 'poDate' || field === 'deliveryDate') {
+      inv[field] = e.target.value;
+    } else {
+      var idx = Number(e.target.getAttribute('data-idx'));
+      var line = inv.lines[idx];
+      if (!line) return;
+      if (field === 'formatCode') {
+        inv.lines[idx] = e.target.value === '__custom__' ? blankCustomLine() : catalogEditLine(e.target.value, line.qty || 1);
+      } else if (field === 'productName') {
+        line.productName = e.target.value;
+      } else if (field === 'qty') {
+        line.qty = Math.max(0, Number(e.target.value) || 0);
+      } else if (field === 'unitPrice') {
+        line.unitPrice = Math.max(0, Number(e.target.value) || 0);
+      }
+    }
+    renderEditableInvoice();
+  });
 
   document.getElementById('invoice-print-btn').addEventListener('click', function () {
     window.print();
@@ -546,31 +908,91 @@
     return (parts[parts.length - 1] || '').toLowerCase();
   }
 
-  // Region is inferred, never typed by the rep: an establishment's address is
-  // the most reliable signal (it's an exact place, not a rep's general
-  // territory), so city/area keywords are checked first. Only when the
-  // address doesn't match anything recognized do we fall back to the
-  // logged-in rep's territory, via the same last-name matching used for
-  // "My Accounts" above (Sales sheet rep names and Customer Accounts sales
-  // person names aren't written consistently).
+  // Region is suggested from the establishment's CITY (an exact place, not a
+  // rep's general territory) -- but per Jack Begley 2026-09-01, after a La
+  // Mirada account got silently misfiled under a rep's default (San
+  // Francisco) because "la mirada" matched nothing, this is now only ever a
+  // pre-fill: the rep confirms or corrects it in the Region dropdown on the
+  // new-customer form (see nc-region), never submitted un-reviewed.
+  //
+  // Matching is against the city field ALONE, and by exact name (not
+  // substring-in-the-whole-address) -- that's what makes it safe to list
+  // "la mirada", "la mesa", and "la habra" in three different regions
+  // without any of them colliding: a bare "la" substring search would have
+  // misfired on all of them, which is why the old version avoided it
+  // entirely and just left Los Angeles as a single bare city name.
   var REGION_KEYWORDS = [
-    { region: 'San Rafael', match: ['san rafael'] },
-    { region: 'Burlingame', match: ['burlingame'] },
-    { region: 'North Bay', match: ['north bay', 'santa rosa', 'napa', 'sonoma', 'petaluma', 'novato', 'marin'] },
-    { region: 'San Francisco', match: ['san francisco', 'oakland', 'berkeley', 'daly city', ' sf ', ' sf,', ' sf.'] },
-    { region: 'Arcadia', match: ['arcadia'] },
-    { region: 'Long Beach', match: ['long beach'] },
-    { region: 'Orange County', match: ['orange county', 'anaheim', 'irvine', 'santa ana', 'huntington beach', 'costa mesa'] },
-    { region: 'San Diego', match: ['san diego'] },
-    // No bare "la" token here -- real CA cities like La Mesa, La Jolla, and
-    // La Habra all contain it and would be misclassified as Los Angeles.
-    { region: 'Los Angeles', match: ['los angeles'] }
+    { region: 'San Rafael', cities: [
+      'san rafael', 'san anselmo', 'fairfax', 'ross', 'kentfield', 'larkspur',
+      'corte madera', 'mill valley', 'sausalito', 'tiburon', 'greenbrae'
+    ] },
+    { region: 'Burlingame', cities: [
+      'burlingame', 'san mateo', 'millbrae', 'hillsborough', 'foster city',
+      'belmont', 'san bruno'
+    ] },
+    { region: 'North Bay', cities: [
+      'north bay', 'santa rosa', 'napa', 'sonoma', 'petaluma', 'novato',
+      'marin', 'rohnert park', 'windsor', 'healdsburg', 'cotati',
+      'sebastopol', 'vallejo', 'fairfield', 'american canyon',
+      'st. helena', 'saint helena', 'calistoga', 'yountville'
+    ] },
+    { region: 'San Francisco', cities: [
+      'san francisco', 'sf', 'oakland', 'berkeley', 'daly city', 'emeryville',
+      'alameda', 'san leandro', 'richmond', 'el cerrito', 'albany',
+      'south san francisco', 'brisbane', 'colma', 'pacifica'
+    ] },
+    { region: 'Arcadia', cities: [
+      'arcadia', 'monrovia', 'sierra madre', 'temple city', 'san marino'
+    ] },
+    { region: 'Long Beach', cities: [
+      'long beach', 'signal hill', 'lakewood'
+    ] },
+    { region: 'Orange County', cities: [
+      'orange county', 'anaheim', 'anaheim hills', 'irvine', 'santa ana',
+      'huntington beach', 'costa mesa', 'fullerton', 'orange',
+      'garden grove', 'westminster', 'fountain valley', 'newport beach',
+      'laguna beach', 'laguna niguel', 'laguna hills', 'mission viejo',
+      'lake forest', 'tustin', 'buena park', 'la habra', 'yorba linda',
+      'placentia', 'brea', 'cypress', 'los alamitos', 'seal beach',
+      'san clemente', 'dana point', 'aliso viejo',
+      'rancho santa margarita', 'stanton', 'la palma'
+    ] },
+    { region: 'San Diego', cities: [
+      'san diego', 'chula vista', 'oceanside', 'escondido', 'carlsbad',
+      'el cajon', 'vista', 'san marcos', 'encinitas', 'national city',
+      'la mesa', 'santee', 'poway', 'coronado', 'imperial beach',
+      'lemon grove', 'solana beach', 'del mar'
+    ] },
+    { region: 'Los Angeles', cities: [
+      'los angeles', 'la mirada', 'la puente', 'la verne',
+      'la canada flintridge', 'la cañada flintridge', 'la crescenta',
+      'whittier', 'pico rivera', 'downey', 'norwalk', 'santa fe springs',
+      'bellflower', 'paramount', 'south gate', 'lynwood', 'compton',
+      'hawthorne', 'gardena', 'torrance', 'carson', 'inglewood',
+      'el segundo', 'culver city', 'santa monica', 'west hollywood',
+      'beverly hills', 'pasadena', 'glendale', 'burbank',
+      'north hollywood', 'van nuys', 'sherman oaks', 'studio city',
+      'encino', 'woodland hills', 'northridge', 'reseda', 'canoga park',
+      'chatsworth', 'san fernando', 'sylmar', 'sun valley',
+      'panorama city', 'granada hills', 'porter ranch', 'west covina',
+      'covina', 'baldwin park', 'el monte', 'south el monte', 'rosemead',
+      'san gabriel', 'alhambra', 'monterey park', 'montebello', 'pomona',
+      'claremont', 'san dimas', 'glendora', 'azusa', 'duarte', 'bell',
+      'bell gardens', 'cudahy', 'huntington park', 'vernon', 'maywood',
+      'south pasadena', 'walnut', 'diamond bar',
+      'rowland heights', 'hacienda heights', 'cerritos', 'artesia',
+      'lawndale', 'lomita', 'palos verdes estates', 'rancho palos verdes',
+      'rolling hills', 'malibu', 'calabasas', 'agoura hills',
+      'westlake village', 'hidden hills'
+    ] }
   ];
 
   // Reps whose territory we know from historical order data -- keyed by last
   // name so "T. Gilbert" and "Thomas Gilbert" both resolve. Reps not listed
   // here have no reliable default yet; for them, region only fills in when
-  // the address itself gives a match.
+  // the city itself gives a match. Only used as a LAST resort now (see
+  // inferRegion) -- it's what put a real La Mirada account under San
+  // Francisco before the city list covered it.
   var REP_DEFAULT_REGION = {
     'gilbert': 'San Francisco',
     'williams': 'Los Angeles',
@@ -578,13 +1000,10 @@
     'sprague': 'Orange County'
   };
 
-  function inferRegion(rep, address) {
-    var addr = ' ' + String(address || '').toLowerCase() + ' ';
+  function inferRegion(rep, city) {
+    var normalized = String(city || '').trim().toLowerCase();
     for (var i = 0; i < REGION_KEYWORDS.length; i++) {
-      var rule = REGION_KEYWORDS[i];
-      for (var j = 0; j < rule.match.length; j++) {
-        if (addr.indexOf(rule.match[j]) !== -1) return rule.region;
-      }
+      if (REGION_KEYWORDS[i].cities.indexOf(normalized) !== -1) return REGION_KEYWORDS[i].region;
     }
     return REP_DEFAULT_REGION[repLastName(rep)] || '';
   }
@@ -921,15 +1340,87 @@
     state.selection = {};
     state.customer = null;
     document.getElementById('order-notes').value = '';
+    document.getElementById('order-expected-empties').value = '';
+    setYnToggle('order-tap-handle', 'No');
     renderProductList();
     renderPickedCustomer();
     updateOrderTotal();
+    renderReorderBanner(null);
   }
 
   // ---------- Customer picker ----------
   function setCustomer(c) {
     state.customer = c;
     renderPickedCustomer();
+    loadReorderBanner(c);
+    // Defaults from the account's own "Does this location use tap
+    // handles?" setting -- the rep can still flip it for this specific
+    // delivery (e.g. this order isn't adding a new tap, or it's a repeat
+    // order for a location that just got its first one).
+    setYnToggle('order-tap-handle', c && c.tapHandleRequested === 'Yes' ? 'Yes' : 'No');
+  }
+
+  // ---------- Reorder Last Order ----------
+  // As soon as a customer is picked, check for their most recent order and
+  // offer a one-tap shortcut to refill the product grid with those exact
+  // lines -- the rep still reviews/adjusts quantities and taps Submit same
+  // as any order, this just removes re-picking every beer/format from
+  // scratch every time. Best-effort: a failed lookup just hides the banner,
+  // never blocks placing a fresh order.
+  function loadReorderBanner(customer) {
+    renderReorderBanner(null);
+    if (!customer || !apiConfigured()) return;
+    apiGet({ action: 'lastOrder', customer: customer.establishmentName })
+      .then(function (res) {
+        if (res.ok && res.hasOrder && res.lines && res.lines.length) {
+          renderReorderBanner(res);
+        }
+      })
+      .catch(function () {
+        // Silent -- reorder is a convenience, not a requirement.
+      });
+  }
+
+  function renderReorderBanner(lastOrder) {
+    var host = document.getElementById('reorder-banner');
+    if (!host) return;
+    if (!lastOrder) {
+      host.style.display = 'none';
+      host.innerHTML = '';
+      return;
+    }
+    host.style.display = 'block';
+    host.innerHTML =
+      '<button type="button" class="cta-btn secondary" id="btn-reorder-last" style="width:100%;">' +
+        '<span>🔁 Reorder Last Order<small>Same ' + lastOrder.lines.length + ' item(s) as ' + fmtDate(lastOrder.poDate) + ' — review before submitting</small></span>' +
+        '<span>→</span>' +
+      '</button>';
+    document.getElementById('btn-reorder-last').addEventListener('click', function () {
+      applyReorder(lastOrder.lines);
+    });
+  }
+
+  // Maps {productCode, qty} lines back to state.selection's
+  // {productId: {formatCode: qty}} shape by matching productCode against
+  // window.LM_PRODUCTS' format codes -- the same SKU codes already used
+  // everywhere else (Sales sheet, PRICE_MAP), so this never needs its own
+  // lookup table.
+  function applyReorder(lines) {
+    var selection = {};
+    lines.forEach(function (line) {
+      window.LM_PRODUCTS.forEach(function (p) {
+        p.formats.forEach(function (f) {
+          if (f.code === line.productCode) {
+            if (!selection[p.id]) selection[p.id] = {};
+            selection[p.id][f.code] = line.qty;
+          }
+        });
+      });
+    });
+    state.selection = selection;
+    renderProductList();
+    updateOrderTotal();
+    toast('Last order applied — review quantities, then submit');
   }
 
   function renderPickedCustomer() {
@@ -1017,7 +1508,8 @@
     document.getElementById('new-customer-form').reset();
     document.getElementById('new-customer-error').textContent = '';
     setYnToggle('nc-tap-handle', 'No');
-    setYnToggle('nc-payment-method', '');
+    setYnToggle('nc-billing-same', 'Yes');
+    updateBillingFieldsVisibility();
     document.getElementById('new-customer-form').style.display = 'flex';
     document.getElementById('nc-success').style.display = 'none';
     document.getElementById('back-newcustomer-to-customers').style.display = 'block';
@@ -1027,6 +1519,17 @@
 
   document.getElementById('back-newcustomer-to-customers').addEventListener('click', function () {
     showScreen(state.newCustomerReturnTo || 'screen-customers');
+  });
+
+  // Suggests a region as soon as the rep leaves the City field, but only
+  // while the dropdown is still on its placeholder -- once the rep has
+  // picked (or corrected) a region themselves, typing in City again won't
+  // silently overwrite that choice.
+  document.getElementById('nc-address-city').addEventListener('blur', function (e) {
+    var regionSelect = document.getElementById('nc-region');
+    if (regionSelect.value) return;
+    var suggested = inferRegion(state.rep, e.target.value);
+    if (suggested) regionSelect.value = suggested;
   });
 
   document.getElementById('nc-place-order-btn').addEventListener('click', function () {
@@ -1058,30 +1561,78 @@
       var btn = e.target.closest('.yn-btn');
       if (!btn) return;
       setYnToggle(wrap.id, btn.getAttribute('data-value'));
+      if (wrap.id === 'nc-billing-same') updateBillingFieldsVisibility();
     });
   });
+
+  // Billing Address fields only need to exist (and be required) when the
+  // billing address differs from the business address -- otherwise they'd
+  // block submission of a form the rep has no reason to fill in twice.
+  function updateBillingFieldsVisibility() {
+    var differs = getYnToggle('nc-billing-same') === 'No';
+    document.getElementById('nc-billing-fields').style.display = differs ? 'flex' : 'none';
+    ['nc-billing-street', 'nc-billing-city', 'nc-billing-state', 'nc-billing-zip'].forEach(function (id) {
+      document.getElementById(id).required = differs;
+    });
+  }
+
+  // Joins street/line2/city/state/zip into the single formatted line the
+  // Sheet's address columns have always stored (neither "Delivery Address"
+  // nor "Billing Address" is split into parts on that side) -- e.g.
+  // "123 Main St, Suite 2, San Francisco, CA 94103". Blank parts (address
+  // line 2 is optional) are dropped rather than leaving stray ", ,".
+  function formatAddress(street, line2, city, stateCode, zip) {
+    var cityStateZip = [city, [stateCode, zip].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+    return [street, line2, cityStateZip].filter(Boolean).join(', ');
+  }
 
   document.getElementById('new-customer-form').addEventListener('submit', function (e) {
     e.preventDefault();
     var errEl = document.getElementById('new-customer-error');
     var val = function (id) { return document.getElementById(id).value.trim(); };
+    var billingDiffers = getYnToggle('nc-billing-same') === 'No';
+    var businessAddress = formatAddress(val('nc-address-street'), val('nc-address-2'), val('nc-address-city'), val('nc-address-state'), val('nc-address-zip'));
     var newCustomer = {
       establishmentName: val('nc-name'),
-      address: val('nc-address'),
-      orderingContact: val('nc-contact'),
+      address: businessAddress,
+      orderingContact: [val('nc-contact-first'), val('nc-contact-last')].filter(Boolean).join(' '),
       phone: val('nc-phone'),
       email: val('nc-email'),
-      deliveryAddress: val('nc-delivery-address'),
+      // Confusingly named on the Sheet side (see handleAddCustomer in
+      // Code.gs): this actually lands in "Billing Address (If not the same
+      // as shipping)", left blank when it matches the business address.
+      deliveryAddress: billingDiffers ? formatAddress(val('nc-billing-street'), val('nc-billing-2'), val('nc-billing-city'), val('nc-billing-state'), val('nc-billing-zip')) : '',
       deliveryInstructions: val('nc-delivery-instructions'),
-      region: inferRegion(state.rep, val('nc-address')),
+      // Rep-confirmed, not re-inferred here -- see the nc-address-city blur
+      // handler below for the pre-fill. Submitting whatever the dropdown
+      // actually shows (rather than recomputing) is what makes this a real
+      // fix and not just a hidden default with extra steps.
+      region: val('nc-region'),
       licenseNumber: val('nc-license'),
       tapHandleRequested: getYnToggle('nc-tap-handle'),
       salesRep: state.rep || '',
       addedBy: state.rep || '',
-      paymentMethod: getYnToggle('nc-payment-method')
+      // No more Fintech/ACH choice -- every account goes on Stripe now.
+      paymentMethod: 'ACH / Stripe ACH'
     };
 
-    var required = ['establishmentName', 'address', 'orderingContact', 'phone', 'email', 'deliveryAddress', 'deliveryInstructions', 'paymentMethod'];
+    var required = ['establishmentName', 'phone', 'email'];
+    if (!val('nc-address-street') || !val('nc-address-city') || !val('nc-address-state') || !val('nc-address-zip')) {
+      errEl.textContent = 'Please fill in the full business address.';
+      return;
+    }
+    if (!val('nc-contact-first') || !val('nc-contact-last')) {
+      errEl.textContent = 'Please fill in the ordering contact’s first and last name.';
+      return;
+    }
+    if (!val('nc-region')) {
+      errEl.textContent = 'Please select a region.';
+      return;
+    }
+    if (billingDiffers && (!val('nc-billing-street') || !val('nc-billing-city') || !val('nc-billing-state') || !val('nc-billing-zip'))) {
+      errEl.textContent = 'Please fill in the full billing address, or select "Yes" if it matches the business address.';
+      return;
+    }
     var missing = required.filter(function (k) { return !newCustomer[k]; });
     if (missing.length) { errEl.textContent = 'Please fill in all required fields.'; return; }
 
@@ -1131,8 +1682,8 @@
     var tiles = window.LM_PRODUCTS.map(function (p) {
       var selected = !!state.selection[p.id];
       return (
-        '<button type="button" class="product-tile' + (selected ? ' selected' : '') + '" data-toggle="' + p.id + '">' +
-          (selected ? '<span class="tile-check">✓</span>' : '') +
+        '<button type="button" class="product-tile' + (selected ? ' selected' : '') + '" data-toggle="' + p.id + '" style="--tile-accent:' + p.accent + ';">' +
+          '<span class="tile-check">' + (selected ? '✓' : '+') + '</span>' +
           '<span class="tile-logo"><img src="' + p.image + '" alt="' + escapeHtml(p.name) + ' can" /></span>' +
           '<span class="tile-name">' + escapeHtml(p.name) + '</span>' +
           '<span class="tile-sub">' + escapeHtml(p.subtitle) + '</span>' +
@@ -1226,8 +1777,69 @@
     box.style.display = 'block';
   }
 
+  // ---------- Order confirmation ----------
+  // Shown after a successful submit -- lets the rep jump straight to the
+  // Slack thread the order notification landed in, or the printable
+  // invoice, without hunting for either one manually.
+  function slackThreadReplyUrl(channel, ts) {
+    // The web permalink format Slack itself generates for "copy link to
+    // this thread" -- opening it lands directly in the message's thread
+    // reply panel (not just the channel scrolled to the parent message,
+    // which is all the slack://channel app-scheme deep link could do).
+    // thread_ts === the parent message's own ts here, since this is always
+    // linking to the order notification itself, never an existing reply.
+    var tsNoDot = ts.replace('.', '');
+    return (
+      'https://' + window.LM_CONFIG.SLACK_WORKSPACE_DOMAIN + '.slack.com/archives/' + channel + '/p' + tsNoDot +
+      '?thread_ts=' + encodeURIComponent(ts) + '&cid=' + encodeURIComponent(channel)
+    );
+  }
+
+  function renderOrderConfirmation(orderPayload, lines, res) {
+    document.getElementById('confirm-invoice-label').textContent =
+      res.invoiceNumber ? 'Invoice ' + res.invoiceNumber : 'Sent to the order sheet';
+
+    var total = lines.reduce(function (sum, l) { return sum + l.lineTotal; }, 0);
+    var summary = document.getElementById('confirm-summary');
+    summary.innerHTML =
+      '<div class="oline"><span>Customer</span><strong>' + escapeHtml(orderPayload.customer) + '</strong></div>' +
+      '<div class="oline"><span>PO Date</span><span>' + fmtDate(orderPayload.poDate) + '</span></div>' +
+      lines.map(function (l) {
+        return '<div class="oline"><span>' + l.qty + ' &times; ' + escapeHtml(l.productName) + ' <span style="color:var(--silver-dim)">' + escapeHtml(l.packagingFormat) + '</span></span><span>' + fmtMoney(l.lineTotal) + '</span></div>';
+      }).join('') +
+      '<div class="oline"><strong>Order Total</strong><strong>' + fmtMoney(total) + '</strong></div>';
+
+    var slackBtn = document.getElementById('btn-confirm-slack');
+    if (res.slackChannel && res.slackTs && window.LM_CONFIG.SLACK_WORKSPACE_DOMAIN) {
+      slackBtn.style.display = 'flex';
+      slackBtn.onclick = function () {
+        // New tab, not location.href -- on desktop this is a real https://
+        // URL (unlike the old slack:// scheme), so navigating the current
+        // tab would leave the confirmation screen instead of just handing
+        // off to Slack. Mobile still hands off to the installed app via
+        // universal links either way.
+        window.open(slackThreadReplyUrl(res.slackChannel, res.slackTs), '_blank');
+      };
+    } else {
+      slackBtn.style.display = 'none';
+    }
+
+    var invoiceBtn = document.getElementById('btn-confirm-invoice');
+    if (res.invoiceNumber) {
+      invoiceBtn.style.display = 'flex';
+      invoiceBtn.onclick = function () { openInvoice(res.invoiceNumber); };
+    } else {
+      invoiceBtn.style.display = 'none';
+    }
+
+    showScreen('screen-order-confirm');
+  }
+
+  document.getElementById('btn-confirm-home').addEventListener('click', function () { showScreen('screen-home'); });
+
   document.getElementById('footer-submit').addEventListener('click', function () {
     var notes = document.getElementById('order-notes').value.trim();
+    var expectedEmptyKegs = Math.max(0, Number(document.getElementById('order-expected-empties').value) || 0);
     var lines = collectLineItems();
 
     if (!state.customer) { toast('Select a customer account', true); return; }
@@ -1247,28 +1859,27 @@
       paymentMethod: state.customer.paymentMethod || '',
       poDate: new Date().toISOString().slice(0, 10),
       notes: notes,
+      expectedEmptyKegs: expectedEmptyKegs,
+      tapHandleNeeded: getYnToggle('order-tap-handle'),
       lines: lines
     };
 
-    var finish = function (ok, msg, invoiceNumber) {
+    var finish = function (ok, msg, res) {
       btn.disabled = false;
       label.textContent = 'Submit Order';
-      toast(msg, !ok);
-      if (ok) {
-        loadStats();
-        if (invoiceNumber) openInvoice(invoiceNumber);
-        else showScreen('screen-home');
-      }
+      if (!ok) { toast(msg, true); return; }
+      loadStats();
+      renderOrderConfirmation(payload, lines, res || {});
     };
 
     if (!apiConfigured()) {
-      setTimeout(function () { finish(true, 'Order captured (demo mode — connect the sheet in config.js)'); }, 500);
+      setTimeout(function () { finish(true, '', { invoiceNumber: '' }); }, 500);
       return;
     }
 
     apiPost(payload)
       .then(function (res) {
-        if (res.ok) finish(true, lines.length + ' line item(s) sent to the order sheet', res.invoiceNumber);
+        if (res.ok) finish(true, '', res);
         else finish(false, res.error || 'Order failed to submit');
       })
       .catch(function (err) { finish(false, friendlyApiError(err)); });
