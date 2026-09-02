@@ -264,6 +264,79 @@ truck.
 
 ---
 
+## Deployed — 2026-09-02
+
+`ops.tlmbg.co` is live and serving this app.
+
+| Step | Done |
+|---|---|
+| Production Neon migrated | `20260831230000_add_stripe_billing_and_inventory` + `20260902130000_add_ops_platform`. Zero drift afterwards; both views present; `Jack Begley` still `admin` (the hand-written `USING` cast preserved role data); 108 accounts and 0 orders intact. |
+| Production config seeded | 11 locations, 7 commodities, 4 route days, 14 automation rules, 6 products enriched. Auto-schedule OFF for every region. |
+| Env added | `CRON_SECRET` (generated, never recorded here — `vercel env pull` if you need it), `APP_BASE_URL`. |
+| Domain moved | `ops.tlmbg.co` force-moved off `leopard-mark-ops` onto `leopard-mark-order-app` and aliased to the production deployment. |
+| Verified live | `/` host-rewrites to `/ops` and gates to login; `/admin/login` 200; a wrong-PIN login returns a clean `CredentialsSignin` rather than a 500, which proves Neon is reachable through the domain. |
+
+**Untouched, deliberately.** `orders.tlmbg.co` (rep app), `bol.tlmbg.co`,
+`inventory.tlmbg.co` and `ach.tlmbg.co` still point at their own projects, per
+§2 rule 1's "change their DNS last, after acceptance". The old
+`leopard-mark-ops` project is still deployed, now reachable only at
+`leopard-mark-ops.vercel.app`, so reverting is a one-command domain move back.
+
+### The one thing not verified
+
+I could not log in to production: `Jack Begley`'s PIN there is the real one, not
+the `1234` the local demo script sets. So the hub has been proven to route,
+gate and reach the database, but **nobody has yet seen a production page
+render**. Sign in at `https://ops.tlmbg.co/admin/login` and check the Command
+Center. Expect it to be quiet: production has 0 orders, so the attention queue
+will show the accounts-needing-setup items and the pipeline strip will read
+① 108 · ②–⑦ 0.
+
+### Cron is daily, not per-minute
+
+Vercel rejected `* * * * *`: "Hobby accounts are limited to daily cron jobs."
+§2 rule 5 asks for the reason when a limit forces a change, so:
+
+- `after()` is now the **primary** drain (`lib/jobs/kick.ts`), fired by every
+  action that enqueues work. An invoice still goes out seconds after a delivery
+  is marked, which is the behaviour that matters.
+- The daily cron (09:00 UTC) queues the day's wall-clock jobs with their proper
+  `runAfter` and sweeps up elapsed retries.
+- **Gap:** a job that fails with a 5-minute backoff waits for the next ops
+  action or tomorrow's cron. Upgrade to Pro, restore `* * * * *` in
+  `vercel.json`, and nothing else changes — `enqueuePeriodicJobs` is idempotent
+  per calendar day.
+
+### Integrations still unconfigured in production
+
+The hub renders without them (no page reaches the Stripe client — verified by
+tracing the import graph), but these are needed before the pipeline can complete
+end to end:
+
+`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `RESEND_API_KEY`,
+`RESEND_FROM_EMAIL`, `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_BA`, `SLACK_CHANNEL_LA`,
+`APPS_SCRIPT_URL`, `SYNC_SHARED_SECRET`.
+
+Until they are set, the relevant jobs fail with a readable reason, retry, and
+land in the dead-letter queue on `/ops/automations` — which is where an operator
+can see them, rather than failing silently.
+
+### Sessions are per-hostname
+
+Cookies are host-scoped, so signing in at `ops.tlmbg.co` does not carry over to
+`inventory.tlmbg.co` once those domains move here too. That is fine for
+old-bookmark aliases but worth knowing. Sharing one session across subdomains
+would mean setting a `.tlmbg.co` cookie domain, which also hands the session to
+`bol.tlmbg.co` where `docs_only` users live — a deliberate decision, not made.
+
+### Pre-existing lint error
+
+`app/page.tsx` (main's file, restored unchanged by the merge) trips
+`react-hooks/set-state-in-effect`. It predates this work and does not block the
+build, so it was left alone rather than edited mid-cutover.
+
+---
+
 ## Before deploying
 
 1. `prisma migrate deploy` against Neon. The pending
