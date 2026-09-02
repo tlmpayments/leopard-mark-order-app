@@ -8,6 +8,7 @@ import { scheduleOrder } from "@/lib/scheduling";
 import { blockOrder, unblockOrder, appendOrderEvent } from "@/lib/orderEvents";
 import { enqueue } from "@/lib/jobs/queue";
 import { isBlockedReason } from "@/lib/pipeline";
+import { kickJobs } from "@/lib/jobs/kick";
 
 /**
  * Order actions. Every one of these re-checks the role server-side — the proxy
@@ -37,6 +38,9 @@ export async function scheduleOrderAction(formData: FormData): Promise<void> {
     byUserId: user.id,
     reschedule,
   });
+  // Drain now rather than waiting for the daily cron (see lib/jobs/kick.ts).
+  kickJobs();
+
   revalidatePath(`/ops/orders/${orderId}`);
   revalidatePath("/ops");
 }
@@ -86,6 +90,9 @@ export async function markDeliveredAction(formData: FormData): Promise<void> {
     notes: String(formData.get("notes") ?? "") || null,
   });
 
+  // Drain now rather than waiting for the daily cron (see lib/jobs/kick.ts).
+  kickJobs();
+
   revalidatePath(`/ops/orders/${orderId}`);
   revalidatePath("/ops");
   revalidatePath("/ops/inventory");
@@ -106,6 +113,9 @@ export async function issueInvoiceNowAction(formData: FormData): Promise<void> {
     actor: "ops",
     payload: { requestedBy: user.id, manual: true },
   });
+  // Drain now rather than waiting for the daily cron (see lib/jobs/kick.ts).
+  kickJobs();
+
   revalidatePath(`/ops/orders/${orderId}`);
 }
 

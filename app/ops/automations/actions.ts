@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { ADMIN_ROLES, LEDGER_ROLES, assertRole } from "@/lib/ops/session";
 import { discardJob, retryJob } from "@/lib/jobs/queue";
 import { AUTOMATION_RULES } from "@/lib/automations";
+import { kickJobs } from "@/lib/jobs/kick";
 
 /** Toggling an automation is an admin action and is recorded with who did it. */
 export async function toggleRuleAction(formData: FormData): Promise<void> {
@@ -32,6 +33,9 @@ export async function toggleRuleAction(formData: FormData): Promise<void> {
 export async function retryJobAction(formData: FormData): Promise<void> {
   const user = await assertRole(LEDGER_ROLES);
   await retryJob(String(formData.get("jobId")), user.id);
+  // Drain now rather than waiting for the daily cron (see lib/jobs/kick.ts).
+  kickJobs();
+
   revalidatePath("/ops/automations");
   revalidatePath("/ops");
 }

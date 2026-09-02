@@ -4,8 +4,16 @@ import { drainJobs, enqueuePeriodicJobs } from "@/lib/jobs/runner";
 /**
  * The job runner's cron entry point (§2 rule 5).
  *
- * Vercel Cron calls this every minute. It first enqueues any wall-clock jobs
- * whose window has arrived, then drains what is due.
+ * Runs ONCE DAILY, not every minute: Vercel Hobby rejects a `* * * * *`
+ * schedule at deploy time ("Hobby accounts are limited to daily cron jobs").
+ * §2 rule 5 says to state the reason when a limit forces a change, so: this is
+ * that reason, and the response is to make `after()` the primary drain
+ * (lib/jobs/kick.ts) with this cron as the safety net rather than adding
+ * Inngest/Trigger.dev for a few hundred jobs a day.
+ *
+ * It enqueues the day's wall-clock jobs with their proper runAfter times, then
+ * drains whatever is due. On Pro, restore `* * * * *` in vercel.json and
+ * nothing else needs to change -- enqueuePeriodicJobs is idempotent per day.
  *
  * Auth: Vercel signs cron requests with CRON_SECRET as a bearer token. The
  * check is not optional decoration — without it this URL is an unauthenticated

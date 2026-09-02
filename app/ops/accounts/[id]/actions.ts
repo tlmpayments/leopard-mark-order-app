@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { LEDGER_ROLES, assertRole } from "@/lib/ops/session";
 import { enqueue } from "@/lib/jobs/queue";
+import { kickJobs } from "@/lib/jobs/kick";
 
 /**
  * Send the Stripe ACH setup link — the entirety of what ach.tlmbg.co did as a
@@ -23,6 +24,9 @@ export async function sendSetupLinkAction(formData: FormData): Promise<void> {
     { accountId, requestedBy: user.id },
     { accountId },
   );
+
+  // Drain now rather than waiting for the daily cron (see lib/jobs/kick.ts).
+  kickJobs();
 
   revalidatePath(`/ops/accounts/${accountId}`);
 }

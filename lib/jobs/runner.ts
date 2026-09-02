@@ -91,48 +91,87 @@ async function notifyFailure(kind: string, ref: string, err: unknown, status: st
 }
 
 /**
- * Enqueue the periodic jobs whose schedule is a wall-clock time rather than a
- * reaction to an event. Idempotent per day/hour via the idempotency key, so
- * calling this every minute produces one run per window.
+ * Enqueue the day's wall-clock jobs.
+ *
+ * Written for a ONCE-DAILY cron, because that is all Vercel Hobby allows -- a
+ * `* * * * *` schedule is rejected at deploy time. So this cannot gate on "is
+ * it 16:00 right now"; instead it queues each of the day's jobs once, with
+ * `runAfter` set to the time it should actually run. Whatever is already due
+ * gets drained by this same invocation, and the rest is picked up by the next
+ * kick from an ops action (lib/jobs/kick.ts) or tomorrow's cron.
+ *
+ * Idempotent per calendar day via the idempotency key, so calling it more often
+ * -- which is exactly what happens after an upgrade to Pro -- still produces
+ * one run per job per day.
  */
 export async function enqueuePeriodicJobs(now: Date = new Date()): Promise<string[]> {
   const { enqueue } = await import("./queue");
   const enqueued: string[] = [];
 
-  const pt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Los_Angeles",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    hour12: false,
-  }).formatToParts(now);
-  const get = (t: string) => pt.find((p) => p.type === t)?.value ?? "";
-  const day = `${get("year")}-${get("month")}-${get("day")}`;
-  const hour = Number.parseInt(get("hour"), 10);
+  const day = pacificDay(now);
 
-  // 16:00 PT — tomorrow's deliveries, in time to act on it before people leave.
-  if (hour === 16) {
-    const { created } = await enqueue("delivery_digest", day, { day });
-    if (created) enqueued.push("delivery_digest");
+  // [kind, local PT hour it should run at]
+  const schedule: Array<[Parameters<typeof enqueue>[0], number]> = [
+    // 02:00 -- the nightly reconcile, when nobody is editing the Sheet.
+    ["sheet_reconcile", 2],
+    // 09:00 -- the overdue summary, at the start of the working day.
+    ["invoice_reminder", 9],
+    // 16:00 -- tomorrow's deliveries, in time to act before people leave.
+    ["delivery_digest", 16],
+  ];
+
+  for (const [kind, hour] of schedule) {
+    const { created } = await enqueue(kind, day, { day }, { runAfter: atPacificHour(day, hour) });
+    if (created) enqueued.push(kind);
   }
-  // 02:00 PT — the nightly reconcile, when nobody is editing the Sheet.
-  if (hour === 2) {
-    const { created } = await enqueue("sheet_reconcile", day, { day });
-    if (created) enqueued.push("sheet_reconcile");
-  }
-  // 09:00 PT — the overdue summary, at the start of the working day.
-  if (hour === 9) {
-    const { created } = await enqueue("invoice_reminder", day, { day });
-    if (created) enqueued.push("invoice_reminder");
-  }
-  // Monday 09:00 PT — keg custody.
-  if (hour === 9 && new Date(now).getUTCDay() === 1) {
-    const { created } = await enqueue("keg_custody_nudge", day, { day });
+
+  // Weekly, on Mondays.
+  if (pacificWeekday(now) === 1) {
+    const { created } = await enqueue("keg_custody_nudge", day, { day }, {
+      runAfter: atPacificHour(day, 9),
+    });
     if (created) enqueued.push("keg_custody_nudge");
   }
 
   return enqueued;
+}
+
+/** "YYYY-MM-DD" in Pacific time -- the business's own calendar day. */
+function pacificDay(at: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(at);
+}
+
+function pacificWeekday(at: Date): number {
+  const name = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    weekday: "short",
+  }).format(at);
+  return { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }[name] ?? 0;
+}
+
+/**
+ * A given local hour on a given Pacific calendar day, as a real instant.
+ * Resolves the UTC offset for that day rather than assuming -08:00, so the
+ * schedule does not slip by an hour across the DST boundaries in March and
+ * November.
+ */
+function atPacificHour(day: string, hour: number): Date {
+  const naive = new Date(`${day}T${String(hour).padStart(2, "0")}:00:00Z`);
+  const label = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    timeZoneName: "shortOffset",
+  })
+    .formatToParts(naive)
+    .find((part) => part.type === "timeZoneName")?.value;
+  const m = /GMT([+-]\d{1,2})(?::(\d{2}))?/.exec(label ?? "");
+  const offsetHours = m ? Number.parseInt(m[1], 10) : -8;
+  const offsetMinutes = m?.[2] ? Number.parseInt(m[2], 10) : 0;
+  return new Date(naive.getTime() - (offsetHours * 60 + Math.sign(offsetHours) * offsetMinutes) * 60_000);
 }
 
 /** Queue depth for the hub's health chip. */
