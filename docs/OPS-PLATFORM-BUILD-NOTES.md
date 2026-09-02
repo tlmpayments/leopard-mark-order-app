@@ -1,0 +1,277 @@
+# Ops Platform — build notes
+
+Companion to `docs/OPS-PLATFORM-BUILD-PROMPT.md`. What is built, what is
+verified, what is deliberately not built yet, and how to run it.
+
+Everything here is additive. The rep app (`public/rep-app`), the Apps Script
+backend and the Google Sheet are untouched and still authoritative for order
+entry; nothing in this build changes how a rep places an order today.
+
+---
+
+## Run it
+
+```bash
+# 1. A local Postgres to develop against (never point this build at Neon while
+#    testing — it writes orders, mints BOL numbers and calls Stripe).
+npx prisma dev --name ops-platform-test --detach     # prints a DATABASE_URL
+export DATABASE_URL="postgres://postgres:postgres@localhost:<port>/template1?sslmode=disable"
+export DATABASE_URL_UNPOOLED="$DATABASE_URL"
+
+# 2. Schema + config + catalog
+npx prisma migrate deploy
+npx tsx scripts/import-foundation-data.ts     # accounts, reps, the 6 priced SKUs
+npx tsx scripts/seed-ops-platform.ts          # locations, routes, commodities, rules
+                                              # (--dry-run to preview)
+
+# 3. Demo data that exercises the real pipeline end to end
+npx tsx scripts/dev/demo-pipeline.ts          # dev only; refuses a hosted DB
+
+# 4. Run
+AUTH_SECRET=dev-only-secret npx next dev
+# sign in at /admin/login — the demo script creates
+#   Jack Begley (admin) · Dany (ops) · Warehouse — Benicia (warehouse) · Daniel (docs_only)
+#   all with PIN 1234
+```
+
+`npx prisma dev ls` lists local servers; `npx prisma dev stop <name>` stops one.
+
+### Env vars this build reads that were not already set
+
+| Var | Needed for | Behaviour if unset |
+|---|---|---|
+| `CRON_SECRET` | Authenticating Vercel Cron to `/api/cron/jobs` | **In production the route returns 503.** It fails closed on purpose: without it, that URL is an unauthenticated way to make the system send invoices. |
+| `STRIPE_WEBHOOK_SECRET` | Verifying Stripe webhook signatures | Webhook returns 401 (pre-existing behaviour) |
+| `APPS_SCRIPT_URL`, `SYNC_SHARED_SECRET` | DB → Sheet mirror | `syncOrderToSheet` returns `ok:false`; jobs retry then dead-letter |
+| `APP_BASE_URL` | Links in Slack digests | Falls back to `https://ops.tlmbg.co` |
+| `SLACK_CHANNEL_INVENTORY` | Reorder alerts | Alerts computed but not posted |
+
+---
+
+## What is built
+
+### Data model (§4)
+`prisma/migrations/20260902130000_add_ops_platform` — additive, no renames.
+Adds `UserRole`, `UserLocation`, `Location`, `RouteSchedule`,
+`RegionSlackChannel`, `Commodity`, `InventoryEvent`, `Shipment`, `BolSequence`,
+`DocumentLog`, `KegCustodyEntry`, `JobRun`, `AutomationRule`, `StripeEvent`;
+enriches `Product`, `Order`, `Invoice`, `Account`.
+
+Two SQL views do the netting: `stock_by_location` and `available_for_delivery`
+(warehouses only, minus what scheduled orders have already promised).
+
+One hand-written piece of that migration is worth knowing about. Prisma's
+generated diff wanted to `DROP` and re-add `reps.role` to change its enum type,
+which would have silently reset every existing admin to `rep`. It is rewritten
+as an in-place `ALTER COLUMN ... TYPE ... USING` cast, so the data survives.
+
+### The pipeline (§3)
+`lib/pipeline.ts`. `OrderStatus` stays the contract lifecycle — the compliance
+gate `draft → pending_confirmation → confirmed` is untouched — and the seven
+stages are *derived* by one pure function from fulfillment and billing columns.
+`blocked` is an overlay carrying the stage it blocks, so a blocked card keeps
+its board column.
+
+The contract gate now outranks every fulfillment fact: an order that has not
+reached `confirmed` cannot appear past ①, however its other columns look.
+
+### The Sheet mirror gate
+`syncOrderToSheet` now **refuses** any order outside
+`SHEET_MIRRORABLE_STATUSES` (`confirmed`, `scheduled`, `fulfilled`).
+
+This replaces what `__tests__/confirmation-gate-adjacency.test.ts` used to
+guarantee. That test asserted the mirror had *no automatic caller at all*, which
+was true while orders still reached the Sheet via Apps Script. The job runner is
+now a legitimate automatic caller, so a call-site allowlist alone would only
+prove somebody remembered to edit the test. The invariant moved into the
+choke-point, and the test now asserts the refusal directly — a future caller
+cannot bypass it by being written before someone reads the test file.
+
+### Jobs (§2 rule 5, §7)
+`lib/jobs/` — a Postgres queue drained by Vercel Cron every minute
+(`vercel.json`, `app/api/cron/jobs`). Idempotency key per (kind, subject),
+`FOR UPDATE SKIP LOCKED` claiming, the §6.5 backoff ladder (1m/5m/30m/2h/12h),
+dead-letter after `maxAttempts`, retry and discard from the hub.
+
+Not Inngest/Trigger.dev: the hub has to render the run log either way, and once
+run history must be queryable from our own database, a hosted queue would mean
+two copies of the same truth.
+
+### Delivery (⑤) — `lib/delivery.ts`
+One transaction mints the BOL from a real locked counter, writes one `DELIVERY`
+event per line, `RETURN` events for empties, moves keg custody, stamps
+`deliveredAt` (which is what Net 30 counts from), and enqueues the invoice.
+Idempotent — a double-tap in a warehouse does not mint a second BOL.
+
+`BolSequence` replaces two broken schemes: the Inventory app's unlocked
+scan-and-increment (two people marking delivered in the same second get the same
+number) and the BOL Maker's four random digits with no collision check.
+
+### Invoicing (§6) — `lib/billing/`
+`compose.ts` is pure and asserted against the real INV26277: one item per line,
+`Keg Deposit` at +$35/keg, `Keg Deposit Returned` at −$35/empty, the exempt-tax
+line and both § 25509 / § 25509.1 sentences verbatim, our own INV# in
+`custom_fields` (Stripe's numbering is immutable per account and cannot be ours).
+
+Due date is computed from `deliveredAt`, not from finalization. Stripe's
+`days_until_due` counts from finalization, which would put a legally wrong date
+on the document.
+
+A pickup-only visit can net negative. Stripe will not finalize a negative
+invoice, so the excess becomes a customer balance credit rather than vanishing.
+
+### One renderer (§13) — `lib/bol/render.ts`
+Replaces the copy in the Inventory app and the hand-synced copy in the BOL
+Maker, which had already drifted: the BOL Maker's version had gained SKU and lot
+columns, the package-type line break and the `@page`/`print-color-adjust` rules
+that make the navy bars actually print. **That is the version kept.**
+
+Delivery receipts still show weight and never price (Inventory commit 79a0f57).
+
+### The hub (§8) — `app/ops/`
+Command Center, Orders (board + table), Order detail with the seven-node
+timeline, Accounts + detail, Deliveries week view, Inventory, Documents,
+Billing, Payment setup links, Automations, Settings, Search. Plus `/docs`, the
+paperwork-only maker for `docs_only`.
+
+Design tokens come from `public/rep-app/assets/css/app.css` so the hub and the
+rep app are one brand. Two departures from the mockup, both because the mockup
+could not ship what the real app can: the real brand faces (Bowery Lane / Tomato
+Grotesk / Bogart) are served from `/rep-app/assets/fonts/` instead of Barlow,
+and the monospace is the platform stack rather than a Google-hosted IBM Plex —
+§8 asks for aligned digits, which `font-variant-numeric: tabular-nums` gives
+without blocking first paint on fonts.googleapis.com.
+
+The attention queue is **computed, not stored**. There is no alerts table to go
+stale — which is the direction the prototype's permanently-empty `ALERTS` array
+was heading.
+
+### Access (§2 rule 6)
+The Credentials login used to refuse everyone but admins, which made "can hold a
+session" and "may do anything" the same question. Five roles now share one PIN
+login, so those questions came apart and the checks moved to where the role
+means something:
+
+- `proxy.ts` — host routing plus route access. **This is also where `/admin`
+  gained an explicit `role === "admin"` check.** Without that line, widening the
+  login would have widened `/admin` with it.
+- `lib/ops/roles.ts` — the pure policy (framework-free, so it is testable).
+- `lib/ops/session.ts` — `requireOpsUser` / `assertRole` / `assertLocation`,
+  re-checked inside every mutating page and action. The proxy is a convenience;
+  this is the boundary.
+
+A `warehouse` user with no locations assigned can act **nowhere** — fail closed,
+so a half-finished setup never reads as "allow everything".
+
+### Host routing (§2 rule 1)
+`ops.tlmbg.co → /ops`, `inventory.tlmbg.co → /ops/inventory`,
+`bol.tlmbg.co → /docs`, `ach.tlmbg.co → /ops/billing/setup-links`, as a
+**rewrite** so the operator stays on the branded host and old bookmarks keep the
+hostname they were saved with. `orders.tlmbg.co` is deliberately absent — the
+rep app keeps serving exactly as today until the Phase R cutover.
+
+---
+
+## Verified, not asserted
+
+Against a local Postgres, with output in the session transcript:
+
+- **Migration** applies from scratch through all 8 migrations; `migrate diff`
+  against the schema reports an empty diff (no drift); both views queryable;
+  `UserRole` has all five values; `RepRole` dropped with data preserved.
+- **189 tests pass** (15 files), including the 18 pre-existing DB-backed ones.
+- **`next build`** compiles all 25 routes; `eslint` reports 0 errors.
+- **End-to-end pipeline** (`scripts/dev/demo-pipeline.ts`): slot proposed
+  `2026-09-04 from WH-WIL` → scheduled → `markDelivered` minted
+  `BOL-WH-BEN-260902-02`, wrote 3 ledger events, moved custody +3, enqueued the
+  invoice. Derived stages came back `new_order`, `needs_scheduling`,
+  `scheduled`, `blocked (license_expired, at scheduled)`, `delivered`.
+- **Stock netting** after that delivery: `CNT1AKHB01` 24 → 20,
+  `CNT1AKSB01` 22 (−2 delivered, +1 returned, twice), and
+  `SGB1AKHB01 on_hand=24 available=20` — the reservation showing up.
+- **BOL concurrency**: 8 parallel mints → 8 distinct contiguous numbers
+  (and 10 with a gap-free sequence assertion in `bol-sequence.test.ts`).
+- **All 13 hub screens** return 200 with real data. The pipeline strip read
+  ① 6 · ② 20 · ③ 2 · ④ 4 · ⑤ 2 · ⑥ 0 · ⑦ 0.
+- **Printed receipt** carries the real BOL number, `436 lbs` total weight
+  (2×160 + 2×58), the empty-keg pickup block, `@page size: letter`, and **zero
+  price symbols**.
+- **Role gating**: `docs_only` → `/ops` redirects to `/docs`; `/docs` 200;
+  `/admin` redirects to `/docs` in one hop.
+
+### One bug this verification caught
+The pipeline strip and orders board showed stage ③ as permanently empty while
+the order detail page showed it correctly. A slot proposal is an `OrderEvent`,
+not a column, and the list query was not loading it — so `pipelineStage()` never
+saw a proposal from a list. Fixed in `lib/ops/queries.ts` (`ORDER_INCLUDE` now
+selects the latest `order.slot_proposed`); ③ went from 0 to 2 and ② dropped
+correspondingly.
+
+---
+
+## Not built yet
+
+Honest list, roughly in the order it would matter:
+
+1. **The order-confirmation trigger.** Nothing yet enqueues
+   `sync_order_to_sheet` / `slack_new_order` / `stock_check` /
+   `propose_delivery_slot` on `order.confirmed`, because no path in this repo
+   creates a confirmed order yet — reps still go through Apps Script. The
+   handlers are written and tested; they need a call site, which is Phase R
+   (`/api/rep/*`).
+2. **`scripts/migrate-inventory-from-sheet.ts`** (§4 steps 1–7). The schema,
+   views and netting are in place and the seed loads locations, routes,
+   commodities and product enrichment — but the historical `Inventory Ledger`
+   import and the SKU-by-SKU parity proof against `inventory.tlmbg.co` are not
+   written. **Do not retire the old dashboard before that parity check runs.**
+3. **Sheet ownership registry for the new tabs** (§5). `lib/sheetColumns.ts`
+   still covers the Sales tab only; the per-tab registry for `BOLs`,
+   `SKU Master`, `Inventory Ledger` etc. is not built, and neither are the
+   Code.gs actions to write them. This is the "5-place coordinated change".
+4. **Inventory write UI** — `/ops/inventory/movement` and `/transfer` are linked
+   but not built. `lib/inventory.ts` and `lib/delivery.ts` have the primitives.
+5. **Drag-to-schedule** on the board and deliveries week view. Scheduling works
+   through the form on the order detail page.
+6. **Freight BOL form** for `/docs`. The renderer supports it fully; only the
+   delivery-receipt form is built.
+7. **Rep app changes** (§9) — setup-checklist response, Mark delivered, stage
+   chips.
+8. **Remaining §11 tests**: `inventory-stock` covers netting but not view-vs-app
+   parity; `first-order`, `jobs` (queue integration, as opposed to the pure
+   backoff/idempotency tests that exist), `billing-email-resolution` (covered
+   inside `account-checklist`), `sheet-ownership`.
+
+---
+
+## Answers I assumed (§12) — please confirm
+
+§12 says not to guess. These are the spec's or the mockup's own stated defaults,
+seeded as **data** so correcting any of them is an `UPDATE`, not a deploy. But
+they are assumptions, and three of them can produce a wrong document or a wrong
+truck.
+
+| # | Question | Assumed | Where it lives |
+|---|---|---|---|
+| 1 | Region → warehouse → weekdays, cutoff | BA → WH-SF/WH-BEN, Tue + Thu; LA → WH-WIL, Wed + Fri; 14:00 prior-day cutoff. Auto-schedule **off** for both. | `RouteSchedule`, `AutomationRule` |
+| 2 | All accounts sales-tax exempt? | Yes — `Account.taxExempt` defaults `true`. A column, not a constant, so a non-exempt account is a data change. | `accounts.tax_exempt` |
+| 3 | Keg deposits | $35 on ½ and ⅙ (per INV26277). **GSP/SGS and MicroStar unconfirmed.** | `products.deposit_amount` |
+| 4 | Billing email source | `Account.billingContactEmail` → ordering `Contact.email` → block the invoice. Rep app does not yet require it. | `lib/ops/checklist.ts` |
+| 5 | Invoice timing | Immediate on delivery, rule-toggleable. | `auto_invoice_on_delivery` |
+| 6 | `docs_only` users / warehouse scoping | Daniel = `docs_only`. Warehouse scoping is per-user and **empty by default**. | `UserLocation` |
+| 7 | Slack channels | Keep BA/LA from env. `#inventory` / `#billing` need channel IDs. | `RegionSlackChannel` |
+| 8 | Delivery receipts: weight or price | Weight, as today. No signature capture. | `lib/bol/render.ts` |
+| 9 | Port anything from the prototype? | No, per the spec's default. | — |
+
+---
+
+## Before deploying
+
+1. `prisma migrate deploy` against Neon. The pending
+   `20260831230000_add_stripe_billing_and_inventory` (pre-existing) applies
+   first. **This build was never pointed at the Neon database.**
+2. Set `CRON_SECRET`, or `/api/cron/jobs` returns 503 in production by design.
+3. Add the four hostnames to this Vercel project. Move DNS **last**, after
+   acceptance — the old projects stay deployed so a rollback is a DNS revert.
+4. Run the §4 parity check before retiring `inventory.tlmbg.co`.
+5. Parallel-run the Sheet mirror against a **copy** of the master spreadsheet
+   until P8, per the original prompt's ground rule.

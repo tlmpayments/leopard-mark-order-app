@@ -23,18 +23,22 @@ model Rep {
   name      String   @unique
   pinHash   String?  @map("pin_hash")
   active    Boolean  @default(true)
-  role      RepRole  @default(rep)
+  role      UserRole  @default(rep)
   createdAt DateTime @default(now()) @map("created_at")
 
   accounts Account[]
   orders   Order[]
+  locations UserLocation[]
 
   @@map("reps")
 }
 
-enum RepRole {
-  rep
+enum UserRole {
   admin
+  ops
+  warehouse
+  rep
+  docs_only
 }
 
 // ---------- Accounts ----------
@@ -55,6 +59,14 @@ model Account {
   paymentMethod        String?       @map("payment_method")
   terms                String?
   creditHold           Boolean       @default(false) @map("credit_hold")
+  // Independent of licenseStatus/creditHold -- this gates whether a
+  // self-service portal signup is a real, vetted account at all, before
+  // license/credit standing even become relevant questions. Every account
+  // that existed before this field shipped (the 107 Sheet-imported
+  // accounts, anything a rep adds via the rep app) is backfilled to
+  // `approved` in this field's own migration -- only a customer signing
+  // themselves up through the portal ever starts at `pending`.
+  approvalStatus       AccountApprovalStatus @default(pending) @map("approval_status")
   priority             String?
   importedToEkos       Boolean       @default(false) @map("imported_to_ekos")
   lat                  Float?
@@ -65,6 +77,31 @@ model Account {
   // display-name edit shouldn't orphan the row once imported — see plan's
   // "Data model" section.
   sheetRowRef          Int?          @map("sheet_row_ref")
+  // Stripe billing linkage (see plan's Phase 9). stripeCustomerId is set
+  // once by ensureStripeCustomer -- every other Stripe write goes through
+  // that one function so the two call sites (admin approval, and rep-app
+  // addCustomer once Stage 2 ships) can't independently create duplicate
+  // Stripe Customers for the same account. stripeDefaultPaymentMethod is
+  // kept in sync by the Stripe webhook, not read live from the Stripe API
+  // on every dashboard load -- it's what issueOrderInvoice checks to decide
+  // charge_automatically vs send_invoice.
+  stripeCustomerId           String?   @unique @map("stripe_customer_id")
+  stripeDefaultPaymentMethod String?   @map("stripe_default_payment_method")
+  stripeSetupLinkSentAt      DateTime? @map("stripe_setup_link_sent_at")
+  // Billing email source of truth (§6.2). Imported from the Customer
+  // Accounts "Billing Contact Email" column; resolution order is
+  // billingContactEmail -> ordering Contact.email -> none (blocks the
+  // invoice, never the order).
+  billingContactEmail        String?   @map("billing_contact_email")
+  // Set once, the first time an order reaches stage (2) for this account.
+  // Mirrors the Sheet's "First Order Sent" column and is what makes the
+  // Slack ":tada: FIRST ORDER" copy fire exactly once (§6.4).
+  firstOrderAt               DateTime? @map("first_order_at")
+  // Wholesale alcohol to licensed retailers is sales-tax exempt today, so
+  // this defaults true and every invoice prints "TAX: Exempt (0.0000%)".
+  // It is a column rather than a hardcoded constant so a non-exempt account
+  // needs a data change, not a code change (§6.3).
+  taxExempt                  Boolean   @default(true) @map("tax_exempt")
   createdAt            DateTime      @default(now()) @map("created_at")
   updatedAt            DateTime      @updatedAt @map("updated_at")
 
@@ -73,6 +110,10 @@ model Account {
   accountPricing AccountPricing[]
   orders         Order[]
   messages       Message[]
+  invoices       Invoice[]
+  shipments        Shipment[]
+  inventoryEvents  InventoryEvent[]
+  kegCustody       KegCustodyEntry[]
 
   @@index([salesRepId])
   @@map("accounts")
@@ -83,6 +124,12 @@ enum LicenseStatus {
   expired
   suspended
   unknown
+}
+
+enum AccountApprovalStatus {
+  pending
+  approved
+  rejected
 }
 
 // ---------- Contacts (ordering contacts, some of whom are SMS-authorized) ----------
@@ -150,8 +197,23 @@ model Product {
   active       Boolean  @default(true)
   createdAt    DateTime @default(now()) @map("created_at")
 
+  // Enrichment from the Inventory app's "SKU Master" tab, joined on skuCode
+  // (the two systems already use identical SKU codes, e.g. CNT1AKSB01).
+  brandCode        String?  @map("brand_code")
+  packageType      String?  @map("package_type")
+  isKeg            Boolean  @default(false) @map("is_keg")
+  // $35.00 on 1/2 and 1/6 bbl today, per INV26277's "Keg Deposit" line.
+  depositAmount    Decimal? @map("deposit_amount") @db.Decimal(10, 2)
+  reorderThreshold Int?     @map("reorder_threshold")
+  // Drives the computed weight on Delivery Receipts and freight BOLs:
+  // 160 lb per 1/2 bbl, 58 lb per 1/6 bbl, 22 lb per case, 0 for tap handles.
+  weightPerUnit    Decimal? @map("weight_per_unit") @db.Decimal(10, 2)
+  upc              String?
+
   accountPricing AccountPricing[]
   orderLines     OrderLine[]
+  inventoryEvents InventoryEvent[]
+  kegCustody      KegCustodyEntry[]
 
   @@map("products")
 }
@@ -230,6 +292,20 @@ model Order {
   bolNumber    String?   @map("bol_number")
   achRef       String?   @map("ach_ref")
 
+  // ---- Fulfillment & billing facts (§3). OrderStatus stays the contract
+  // lifecycle (draft -> pending_confirmation -> confirmed); the seven-stage
+  // pipeline is DERIVED from these columns by pipelineStage() in
+  // lib/pipeline.ts. Never add stage values to OrderStatus.
+  deliveredAt         DateTime? @map("delivered_at")
+  expectedEmptyKegs   Int?      @map("expected_empty_kegs")
+  tapHandleRequested  Boolean?  @map("tap_handle_requested")
+  // "blocked" is an overlay on a stage, not a stage of its own: an order can
+  // be scheduled AND blocked:license_expired. Compliance blocks (license,
+  // credit) are never auto-cleared -- a human clears them and it is logged.
+  blockedReason       String?   @map("blocked_reason")
+  blockedAt           DateTime? @map("blocked_at")
+  blockedByUserId     String?   @map("blocked_by_user_id")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -240,9 +316,51 @@ model Order {
   events            OrderEvent[]
   aiInterpretations AiInterpretation[]
   syncLogs          SyncLog[]
+  invoice           Invoice?
+  shipment          Shipment?
 
   @@index([accountId, status])
   @@map("orders")
+}
+
+// ---------- Stripe invoices (see plan's Phase 10) ----------
+// Deliberately separate from Order.invoiceNumber/invoiceStatus above --
+// those are the legacy Sheet-facing fields (ops's own invoice numbering,
+// synced to the Sheet); this is the real Stripe billing record and never
+// syncs to the Sheet in this pass (see plan's "5-place coordinated change"
+// note on lib/sheetColumns.ts -- adding a Sheet-synced field is real cost,
+// deliberately avoided here).
+model Invoice {
+  id               String    @id @default(cuid())
+  orderId          String    @unique @map("order_id")
+  accountId        String    @map("account_id")
+  stripeInvoiceId  String    @unique @map("stripe_invoice_id")
+  // Mirrors Stripe's own invoice.status string verbatim (draft/open/paid/
+  // uncollectible/void) plus one local-only value, "local_error", used when
+  // the Stripe API call itself failed -- see issueOrderInvoice's retry note.
+  status           String
+  collectionMethod String    @map("collection_method") // charge_automatically | send_invoice
+  amountDue        Decimal   @map("amount_due") @db.Decimal(10, 2)
+  amountPaid       Decimal   @default(0) @map("amount_paid") @db.Decimal(10, 2)
+  dueDate          DateTime? @map("due_date")
+  hostedInvoiceUrl String?   @map("hosted_invoice_url")
+  sentAt           DateTime? @map("sent_at")
+  paidAt           DateTime? @map("paid_at")
+  // Our own INV##### copied from Order.invoiceNumber at issue time. Stripe's
+  // own invoice number is immutable per account, so ours travels in the
+  // Stripe invoice's custom_fields + metadata instead (§6.3).
+  invoiceNumber       String?  @unique @map("invoice_number")
+  pdfUrl              String?  @map("pdf_url")
+  depositAmount       Decimal? @map("deposit_amount") @db.Decimal(10, 2)
+  depositCreditAmount Decimal? @map("deposit_credit_amount") @db.Decimal(10, 2)
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  order   Order   @relation(fields: [orderId], references: [id])
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@index([accountId, status])
+  @@map("invoices")
 }
 
 enum OrderChannel {
@@ -288,6 +406,7 @@ model OrderLine {
 
   order   Order   @relation(fields: [orderId], references: [id])
   product Product @relation(fields: [productId], references: [id])
+  inventoryEvents InventoryEvent[]
 
   @@unique([orderId, lineIndex])
   @@map("order_lines")
@@ -398,4 +517,505 @@ model SyncLog {
 enum SyncDirection {
   db_to_sheet
   sheet_to_db
+}
+
+// ---------- Inventory dashboard (see plan's Phase 11) ----------
+// Purely additive/read-only mirrors of data that lives elsewhere (warehouse
+// exports, a consignment ledger, a VIP/DATASTAGE reporting export) --
+// Postgres never becomes authoritative for stock levels here, per the
+// explicit "read-only dashboard" decision. Populated by
+// scripts/import-inventory-snapshot.ts, run manually whenever a fresh
+// export lands; there is no live feed for any of these three sources.
+enum InventorySource {
+  leopard_mark_warehouse
+  familiar_ventures_consignment
+  vip_datastage
+}
+
+model InventorySnapshot {
+  id             String           @id @default(cuid())
+  source         InventorySource
+  snapshotDate   DateTime         @map("snapshot_date")
+  // Best-effort match to Product.skuCode -- null if the source file's own
+  // code couldn't be confidently normalized/mapped (see import script's
+  // header comment). Never guessed silently.
+  skuCode        String?          @map("sku_code")
+  rawProductCode String           @map("raw_product_code")
+  // Warehouse name for on-hand rows (e.g. "EWD", "WLA Warehouse"), or the
+  // ship-to account name for a Familiar Ventures consignment row.
+  location       String?
+  lotRef         String?          @map("lot_ref")
+  onHand         Decimal?         @map("on_hand") @db.Decimal(10, 2)
+  onOrder        Decimal?         @map("on_order") @db.Decimal(10, 2)
+  onHold         Decimal?         @map("on_hold") @db.Decimal(10, 2)
+  available      Decimal?         @db.Decimal(10, 2)
+  inTransit      Decimal?         @map("in_transit") @db.Decimal(10, 2)
+  importedAt     DateTime         @default(now()) @map("imported_at")
+
+  @@index([source, snapshotDate])
+  @@map("inventory_snapshots")
+}
+
+// ---------- TTB movement ledger mirror (see plan's Phase 11) ----------
+// Mirrors the "Master Movement Ledger" tab of the TTB excise-tax workbook
+// verbatim -- non-sale movements only (Produced/Transfer in bond/Destroyed).
+// Actual sales/removals are never written here; they're computed live from
+// Order/OrderLine on the dashboard for cross-checking against this data,
+// never merged into the same table, matching the ledger's own convention
+// ("log every movement EXCEPT sales").
+model BreweryMovementEvent {
+  id           String   @id @default(cuid())
+  eventDate    DateTime @map("event_date")
+  event        String
+  location     String
+  destination  String?  @map("destination")
+  packageUnit  String?  @map("package_unit")
+  qty          Decimal? @db.Decimal(12, 4)
+  barrels      Decimal? @db.Decimal(12, 4)
+  reportsUnder String?  @map("reports_under")
+  stateCode    String?  @map("state_code")
+  importedAt   DateTime @default(now()) @map("imported_at")
+
+  @@index([location, eventDate])
+  @@map("brewery_movement_events")
+}
+
+// ---------- Auth.js bookkeeping (customer portal magic-link login) ----------
+// Deliberately NOT named User/Account/Session -- @auth/prisma-adapter
+// hardcodes calls to prisma.user/.account/.session/.verificationToken, and
+// this schema's own `Account` model already means "wholesale customer
+// business" (see above), which would collide with Auth.js's conventional
+// "linked provider account" meaning of the same name. auth.ts passes the
+// adapter a small facade object that aliases these onto the {user, account,
+// session, verificationToken} shape it expects, instead of renaming
+// anything already built against the existing Account/Contact/Order models.
+// Session/OAuthAccount are included for full adapter compatibility even
+// though the portal uses JWT sessions (Auth.js's adapter interface expects
+// them to exist regardless of session strategy) -- VerificationToken is the
+// only one actually exercised by the Email/magic-link flow.
+model AuthUser {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime? @map("email_verified")
+  image         String?
+
+  accounts AuthOAuthAccount[]
+  sessions AuthSession[]
+
+  @@map("auth_users")
+}
+
+model AuthOAuthAccount {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user AuthUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("auth_oauth_accounts")
+}
+
+model AuthSession {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+
+  user AuthUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("auth_sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================================================
+// Ops Platform (docs/OPS-PLATFORM-BUILD-PROMPT.md §4)
+//
+// Everything below is additive. Postgres becomes the system of record for the
+// inventory ledger and BOLs, which until now lived in the "TLM Distribution
+// Master File" spreadsheet behind the Inventory app's Apps Script.
+// InventorySnapshot / BreweryMovementEvent above stay as read-only import
+// mirrors for THIRD-PARTY stock (Familiar Ventures consignment, VIP); Leopard
+// Mark's own ledger is InventoryEvent.
+// ============================================================================
+
+// ---------- People & access ----------
+
+// Per-user location scoping. Closes the gap the Inventory app's README names:
+// "any logged-in user can move stock at any facility". A `warehouse` user sees
+// and writes only the locations joined here; `admin` bypasses the scope.
+model UserLocation {
+  userId     String   @map("user_id")
+  locationId String   @map("location_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user     Rep      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@id([userId, locationId])
+  @@map("user_locations")
+}
+
+// ---------- Network ----------
+
+// Seeded from the Inventory app's data/Locations.csv, merged with the
+// "Location Information" and "Location Details" tabs. LocationID values are
+// kept verbatim ("BRW-RICH", "WH-BEN") so BOL numbers minted here are
+// format-compatible with the ones already in the BOLs tab.
+model Location {
+  id     String       @id
+  name   String
+  type   LocationType
+  city   String
+  state  String
+  address String?
+  lat    Float?
+  lng    Float?
+  active Boolean      @default(true)
+
+  // From the "Location Details" tab -- printed on freight BOLs.
+  inboundInstructions  String? @map("inbound_instructions")
+  outboundInstructions String? @map("outbound_instructions")
+  shippingHours        String? @map("shipping_hours")
+  shippingContact      String? @map("shipping_contact")
+  hasLoadingDock       Boolean @default(false) @map("has_loading_dock")
+  liftgateRequired     Boolean @default(false) @map("liftgate_required")
+
+  sheetRowRef Int?     @map("sheet_row_ref")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  users             UserLocation[]
+  routeSchedules    RouteSchedule[]
+  eventsFrom        InventoryEvent[] @relation("InventoryEventFrom")
+  eventsTo          InventoryEvent[] @relation("InventoryEventTo")
+  shipmentsFrom     Shipment[]       @relation("ShipmentFrom")
+  shipmentsTo       Shipment[]       @relation("ShipmentTo")
+
+  @@index([type, active])
+  @@map("locations")
+}
+
+enum LocationType {
+  brewery
+  warehouse
+}
+
+// "What days do we deliver where." Replaces the hardcoded rep -> region map in
+// the rep app (window.LM_REP_REGIONS) and Code.gs's warehouseForRegion().
+// weekday is 0=Sunday..6=Saturday (JS getDay()), cutoffHour is local PT hour
+// on the PRIOR day by which an order must be confirmed to make that route.
+model RouteSchedule {
+  id          String   @id @default(cuid())
+  region      String
+  warehouseId String   @map("warehouse_id")
+  weekday     Int
+  cutoffHour  Int      @map("cutoff_hour")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  warehouse Location @relation(fields: [warehouseId], references: [id])
+
+  @@unique([region, warehouseId, weekday])
+  @@index([region, active])
+  @@map("route_schedules")
+}
+
+// BA/LA today; extensible. Replaces Code.gs's SLACK_CHANNEL_BA/_LA split.
+model RegionSlackChannel {
+  region    String   @id
+  channelId String   @map("channel_id")
+  purpose   String   @default("orders")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("region_slack_channels")
+}
+
+// Freight BOL commodity codes, from the Inventory app's "Commodities" tab.
+model Commodity {
+  code       String   @id
+  name       String
+  nmfcNumber String?  @map("nmfc_number")
+  notes      String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  shipments Shipment[]
+
+  @@map("commodities")
+}
+
+// ---------- Inventory: event-sourced, append-only ----------
+
+enum InventoryEventType {
+  BREW
+  INCOMING
+  TRANSFER
+  DELIVERY
+  RETURN
+  SAMPLE
+  DESTRUCTION
+  LOSS
+  ADJUSTMENT
+}
+
+// One row per stock movement. qty is always a POSITIVE integer; direction is
+// implied by type + which location fields are set, matching the netting rules
+// the Inventory app's computeStock() already uses:
+//   BREW, INCOMING          -> +qty at toLocation
+//   DELIVERY, SAMPLE,
+//   DESTRUCTION, LOSS       -> -qty at fromLocation   (sinks)
+//   TRANSFER, RETURN        -> -qty at from, +qty at to
+// Rows are NEVER updated or deleted. A mistake is corrected by writing an
+// ADJUSTMENT row whose correctionOfId points at the event it corrects.
+model InventoryEvent {
+  id         String             @id @default(cuid())
+  occurredAt DateTime           @map("occurred_at")
+  type       InventoryEventType
+  productId  String             @map("product_id")
+  qty        Int
+
+  // null = external source/sink (a contract brewery we don't model, a dumped
+  // keg, a sample handed out). DELIVERY sets fromLocation + accountId.
+  fromLocationId String? @map("from_location_id")
+  toLocationId   String? @map("to_location_id")
+
+  accountId   String? @map("account_id")
+  orderLineId String? @map("order_line_id")
+  shipmentId  String? @map("shipment_id")
+
+  lotNumber     String? @map("lot_number")
+  actorUserId   String? @map("actor_user_id")
+  // Preserves the legacy "EVT-nnn" Event ID when a row is imported from the
+  // Inventory Ledger tab, so the migration is re-runnable and auditable.
+  refNote       String? @map("ref_note")
+  notes         String?
+  correctionOfId String? @map("correction_of_id")
+  // Idempotency key for the one-time migration out of the Inventory Ledger
+  // tab: "sheet:<EventID>". Unique so re-running the migration cannot
+  // double-count stock. Null for events this system originates.
+  importRef     String? @unique @map("import_ref")
+
+  sheetRowRef Int?     @map("sheet_row_ref")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  product      Product    @relation(fields: [productId], references: [id])
+  fromLocation Location?  @relation("InventoryEventFrom", fields: [fromLocationId], references: [id])
+  toLocation   Location?  @relation("InventoryEventTo", fields: [toLocationId], references: [id])
+  account      Account?   @relation(fields: [accountId], references: [id])
+  orderLine    OrderLine? @relation(fields: [orderLineId], references: [id])
+  shipment     Shipment?  @relation(fields: [shipmentId], references: [id])
+
+  @@index([productId, fromLocationId])
+  @@index([productId, toLocationId])
+  @@index([shipmentId])
+  @@index([accountId, occurredAt])
+  @@index([type, occurredAt])
+  @@map("inventory_events")
+}
+
+// ---------- Shipments & documents ----------
+
+enum ShipmentStatus {
+  planned
+  in_transit
+  delivered
+  cancelled
+}
+
+enum DocType {
+  delivery_receipt
+  straight_bol
+}
+
+model Shipment {
+  id     String             @id @default(cuid())
+  status ShipmentStatus     @default(planned)
+  type   InventoryEventType
+
+  fromLocationId String? @map("from_location_id")
+  toLocationId   String? @map("to_location_id")
+  accountId      String? @map("account_id")
+  // One shipment per order for now. A split delivery would relax this.
+  orderId        String? @unique @map("order_id")
+
+  scheduledFor     DateTime? @map("scheduled_for")
+  deliveredAt      DateTime? @map("delivered_at")
+  deliveredByUserId String?  @map("delivered_by_user_id")
+
+  // Minted from BolSequence at the moment of delivery, never before, so the
+  // sequence has no gaps for shipments that get cancelled.
+  bolNumber String? @unique @map("bol_number")
+  docType   DocType @default(delivery_receipt) @map("doc_type")
+
+  carrierName     String?  @map("carrier_name")
+  carrierPhone    String?  @map("carrier_phone")
+  handlingUnits   Int?     @map("handling_units")
+  handlingUnitType String? @map("handling_unit_type")
+  weightLbs       Decimal? @map("weight_lbs") @db.Decimal(10, 2)
+  dimensions      String?
+  freightClass    String?  @map("freight_class")
+  commodityCode   String?  @map("commodity_code")
+
+  preparedBy    String? @map("prepared_by")
+  referenceNote String? @map("reference_note")
+  notes         String?
+  // Immutable snapshot of the document as printed. The renderer can change;
+  // what the customer signed cannot.
+  renderedHtml  String? @map("rendered_html")
+
+  emptiesPickedUp Int?  @map("empties_picked_up")
+  sheetRowRef     Int?  @map("sheet_row_ref")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  order        Order?     @relation(fields: [orderId], references: [id])
+  account      Account?   @relation(fields: [accountId], references: [id])
+  fromLocation Location?  @relation("ShipmentFrom", fields: [fromLocationId], references: [id])
+  toLocation   Location?  @relation("ShipmentTo", fields: [toLocationId], references: [id])
+  commodity    Commodity? @relation(fields: [commodityCode], references: [code])
+
+  inventoryEvents InventoryEvent[]
+  kegCustody      KegCustodyEntry[]
+  documents       DocumentLog[]
+
+  @@index([status, scheduledFor])
+  @@index([accountId, deliveredAt])
+  @@map("shipments")
+}
+
+// The real BOL counter. The Inventory app derives the next number by scanning
+// the BOLs tab with no lock, which races under concurrent delivery marking.
+// This row is taken with SELECT ... FOR UPDATE inside a transaction, so N
+// parallel mints produce N distinct numbers.
+model BolSequence {
+  locationId String @map("location_id")
+  yymmdd     String
+  last       Int    @default(0)
+
+  @@id([locationId, yymmdd])
+  @@map("bol_sequences")
+}
+
+// The BOL Maker's "Previously Generated" log: paperwork with NO ledger effect.
+// This is what bol.tlmbg.co produces today and what `docs_only` users can do.
+// shipmentId is set only if the document is later attached to a real shipment.
+model DocumentLog {
+  docNumber       String   @id @map("doc_number")
+  docType         DocType  @map("doc_type")
+  date            DateTime
+  summary         String
+  payloadJson     Json     @map("payload_json")
+  createdByUserId String?  @map("created_by_user_id")
+  shipmentId      String?  @map("shipment_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  shipment Shipment? @relation(fields: [shipmentId], references: [id])
+
+  @@index([docType, date])
+  @@map("document_logs")
+}
+
+// ---------- Keg custody ----------
+
+// Closes the second gap in the Inventory README: "keg deposit/custody balances
+// by customer account are not tracked yet". Append-only, same discipline as
+// InventoryEvent. Balance per account = SUM(delta); deposit exposure =
+// SUM(delta * Product.depositAmount).
+model KegCustodyEntry {
+  id         String   @id @default(cuid())
+  accountId  String   @map("account_id")
+  productId  String   @map("product_id")
+  // +n delivered into the account's custody, -n returned to us.
+  delta      Int
+  shipmentId String?  @map("shipment_id")
+  invoiceId  String?  @map("invoice_id")
+  occurredAt DateTime @map("occurred_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  account  Account   @relation(fields: [accountId], references: [id])
+  product  Product   @relation(fields: [productId], references: [id])
+  shipment Shipment? @relation(fields: [shipmentId], references: [id])
+
+  @@index([accountId, occurredAt])
+  @@map("keg_custody_entries")
+}
+
+// ---------- Jobs & automation ----------
+
+enum JobStatus {
+  queued
+  running
+  succeeded
+  failed
+  dead
+}
+
+// Postgres-backed job queue, drained by Vercel Cron every minute plus an
+// after()/waitUntil nudge for immediate follow-ups. Deliberately not
+// Inngest/Trigger.dev: the volume is a few hundred jobs a day and the hub has
+// to render the run log anyway, so the queue may as well be a table ops can
+// see. idempotencyKey is what makes "invoice this order" safe to enqueue twice.
+model JobRun {
+  id             String    @id @default(cuid())
+  kind           String
+  idempotencyKey String    @unique @map("idempotency_key")
+  status         JobStatus @default(queued)
+  payloadJson    Json      @map("payload_json")
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(5) @map("max_attempts")
+  runAfter       DateTime  @map("run_after")
+  lastError      String?   @map("last_error")
+  startedAt      DateTime? @map("started_at")
+  finishedAt     DateTime? @map("finished_at")
+  durationMs     Int?      @map("duration_ms")
+  orderId        String?   @map("order_id")
+  accountId      String?   @map("account_id")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@index([status, runAfter])
+  @@index([kind, createdAt])
+  @@map("job_runs")
+}
+
+// Every automation in §7 is a row here. Code reads these and never hardcodes
+// "on", so ops can see and disable anything that misbehaves. If ops can't see
+// it in /ops/automations, it doesn't run.
+model AutomationRule {
+  key             String   @id
+  enabled         Boolean
+  configJson      Json?    @map("config_json")
+  updatedByUserId String?  @map("updated_by_user_id")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("automation_rules")
+}
+
+// Stripe webhook idempotency. Stripe redelivers events; without this a
+// redelivered invoice.paid would append a duplicate OrderEvent and re-post to
+// Slack. Insert-on-first-sight, and a unique-violation means "already handled".
+model StripeEvent {
+  id          String   @id
+  type        String
+  processedAt DateTime @default(now()) @map("processed_at")
+
+  @@map("stripe_events")
 }
