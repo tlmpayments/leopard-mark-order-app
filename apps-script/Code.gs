@@ -48,14 +48,10 @@ function doGet(e) {
     if (action === 'stats') return respond(handleStats(e.parameter.rep));
     if (action === 'customers') return respond(handleCustomers());
     if (action === 'debugHeaders') return respond(handleDebugHeaders());
-    if (action === 'debugSlackTest') return respond(handleDebugSlackTest(e.parameter.inventorySource));
-    if (action === 'backfillFirstOrderFlag') return respond(handleBackfillFirstOrderFlag());
-    if (action === 'debugSlackTeamInfo') return respond(handleDebugSlackTeamInfo());
     if (action === 'debugSales') return respond(handleDebugSales(e.parameter.rows));
     if (action === 'invoiceDetail') return respond(handleInvoiceDetail(e.parameter.invoiceNumber));
     if (action === 'customerOrders') return respond(handleCustomerOrders(e.parameter.customer));
     if (action === 'allOrders') return respond(handleAllOrders());
-    if (action === 'lastOrder') return respond(handleLastOrder(e.parameter.customer));
     if (action === 'allSalesRows') return respond(handleAllSalesRows());
     return respond({ ok: false, error: 'Unknown action' });
   } catch (err) {
@@ -443,74 +439,6 @@ function handleCustomerOrders(customerName) {
   };
 }
 
-// Powers the "Reorder Last Order" shortcut: the most recent order for one
-// customer, with productCode per line (handleCustomerOrders omits it --
-// fine for a history list, not enough to reconstruct a re-orderable
-// selection). Same invoice-grouping/sort as handleCustomerOrders, just
-// narrowed to the single newest group and one extra field per line.
-function handleLastOrder(customerName) {
-  if (!customerName) return { ok: false, error: 'Missing customer' };
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SALES_SHEET_NAME);
-  if (!sheet) return { ok: false, error: 'Sales tab not found' };
-  var hc = getSalesHeaderAndCol(sheet);
-  var header = hc.header, col = hc.col;
-  var dataStartRow = hc.headerRowNumber + 1;
-  var data = sheet.getRange(dataStartRow, 1, Math.max(0, sheet.getLastRow() - hc.headerRowNumber), sheet.getLastColumn()).getValues();
-
-  var customerIdx = salesCol(col, header, 'Customer', ['customer']);
-  var qtyIdx = salesCol(col, header, 'Qty', ['qty']);
-  var productIdx = salesCol(col, header, 'Product Name', ['product', 'name']);
-  var packagingIdx = salesCol(col, header, 'Packaging Format', ['packaging']);
-  var productCodeIdx = salesCol(col, header, 'Product Code', ['product', 'code']);
-  var poDateIdx = salesCol(col, header, 'PO Date', ['po', 'date']);
-  var invoiceIdx = salesCol(col, header, 'Invoice #', ['invoice', '#']);
-  var notesIdx = salesCol(col, header, 'Notes', ['notes']);
-
-  var target = String(customerName).trim().toLowerCase();
-  var invoiceMap = {};
-  var invoiceOrder = [];
-
-  for (var i = 0; i < data.length; i++) {
-    var row = data[i];
-    if (customerIdx === -1) continue;
-    if (!customerMatches(row[customerIdx], target)) continue;
-
-    var invoiceNumber = invoiceIdx === -1 ? '' : String(row[invoiceIdx] || '');
-    var poDate = poDateIdx === -1 ? '' : row[poDateIdx];
-    var groupKey = invoiceNumber || ('__noinv_' + i);
-
-    if (!invoiceMap[groupKey]) {
-      invoiceMap[groupKey] = {
-        invoiceNumber: invoiceNumber,
-        poDate: poDate,
-        notes: notesIdx === -1 ? '' : row[notesIdx],
-        lines: []
-      };
-      invoiceOrder.push(groupKey);
-    }
-    invoiceMap[groupKey].lines.push({
-      product: productIdx === -1 ? '' : row[productIdx],
-      packaging: packagingIdx === -1 ? '' : row[packagingIdx],
-      productCode: productCodeIdx === -1 ? '' : row[productCodeIdx],
-      qty: Number(qtyIdx === -1 ? 0 : row[qtyIdx]) || 0
-    });
-  }
-
-  if (!invoiceOrder.length) return { ok: true, hasOrder: false };
-
-  var orders = invoiceOrder.map(function (k) { return invoiceMap[k]; });
-  orders.sort(function (a, b) { return new Date(b.poDate) - new Date(a.poDate); });
-  var last = orders[0];
-
-  return {
-    ok: true,
-    hasOrder: true,
-    poDate: last.poDate,
-    notes: last.notes,
-    lines: last.lines.filter(function (l) { return l.productCode && l.qty > 0; })
-  };
-}
-
 // Every order across every rep, most recent first -- powers the admin
 // "All Orders" dashboard. Same invoice-grouping logic as handleStats/
 // handleCustomerOrders, just with no rep/customer filter.
@@ -655,97 +583,12 @@ function nextInvoiceNumber(sheet, invoiceColIdx, headerRowNumber) {
   return 'INV' + next;
 }
 
-// ---- First-order tracking (Customer Accounts tab, not the Sales tab) ----
-// Used to scan the Sales tab for "has this customer name ever appeared
-// before" -- unreliable, because historical/Ekos-imported rows store the
-// customer as "Legal Entity / DBA Name" (see customerMatches) while this
-// app always submits just the DBA name, so an account that has clearly
-// ordered from us for years could still read as "no prior row found" and
-// wrongly fire the :tada: FIRST ORDER Slack message. Tracked explicitly
-// instead: every account that already existed before this column was added
-// gets backfilled to TRUE one time (handleBackfillFirstOrderFlag) and can
-// never trigger it again; a brand-new account created via handleAddCustomer
-// starts blank, so its first-ever order through this app is the one and
-// only time it fires -- handleOrder then marks it TRUE immediately.
-// Fails safe in every ambiguous case (column not set up yet, account not
-// found) by treating it as "already sent" -- never claims FIRST ORDER
-// without being sure.
-var FIRST_ORDER_SENT_HEADER = 'First Order Sent';
-
-function findCustomerAccountRow(sheet, header, businessName) {
-  var col = {};
-  header.forEach(function (h, i) { col[String(h).trim()] = i; });
-  var nameIdx = col['Business Name'];
-  if (nameIdx === undefined) return null;
+function customerHasPriorOrder(sheet, customerColIdx, headerRowNumber, customerName) {
+  if (!customerName) return false;
   var lastRow = sheet.getLastRow();
-  if (lastRow < 3) return null;
-  var data = sheet.getRange(3, 1, lastRow - 2, sheet.getLastColumn()).getValues();
-  var target = String(businessName || '').trim().toLowerCase();
-  for (var i = 0; i < data.length; i++) {
-    if (String(data[i][nameIdx] || '').trim().toLowerCase() === target) {
-      return { rowNumber: i + 3, col: col };
-    }
-  }
-  return null;
-}
-
-function hasSentFirstOrder(customerName) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CUSTOMERS_SHEET_NAME);
-  if (!sheet) return true;
-  var header = sheet.getRange(2, 1, 1, sheet.getLastColumn()).getValues()[0];
-  var found = findCustomerAccountRow(sheet, header, customerName);
-  if (!found) return true; // unknown account -- don't guess, don't claim first order
-  var idx = found.col[FIRST_ORDER_SENT_HEADER];
-  if (idx === undefined) return true; // column not set up on this sheet yet
-  var value = sheet.getRange(found.rowNumber, idx + 1).getValue();
-  return value === true || value === 'TRUE' || String(value || '').trim() !== '';
-}
-
-function markFirstOrderSent(customerName) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CUSTOMERS_SHEET_NAME);
-  if (!sheet) return;
-  var header = sheet.getRange(2, 1, 1, sheet.getLastColumn()).getValues()[0];
-  var found = findCustomerAccountRow(sheet, header, customerName);
-  if (!found) return;
-  var idx = found.col[FIRST_ORDER_SENT_HEADER];
-  if (idx === undefined) return;
-  sheet.getRange(found.rowNumber, idx + 1).setValue(true);
-}
-
-// One-time setup: marks every EXISTING Customer Accounts row as having
-// already sent its first-order notification, since (per the person who
-// asked for this) any account already in the system has already ordered
-// from us in the past -- only accounts created AFTER this rollout should
-// ever be eligible to fire FIRST ORDER. Only touches rows where the flag is
-// currently blank, so it's safe to run more than once, but it should only
-// ever be run once in practice -- running it again after real new accounts
-// with a genuinely blank flag exist would wrongly silence their first order.
-function handleBackfillFirstOrderFlag() {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CUSTOMERS_SHEET_NAME);
-  if (!sheet) return { ok: false, error: 'Customer Accounts tab not found' };
-  var header = sheet.getRange(2, 1, 1, sheet.getLastColumn()).getValues()[0];
-  var col = {};
-  header.forEach(function (h, i) { col[String(h).trim()] = i; });
-  var nameIdx = col['Business Name'];
-  var flagIdx = col[FIRST_ORDER_SENT_HEADER];
-  if (nameIdx === undefined) return { ok: false, error: 'Business Name column not found' };
-  if (flagIdx === undefined) return { ok: false, error: 'First Order Sent column not found -- add the header cell first' };
-
-  var lastRow = sheet.getLastRow();
-  if (lastRow < 3) return { ok: true, updated: 0 };
-  var range = sheet.getRange(3, 1, lastRow - 2, sheet.getLastColumn());
-  var data = range.getValues();
-  var updated = 0;
-  for (var i = 0; i < data.length; i++) {
-    var name = String(data[i][nameIdx] || '').trim();
-    var flag = data[i][flagIdx];
-    if (name && String(flag || '').trim() === '') {
-      data[i][flagIdx] = true;
-      updated++;
-    }
-  }
-  range.setValues(data);
-  return { ok: true, updated: updated, totalRows: data.length };
+  if (lastRow <= headerRowNumber) return false;
+  var values = sheet.getRange(headerRowNumber + 1, customerColIdx + 1, lastRow - headerRowNumber, 1).getValues();
+  return values.some(function (r) { return String(r[0] || '').trim() === customerName.trim(); });
 }
 
 function handleOrder(body) {
@@ -772,15 +615,13 @@ function handleOrder(body) {
     salesRep: salesCol(col, header, 'Sales Rep', ['sales', 'rep']),
     paymentMethod: salesCol(col, header, 'Payment Method', ['payment', 'method']),
     invoiceStatus: salesCol(col, header, 'Invoice Status', ['invoice', 'status']),
-    notes: salesCol(col, header, 'Notes', ['notes']),
-    expectedEmptyKegs: salesCol(col, header, 'Expected Empty Kegs', ['expected', 'empty'])
+    notes: salesCol(col, header, 'Notes', ['notes'])
   };
 
   var lines = body.lines || [];
   if (!lines.length) return { ok: false, error: 'No line items in order' };
 
-  var isFirstOrder = !hasSentFirstOrder(body.customer);
-  if (isFirstOrder) markFirstOrderSent(body.customer);
+  var isFirstOrder = idx.customer !== -1 && !customerHasPriorOrder(sheet, idx.customer, hc.headerRowNumber, body.customer);
 
   var warehouse = warehouseForRegion(body.region);
   // Not populated yet -- the app doesn't collect a delivery date until the
@@ -822,40 +663,19 @@ function handleOrder(body) {
     if (idx.paymentMethod !== -1) row[idx.paymentMethod] = body.paymentMethod || '';
     if (idx.invoiceStatus !== -1) row[idx.invoiceStatus] = 'Not Created';
     if (idx.notes !== -1) row[idx.notes] = body.notes || '';
-    if (idx.expectedEmptyKegs !== -1) row[idx.expectedEmptyKegs] = body.expectedEmptyKegs || '';
     sheet.appendRow(row);
     extendTableForNewRow(sheet);
   });
 
-  // Uses chat.postMessage (not the plain notifySlackForOrder webhook) so the
-  // response carries {channel, ts} -- the rep app's confirmation screen
-  // needs that message reference to deep-link straight to this order's
-  // thread. Falls back to the old webhook only if the bot token/channel
-  // aren't configured, so a Slack misconfiguration still notifies ops even
-  // though the app won't have a thread link to offer that rep.
-  var slackText =
+  notifySlackForOrder(
+    body.region,
     (isFirstOrder ? ':tada: *FIRST ORDER* ' : ':beer: *NEW ORDER* ') + 'from ' + (body.rep || 'a rep') + ' for *' + (body.customer || 'unknown account') + '*\n' +
     lineSummaries.join('\n') +
     (orderTotal ? '\n*Total:* $' + orderTotal.toFixed(2) : '') +
-    (body.expectedEmptyKegs ? '\n:package: Expected empties to pick up: ' + body.expectedEmptyKegs : '') +
-    (body.tapHandleNeeded === 'Yes' ? '\n:beers: *Tap handle needed* -- bring one on this delivery.' : '') +
-    (isFirstOrder ? '\n:point_right: First order for this account — confirm draft lines are clean.' : '');
-  var slackResult = postSlackMessage(channelForInventorySource(warehouse), slackText);
-  if (!slackResult.ok) {
-    notifySlackForOrder(body.region, slackText);
-  } else {
-    // Best-effort -- a failure here never affects the order or the main
-    // notification, which have already both succeeded by this point.
-    postSlackThreadReply(slackResult.channel, slackResult.ts, ':clipboard: Reply here with fulfillment notes, lot numbers, or delivery updates for this order.');
-  }
+    (isFirstOrder ? '\n:point_right: First order for this account — get tap handles out and confirm draft lines are clean.' : '')
+  );
 
-  return {
-    ok: true,
-    linesAdded: lines.length,
-    invoiceNumber: invoiceNumber,
-    slackChannel: slackResult.ok ? slackResult.channel : undefined,
-    slackTs: slackResult.ok ? slackResult.ts : undefined
-  };
+  return { ok: true, linesAdded: lines.length, invoiceNumber: invoiceNumber };
 }
 
 // Mirrors assets/js/products.js formats[].unit -- server-side copy because
@@ -905,8 +725,7 @@ function handleInvoiceDetail(invoiceNumber) {
     price: salesCol(col, header, 'Price (ea)', ['price']),
     lineTotal: salesCol(col, header, 'Line Total', ['line', 'total']),
     salesRep: salesCol(col, header, 'Sales Rep', ['sales', 'rep']),
-    paymentMethod: salesCol(col, header, 'Payment Method', ['payment', 'method']),
-    expectedEmptyKegs: salesCol(col, header, 'Expected Empty Kegs', ['expected', 'empty'])
+    paymentMethod: salesCol(col, header, 'Payment Method', ['payment', 'method'])
   };
 
   var lines = [];
@@ -926,8 +745,7 @@ function handleInvoiceDetail(invoiceNumber) {
         poDate: idx.poDate === -1 ? '' : row[idx.poDate],
         deliveryDate: idx.deliveryDate === -1 ? '' : row[idx.deliveryDate],
         salesRep: idx.salesRep === -1 ? '' : row[idx.salesRep],
-        paymentMethod: idx.paymentMethod === -1 ? '' : row[idx.paymentMethod],
-        expectedEmptyKegs: idx.expectedEmptyKegs === -1 ? '' : row[idx.expectedEmptyKegs]
+        paymentMethod: idx.paymentMethod === -1 ? '' : row[idx.paymentMethod]
       };
     }
 
@@ -971,7 +789,6 @@ function handleInvoiceDetail(invoiceNumber) {
     paymentTerms: paymentTerms,
     salesRep: shared.salesRep,
     paymentMethod: shared.paymentMethod,
-    expectedEmptyKegs: Number(shared.expectedEmptyKegs) || 0,
     shipTo: {
       name: shared.customer,
       address: (customerRecord && customerRecord.address) || '',
@@ -1058,7 +875,7 @@ function handleCustomers() {
       paymentMethod: get(row, 'Payment Method'),
       terms: get(row, 'Terms'),
       priority: get(row, 'Priority'),
-      tapHandleRequested: get(row, 'Tap Handles?') === true || get(row, 'Tap Handles?') === 'TRUE' || get(row, 'Tap Handles?') === 'Yes' ? 'Yes' : 'No',
+      tapHandleRequested: get(row, 'Tap Handle Requested') === true || get(row, 'Tap Handle Requested') === 'TRUE' || get(row, 'Tap Handle Requested') === 'Yes' ? 'Yes' : 'No',
       deliveryAddress: get(row, 'Billing Address (If not the same as shipping)'),
       importedToEkos: get(row, 'Imported to Ekos') === true || get(row, 'Imported to Ekos') === 'TRUE',
       lat: get(row, 'Latitude') !== '' && get(row, 'Latitude') != null ? Number(get(row, 'Latitude')) : null,
@@ -1075,55 +892,6 @@ function findColFuzzy(header, mustContainAll) {
     if (matchesAll) return i;
   }
   return -1;
-}
-
-// Dev-only diagnostic: calls postSlackMessage directly (not through
-// handleOrder, which silently swallows a failure into the old webhook
-// fallback) so a missing Script Property vs. a real Slack API error are
-// distinguishable from outside. Reports presence/absence of the two Script
-// Properties as booleans only -- never echoes the actual token/channel
-// values back over HTTP.
-function handleDebugSlackTest(inventorySource) {
-  var props = PropertiesService.getScriptProperties();
-  var hasToken = !!props.getProperty('SLACK_BOT_TOKEN');
-  var hasChannelBA = !!props.getProperty('SLACK_CHANNEL_BA');
-  var hasChannelLA = !!props.getProperty('SLACK_CHANNEL_LA');
-  var channel = channelForInventorySource(inventorySource || 'EWD');
-  var result = postSlackMessage(channel, ':mag: Diagnostic ping from handleDebugSlackTest -- safe to ignore.');
-  return {
-    ok: true,
-    hasToken: hasToken,
-    hasChannelBA: hasChannelBA,
-    hasChannelLA: hasChannelLA,
-    resolvedChannel: channel || null,
-    postResult: result
-  };
-}
-
-// One-time lookup: the workspace's Slack subdomain (e.g. "theleopardmark"
-// for theleopardmark.slack.com) isn't a secret -- it's visible in the
-// address bar to anyone using Slack in a browser -- but nothing in this
-// codebase had a copy of it until the confirmation screen's Slack link
-// needed to build a proper thread-reply permalink (the slack:// app-scheme
-// deep link has no equivalent of the web permalink's thread_ts parameter).
-// auth.test (not team.info) on purpose -- it's scope-exempt, works with
-// whatever token this bot already has, and its response includes the
-// workspace's own url, so this needs no new scope/reinstall round trip.
-function handleDebugSlackTeamInfo() {
-  var token = PropertiesService.getScriptProperties().getProperty('SLACK_BOT_TOKEN');
-  if (!token) return { ok: false, error: 'SLACK_BOT_TOKEN not configured' };
-  try {
-    var resp = UrlFetchApp.fetch('https://slack.com/api/auth.test', {
-      method: 'post',
-      headers: { Authorization: 'Bearer ' + token },
-      muteHttpExceptions: true
-    });
-    var json = JSON.parse(resp.getContentText());
-    if (!json.ok) return { ok: false, error: json.error || 'Slack API reported failure' };
-    return { ok: true, url: json.url, team: json.team };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
 }
 
 function handleDebugHeaders() {
@@ -1174,10 +942,7 @@ function handleAddCustomer(customer) {
   set(row, col, 'Delivery Instructions', customer.deliveryInstructions);
   set(row, col, 'Billing Address (If not the same as shipping)', customer.deliveryAddress);
   set(row, col, 'Payment Method', customer.paymentMethod || 'Not Set Up');
-  // The actual header is "Tap Handles?" -- this used to say 'Tap Handle
-  // Requested', which never matched, so this value was silently dropped on
-  // every new account until now.
-  set(row, col, 'Tap Handles?', customer.tapHandleRequested || 'No');
+  set(row, col, 'Tap Handle Requested', customer.tapHandleRequested || 'No');
   set(row, col, 'Imported to Ekos', false);
   sheet.appendRow(row);
   extendTableForNewRow(sheet);
@@ -1233,7 +998,7 @@ function handleUpdateCustomer(customer) {
   setCell('Region', customer.region);
   setCell('Payment Method', customer.paymentMethod);
   setCell('Terms', customer.terms);
-  setCell('Tap Handles?', customer.tapHandleRequested);
+  setCell('Tap Handle Requested', customer.tapHandleRequested);
   if (customer.licenseNumber !== undefined && licenseIdx !== -1) {
     sheet.getRange(rowNum, licenseIdx + 1).setValue(customer.licenseNumber);
   }
@@ -1262,72 +1027,6 @@ function handleUpdateCustomer(customer) {
 // bucket without asking the wire protocol to carry a redundant region field.
 function regionHintForInventorySource(inventorySource) {
   return inventorySource === 'EWD' ? 'san francisco' : '';
-}
-
-// Same Bay-Area/LA bucketing as notifySlackForOrder, but returns a channel
-// ID (for chat.postMessage) instead of picking a webhook URL -- webhooks
-// can't return a message reference (channel+ts) to build a link back to,
-// which is what the rep app's post-submission "Open in Slack" button needs.
-// New Script Properties: SLACK_BOT_TOKEN, SLACK_CHANNEL_BA, SLACK_CHANNEL_LA.
-function channelForInventorySource(inventorySource) {
-  var props = PropertiesService.getScriptProperties();
-  var key = inventorySource === 'EWD' ? 'SLACK_CHANNEL_BA' : 'SLACK_CHANNEL_LA';
-  return props.getProperty(key);
-}
-
-// Posts via the Slack Web API (chat.postMessage), not an Incoming Webhook --
-// the only way to get back a {channel, ts} reference to the message just
-// posted, which is what a deep link to "open this exact thread" requires.
-// Returns {ok:true, channel, ts} on success, {ok:false, error} otherwise;
-// never throws (mirrors notifySlackUrl's swallow-on-failure philosophy --
-// the order/sync already succeeded by the time this runs, a Slack outage
-// must not turn into a caller-visible error here, it just means no deep
-// link on the confirmation screen this time).
-function postSlackMessage(channelId, text) {
-  var token = PropertiesService.getScriptProperties().getProperty('SLACK_BOT_TOKEN');
-  if (!token || !channelId) return { ok: false, error: 'Slack bot token or channel not configured' };
-  try {
-    var resp = UrlFetchApp.fetch('https://slack.com/api/chat.postMessage', {
-      method: 'post',
-      contentType: 'application/json',
-      headers: { Authorization: 'Bearer ' + token },
-      payload: JSON.stringify({ channel: channelId, text: text }),
-      muteHttpExceptions: true
-    });
-    var json = JSON.parse(resp.getContentText());
-    if (!json.ok) return { ok: false, error: json.error || 'Slack API reported failure' };
-    return { ok: true, channel: json.channel, ts: json.ts };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
-}
-
-// Posts a threaded reply under an existing message. Used to seed a real
-// thread on every order notification the moment it's posted -- a message
-// with zero replies has no persistent "N replies" affordance in Slack's UI,
-// so a rep opening the parent message (e.g. via a client/platform that
-// doesn't honor the thread_ts/cid permalink params -- confirmed Slack's own
-// desktop app doesn't, though mobile does) would otherwise land on a plain
-// message with nothing marking it as a thread at all. Seeding one guarantees
-// "N replies" is always visible and one click away, on every platform,
-// regardless of how the confirmation screen's link itself got opened.
-function postSlackThreadReply(channelId, threadTs, text) {
-  var token = PropertiesService.getScriptProperties().getProperty('SLACK_BOT_TOKEN');
-  if (!token || !channelId || !threadTs) return { ok: false, error: 'Slack bot token, channel, or threadTs missing' };
-  try {
-    var resp = UrlFetchApp.fetch('https://slack.com/api/chat.postMessage', {
-      method: 'post',
-      contentType: 'application/json',
-      headers: { Authorization: 'Bearer ' + token },
-      payload: JSON.stringify({ channel: channelId, thread_ts: threadTs, text: text }),
-      muteHttpExceptions: true
-    });
-    var json = JSON.parse(resp.getContentText());
-    if (!json.ok) return { ok: false, error: json.error || 'Slack API reported failure' };
-    return { ok: true, channel: json.channel, ts: json.ts };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
 }
 
 // Same shape as customerHasPriorOrder -- scans the Order ID column directly
@@ -1359,33 +1058,12 @@ function handleSyncOrder(body) {
   // Best-effort Slack ping, deliberately outside the lock -- a Slack POST
   // has no business holding up other concurrent syncOrder requests waiting
   // on the same script lock (see notifySlackUrl's own swallow-on-failure
-  // comment for why this never affects the response either way). Rich
-  // message (line items, total, first-order detection) matching what
-  // handleOrder's rep-app path has always sent -- an earlier version of
-  // this notification was a bare ":link: Synced order..." line, a real
-  // regression once this became the only path new rep-app orders take.
-  // isFirstOrder comes from the caller (Postgres knows an account's order
-  // history; this Apps Script project doesn't) rather than being
-  // recomputed here from the Sheet.
+  // comment for why this never affects the response either way).
   if (outcome.ok && !outcome.alreadySynced) {
-    var orderTotal = 0;
-    var lineSummaries = lines.map(function (line) {
-      var qty = Number(line.qty) || 0;
-      if (line.lineTotal) orderTotal += Number(line.lineTotal);
-      return '• ' + formatOrderLineForSlack(line, qty);
-    });
-    var text =
-      (body.isFirstOrder ? ':tada: *FIRST ORDER* ' : ':beer: *NEW ORDER* ') +
-      'from ' + (body.salesRep || 'a rep') + ' for *' + (body.customer || 'unknown account') + '*\n' +
-      lineSummaries.join('\n') +
-      (orderTotal ? '\n*Total:* $' + orderTotal.toFixed(2) : '') +
-      (body.isFirstOrder ? '\n:point_right: First order for this account — get tap handles out and confirm draft lines are clean.' : '');
-
-    var slackResult = postSlackMessage(channelForInventorySource(body.inventorySource), text);
-    if (slackResult.ok) {
-      outcome.slackChannel = slackResult.channel;
-      outcome.slackTs = slackResult.ts;
-    }
+    notifySlackForOrder(
+      regionHintForInventorySource(body.inventorySource),
+      ':link: Synced order ' + (body.invoiceNumber || body.orderId) + ' from platform'
+    );
   }
   return outcome;
 }

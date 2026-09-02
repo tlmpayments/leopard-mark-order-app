@@ -500,43 +500,6 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); bo
 }
 .order-summary .oline:last-child { border-bottom: none; }
 
-/* ---------- Order confirmation ---------- */
-.confirm-hero {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 6px;
-  padding: 28px 0 22px;
-}
-.confirm-check {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--good), #0f6b4c);
-  color: white;
-  font-size: 30px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin-bottom: 6px;
-  box-shadow: 0 0 0 6px rgba(25, 158, 112, 0.15);
-}
-.confirm-title {
-  font-family: var(--font-display);
-  font-size: 26px;
-  font-weight: 600;
-}
-.confirm-sub {
-  color: var(--silver-dim);
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-weight: 600;
-}
-.cta-btn.slack { background: linear-gradient(135deg, #4a154b, #2d0f2e); border: none; }
-
 .sticky-footer {
   position: fixed;
   bottom: 0; left: 0; right: 0;
