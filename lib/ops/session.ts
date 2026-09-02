@@ -65,7 +65,10 @@ export async function currentOpsUser(): Promise<OpsUser | null> {
  */
 export async function requireOpsUser(allowed: readonly UserRole[] = HUB_ROLES): Promise<OpsUser> {
   const user = await currentOpsUser();
-  if (!user) redirect("/admin/login?next=ops");
+  // `next` names the surface being protected, not always "ops" -- /docs uses
+  // this same helper, and telling the login page the wrong destination is the
+  // kind of small lie that becomes a real bug the moment anything reads it.
+  if (!user) redirect(`/admin/login?next=${allowed === DOCS_ROLES ? "docs" : "ops"}`);
   if (!allowed.includes(user.role)) {
     redirect(user.role === "docs_only" ? "/docs" : "/ops?denied=1");
   }
