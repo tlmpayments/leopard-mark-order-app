@@ -13,6 +13,7 @@
  */
 
 import { db } from "@/lib/db";
+import { deliveryRegionFor } from "@/lib/deliveryRegion";
 
 const SLACK_API = "https://slack.com/api";
 
@@ -33,12 +34,21 @@ function token(): string | undefined {
  * Script already uses, so this works before the table is seeded.
  */
 export async function channelForRegion(region: string | null | undefined, purpose = "orders"): Promise<string | null> {
-  if (region) {
-    const row = await db.regionSlackChannel.findFirst({ where: { region, purpose } });
+  // Try the account's own region first, then its delivery region, so a row can
+  // be mapped per city ("#orders-san-diego") or per route ("#orders-la").
+  const deliveryRegion = deliveryRegionFor(region);
+  for (const key of [region, deliveryRegion].filter(Boolean) as string[]) {
+    const row = await db.regionSlackChannel.findFirst({ where: { region: key, purpose } });
     if (row) return row.channelId;
   }
-  const isBayArea = /^(BA|SF|SF\/Bay|Bay Area|Northern)/i.test(region ?? "");
-  return (isBayArea ? process.env.SLACK_CHANNEL_BA : process.env.SLACK_CHANNEL_LA) ?? null;
+
+  // Falling back to the env vars the Apps Script already uses. Resolving the
+  // city to a delivery region first is what stops "Orange County" and
+  // "North Bay" from both silently landing in the LA channel, which is what a
+  // prefix test on the raw string did.
+  if (deliveryRegion === "BA") return process.env.SLACK_CHANNEL_BA ?? null;
+  if (deliveryRegion === "LA") return process.env.SLACK_CHANNEL_LA ?? null;
+  return null;
 }
 
 export async function postMessage(channel: string, text: string): Promise<SlackPostResult> {

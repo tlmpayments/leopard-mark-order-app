@@ -14,6 +14,7 @@
 import { db } from "@/lib/db";
 import { appendOrderEvent } from "@/lib/orderEvents";
 import { enqueue } from "@/lib/jobs/queue";
+import { deliveryRegionFor } from "@/lib/deliveryRegion";
 import type { OrderEventActor } from "@/app/generated/prisma/enums";
 
 export interface RouteDay {
@@ -114,8 +115,15 @@ function pacificOffsetMinutes(at: Date): number {
 }
 
 export async function routeDaysForRegion(region: string): Promise<RouteDay[]> {
+  // The account's region is a city ("San Francisco"); RouteSchedule is keyed by
+  // delivery region ("BA"). Resolve first, or this returns nothing for every
+  // real account. An unmapped city yields no route days, which is the honest
+  // answer: we do not deliver there yet.
+  const deliveryRegion = deliveryRegionFor(region);
+  if (!deliveryRegion) return [];
+
   const rows = await db.routeSchedule.findMany({
-    where: { region, active: true },
+    where: { region: deliveryRegion, active: true },
     orderBy: { weekday: "asc" },
   });
   return rows.map((r) => ({

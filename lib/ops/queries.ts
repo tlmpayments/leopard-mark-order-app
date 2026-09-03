@@ -22,6 +22,7 @@ import {
 import { accountChecklist } from "./checklist";
 import { availableForDelivery, kegCustodyBalances } from "@/lib/inventory";
 import { toNumber } from "./format";
+import { deliveryRegionFor } from "@/lib/deliveryRegion";
 
 /** The order shape every hub screen needs. One include, reused. */
 const ORDER_INCLUDE = {
@@ -310,11 +311,16 @@ export async function attentionQueue(orders: StagedOrder[]): Promise<AttentionIt
     take: 50,
   });
   const routeRegions = new Set((await db.routeSchedule.findMany({ select: { region: true } })).map((r) => r.region));
+  // An account's region is a city; the schedule is keyed by delivery region.
+  const hasRoute = (region: string | null): boolean => {
+    const dr = deliveryRegionFor(region);
+    return dr != null && routeRegions.has(dr);
+  };
   for (const a of pendingAccounts) {
     const ck = accountChecklist({
       ...a,
       contactEmail: a.contacts[0]?.email ?? null,
-      regionHasWarehouse: a.region ? routeRegions.has(a.region) : false,
+      regionHasWarehouse: hasRoute(a.region),
     });
     if (ck.doneCount >= 8) continue; // only the first order is missing -- that is sales, not ops
     items.push({

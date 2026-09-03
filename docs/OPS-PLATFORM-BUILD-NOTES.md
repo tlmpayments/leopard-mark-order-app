@@ -335,7 +335,7 @@ frequencies.
   because a third of a case cannot be delivered; the rounding is reported, not
   silent, and is inside the parity tolerance.
 
-### Region names do not match the route schedule
+### Region names mapped to delivery regions — resolved
 
 Found while refreshing accounts, and it blocks two things:
 
@@ -348,12 +348,37 @@ Consequences: every account fails the "region → warehouse" setup check, so no
 account can reach 9/9; and `auto_propose_slot` has no route day to offer, so
 nothing will ever move to stage ③ on its own.
 
-Deliberately not guessed. A geographic mapping is obvious in outline (North Bay
-and South San Francisco are Bay Area; Long Beach, Orange County and Arcadia are
-LA-ish; San Diego is neither) but the delivery days and cutoffs per region are
-§12 Q1, which says ask rather than assume. Either remap the accounts' region
-values or add `RouteSchedule` rows keyed to the city names — both are data
-changes, no deploy.
+**Fixed** by `lib/deliveryRegion.ts`, which sits between the two vocabularies
+rather than rewriting either. 112 of 121 accounts now resolve; the 9 that do not
+have no region on the tab at all.
+
+Neither alternative was safe. Rewriting `Account.region` to "BA" would be undone
+by the next run of `import-customer-accounts.ts`, and because §5 makes Region a
+bidirectional DB-owned column, a DB→Sheet write would then push "BA" into the
+spreadsheet and destroy city data the sales team uses. Adding a `RouteSchedule`
+row per city would assert the business runs nine routes; it runs two.
+
+So the account keeps its city, the schedule keeps `BA`/`LA`, and one function
+relates them — resolved at all four call sites (slot proposal, the Slack channel
+map, and the setup checklist in both the queries layer and the accounts page).
+
+The mapping is data-as-code, and adding a city is a one-line change. It refuses
+to default: an unrecognised region yields no route days rather than guessing,
+because a default would pass the setup check for an account nobody can deliver
+to and book it onto a truck that does not go there. 22 tests cover every region
+string in the live tab plus the near-miss cases ("Sandusky" must not match
+"San ...").
+
+One judgement call is asserted so it cannot drift silently: **San Diego rides
+the LA route**, since WH-WIL is the only warehouse serving Southern California,
+despite being 120 miles out. Three accounts. Changing it is one line and a
+failing test.
+
+Verified against production: Orange County → LA → Fri Sep 4 from WH-WIL;
+San Francisco → BA → Tue Sep 8 from WH-SF (today is Thursday, and same-day is
+never proposed, so BA correctly skips to Tuesday). `region → warehouse` has
+disappeared from the accounts screen's missing-items lists, which now read
+"license verified, stripe customer, ach on file" — the genuinely undone work.
 
 Also: "R. Villanueva" appears as a sales rep on 2 accounts. The Reps tab lists
 them as "Ricardo Villanueva" — the Reps tab uses full names while Customer

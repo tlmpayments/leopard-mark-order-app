@@ -4,6 +4,7 @@ import { CHECKLIST_ITEMS, accountChecklist } from "@/lib/ops/checklist";
 import { kegCustodyBalances } from "@/lib/inventory";
 import { money } from "@/lib/ops/format";
 import { licenceExpiryCutoff } from "@/lib/ops/queries";
+import { deliveryRegionFor } from "@/lib/deliveryRegion";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +43,12 @@ export default async function AccountsPage({ searchParams }: PageProps<"/ops/acc
     kegCustodyBalances(),
   ]);
 
-  const regions = new Set(routeRegions.map((r) => r.region));
+  const routeRegionSet = new Set(routeRegions.map((r) => r.region));
+  // The account stores a city; the schedule is keyed by delivery region.
+  const hasRoute = (region: string | null): boolean => {
+    const dr = deliveryRegionFor(region);
+    return dr != null && routeRegionSet.has(dr);
+  };
   const custodyByAccount = new Map<string, { kegs: number; exposure: number; last: Date | null }>();
   for (const c of custody) {
     const cur = custodyByAccount.get(c.accountId) ?? { kegs: 0, exposure: 0, last: null };
@@ -57,7 +63,7 @@ export default async function AccountsPage({ searchParams }: PageProps<"/ops/acc
     checklist: accountChecklist({
       ...a,
       contactEmail: a.contacts[0]?.email ?? null,
-      regionHasWarehouse: a.region ? regions.has(a.region) : false,
+      regionHasWarehouse: hasRoute(a.region),
     }),
     custody: custodyByAccount.get(a.id) ?? { kegs: 0, exposure: 0, last: null },
   }));
