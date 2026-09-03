@@ -1726,9 +1726,10 @@
     document.getElementById('mk-needed-by').min = new Date().toISOString().slice(0, 10);
 
     var total = Object.keys(mkIndex).length;
+    var stocked = (window.LM_MARKETING_CATEGORIES || []).filter(function (c) { return c.items.length; });
     document.getElementById('mk-catalog-hint').textContent =
       'Tap a category, then set quantities. ' + total + ' items across ' +
-      (window.LM_MARKETING_CATEGORIES || []).length + ' categories.';
+      stocked.length + ' categories.';
 
     renderMarketingBrandFilter();
     renderMarketingCatalog();
@@ -1806,8 +1807,16 @@
     // shared bar mats and stadium cups in front of them.
     if (mk.brand !== 'All' && item.brand !== mk.brand && item.brand !== 'Multi-Brand') return false;
     if (!mk.query) return true;
-    var haystack = (item.name + ' ' + item.brand + ' ' + item.id + ' ' + cat.name + ' ' + (item.note || '')).toLowerCase();
+    var haystack = (item.name + ' ' + item.brand + ' ' + item.id + ' ' +
+      cat.section + ' ' + cat.name + ' ' + (item.note || '')).toLowerCase();
     return haystack.indexOf(mk.query) !== -1;
+  }
+
+  // The full classification path, for the summary and the order row. Sections
+  // whose only node is themselves (Packaging, Trade Support) would otherwise
+  // read "Trade Support > Trade Support".
+  function mkCategoryPath(cat) {
+    return cat.section === cat.name ? cat.name : cat.section + ' › ' + cat.name;
   }
 
   function mkItemQty(itemId) {
@@ -1871,18 +1880,50 @@
     // match. Leaving them collapsed would show a rep who typed "sticker" a
     // list of category headers and no stickers.
     var forceOpen = !!mk.query || mk.brand !== 'All';
+    var filtering = forceOpen;
     var anyShown = false;
+    var lastSection = null;
+
+    // Emitted once per top-level bucket, the first time one of its groups
+    // survives the filter -- so "Point-of-Sales" can't head an empty run.
+    function sectionHeadHtml(cat) {
+      if (cat.section === lastSection) return '';
+      lastSection = cat.section;
+      return '<div class="mk-section">' + escapeHtml(cat.section) + '</div>';
+    }
 
     var html = (window.LM_MARKETING_CATEGORIES || []).map(function (cat) {
+      // A branch ops hasn't put anything in yet still shows, so the tree a rep
+      // browses is the tree ops maintains -- but it drops out the moment a
+      // search or brand filter is on, where it could only ever be noise.
+      if (!cat.items.length) {
+        if (filtering) return '';
+        var emptyHead = sectionHeadHtml(cat);
+        return emptyHead +
+          '<div class="mk-cat is-empty" data-cat="' + cat.id + '">' +
+            '<div class="mk-cat-head" aria-disabled="true">' +
+              '<span>' + escapeHtml(cat.name) +
+                '<span class="mk-cat-blurb">' + escapeHtml(cat.blurb) + '</span>' +
+              '</span>' +
+              '<span class="mk-cat-meta"><span class="mk-cat-soon">Coming soon</span></span>' +
+            '</div>' +
+          '</div>';
+      }
+
       var items = cat.items.filter(function (item) { return mkItemMatches(item, cat, mk); });
       if (!items.length) return '';
       anyShown = true;
+      var head = sectionHeadHtml(cat);
       var qty = mkCategoryQty(cat);
-      // A category holding a quantity always stays open, even if the rep
-      // then narrows the search past it -- so nothing they've already picked
-      // can end up hidden behind a collapsed header at submit time.
+      // A category holding a quantity stays open, so a rep scrolling an
+      // 18-group tree can always see what they've already put in it without
+      // re-tapping. (A search that excludes the category still hides it --
+      // the filter runs above. Nothing is lost by that: the summary panel
+      // below lists every picked line, and submit reads from state, not
+      // from what happens to be on screen.)
       var open = forceOpen || !!mk.openCats[cat.id] || qty > 0;
-      return '<div class="mk-cat' + (qty ? ' has-qty' : '') + '" data-cat="' + cat.id + '">' +
+      return head +
+        '<div class="mk-cat' + (qty ? ' has-qty' : '') + '" data-cat="' + cat.id + '">' +
         '<button type="button" class="mk-cat-head" data-toggle-cat="' + cat.id + '">' +
           '<span>' + escapeHtml(cat.name) +
             '<span class="mk-cat-blurb">' + escapeHtml(cat.blurb) + '</span>' +
@@ -1981,7 +2022,7 @@
           if (!qty) return;
           lines.push({
             itemId: item.id,
-            category: cat.name,
+            category: mkCategoryPath(cat),
             brand: item.brand,
             item: item.name,
             size: sizeKey,

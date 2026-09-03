@@ -1001,3 +1001,30 @@ input[readonly]:focus { outline: none; border-color: var(--navy-600); }
   flex-shrink: 0;
 }
 .file-row button:active { color: #e35b5b; }
+
+/* ---- Marketing catalog: taxonomy sections & unstocked branches ---------- */
+.mk-section {
+  margin: 18px 0 6px;
+  padding: 0 2px;
+  font-family: var(--font-display, inherit);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--silver-dim);
+  border-bottom: 1px solid var(--hairline, rgba(255,255,255,.08));
+  padding-bottom: 6px;
+}
+.mk-section:first-child { margin-top: 4px; }
+
+/* A branch ops hasn't filled yet: present so the tree stays legible, but
+   plainly not tappable -- no caret, no count, no hover affordance. */
+.mk-cat.is-empty { opacity: .45; }
+.mk-cat.is-empty .mk-cat-head { cursor: default; }
+.mk-cat-soon {
+  font-size: 10px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--silver-dim);
+  white-space: nowrap;
+}
