@@ -2025,8 +2025,16 @@ function saveMarketingAttachments(attachments, requestNumber) {
   }
 }
 
+// #marketing_orders. Held as a code-level default rather than a required
+// setup step: the script property still wins when it's set, so ops can move
+// the channel without a push, but nothing has to be configured by hand for
+// this to work at all. The BA/LA channels are property-only because they
+// predate this and already have their properties set.
+var MARKETING_SLACK_CHANNEL_DEFAULT = 'C0BUVPEJHGA';
+
 function marketingSlackChannel() {
-  return PropertiesService.getScriptProperties().getProperty('SLACK_CHANNEL_MARKETING');
+  return PropertiesService.getScriptProperties().getProperty('SLACK_CHANNEL_MARKETING')
+    || MARKETING_SLACK_CHANNEL_DEFAULT;
 }
 
 function notifySlackForMarketing(text) {
@@ -2251,4 +2259,46 @@ function auditRepPins() {
   Logger.log('PIN not exactly 4 digits (cannot log in): ' + (badFormat.length ? badFormat.join(' ; ') : 'none'));
 
   return { ok: true, activeReps: activeCount, collisions: collisions, noPin: noPin, badFormat: badFormat };
+}
+
+// Verifier for the marketing Slack channel. No longer required setup --
+// marketingSlackChannel() defaults to the channel in code -- but run it from
+// the editor (Run > configureMarketingSlack) after changing the channel or
+// the bot token to confirm the bot can actually post.
+//
+// Script properties are project-wide, not per-version, so this takes effect
+// on the live deployment the moment it runs -- no push or redeploy needed
+// after changing the channel.
+//
+// The channel is private, which is the part that bites: chat.postMessage
+// returns not_in_channel for a private channel the bot hasn't been invited
+// to, and handleMarketingOrder would then quietly fall back to the general
+// webhook. So this doesn't just set the property, it posts once and reports
+// exactly what Slack said.
+function configureMarketingSlack() {
+  var CHANNEL_ID = MARKETING_SLACK_CHANNEL_DEFAULT; // one source of truth
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty('SLACK_CHANNEL_MARKETING', CHANNEL_ID);
+
+  var res = postSlackMessage(
+    CHANNEL_ID,
+    ':white_check_mark: Marketing material requests from the rep app will post here from now on.'
+  );
+
+  if (res.ok) {
+    Logger.log('SLACK_CHANNEL_MARKETING set to ' + CHANNEL_ID + ' and a test message posted OK.');
+    return { ok: true, channel: CHANNEL_ID, posted: true };
+  }
+
+  // Named remedies rather than the bare Slack error code, because every one
+  // of these is a different fix and the code alone doesn't say which.
+  var hint = res.error === 'not_in_channel'
+    ? 'Invite @leopard_mark_orders to #marketing_orders.'
+    : res.error === 'channel_not_found'
+      ? 'Wrong channel ID, or the bot cannot see this private channel.'
+      : res.error === 'missing_scope'
+        ? 'The bot token needs chat:write (and groups:write for private channels).'
+        : 'Check SLACK_BOT_TOKEN in Script Properties.';
+  Logger.log('SLACK_CHANNEL_MARKETING set to ' + CHANNEL_ID + ', but the test post FAILED: ' + res.error + ' -- ' + hint);
+  return { ok: false, channel: CHANNEL_ID, posted: false, error: res.error, hint: hint };
 }
