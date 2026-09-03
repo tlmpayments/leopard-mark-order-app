@@ -319,13 +319,47 @@ frequencies.
 
 **Still outstanding from the import:**
 
-- 33 orders reference customers with no Account row (including INV26277,
-  "La Sexy Michelada" — the spec's own reference invoice). The 108 accounts came
-  from the rep app's bundled `customers.js` snapshot, not the live Customer
-  Accounts tab; refreshing from that tab should close most of it.
+- ~~33 orders reference customers with no Account row~~ — **closed.**
+  `import-customer-accounts.ts` refreshed from the live tab: 13 accounts created,
+  106 updated, 121 total. Re-running the order import took the skipped count
+  from 33 to 18 and brought in INV26277 ("La Sexy Michelada"), the spec's own
+  reference invoice. Production now holds 265 orders and 203 invoices.
+
+  The remaining 18 are customers that are genuinely not on the Customer Accounts
+  tab at all — one-offs and non-retail counterparties like "Atlassian",
+  "Beachwood Brewing" (a contract brewery) and "Familiar Ventures LLC / Thomas
+  Gilbert" (their own entity). Creating accounts from a name alone would put
+  thin, permanently-incomplete rows in the attention queue for customers who
+  will never order again, so they are reported instead.
 - One ledger event had a fractional case quantity (33.49 → 33). `qty` is an Int
   because a third of a case cannot be delivered; the rounding is reported, not
   silent, and is inside the parity tolerance.
+
+### Region names do not match the route schedule
+
+Found while refreshing accounts, and it blocks two things:
+
+The Customer Accounts tab writes **city-level** regions — San Francisco (52),
+Los Angeles (18), North Bay (14), Orange County (11), Long Beach (9),
+San Diego (3), South San Francisco, San Rafael, Arcadia — while `RouteSchedule`
+is seeded with `BA` and `LA`, which match **none** of them.
+
+Consequences: every account fails the "region → warehouse" setup check, so no
+account can reach 9/9; and `auto_propose_slot` has no route day to offer, so
+nothing will ever move to stage ③ on its own.
+
+Deliberately not guessed. A geographic mapping is obvious in outline (North Bay
+and South San Francisco are Bay Area; Long Beach, Orange County and Arcadia are
+LA-ish; San Diego is neither) but the delivery days and cutoffs per region are
+§12 Q1, which says ask rather than assume. Either remap the accounts' region
+values or add `RouteSchedule` rows keyed to the city names — both are data
+changes, no deploy.
+
+Also: "R. Villanueva" appears as a sales rep on 2 accounts. The Reps tab lists
+them as "Ricardo Villanueva" — the Reps tab uses full names while Customer
+Accounts and Sales use initials. `salesRepId` is left unset on those two rather
+than creating a duplicate Rep under the abbreviated form; which spelling is
+canonical is a decision, not a fix.
 
 ### Integrations wired
 

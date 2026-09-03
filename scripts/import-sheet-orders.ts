@@ -50,6 +50,7 @@ import { Pool } from "pg";
 import { config } from "dotenv";
 import { ulid } from "ulid";
 import { aliasHistoricalSku } from "../lib/sheetSkuAlias";
+import { buildAccountResolver } from "../lib/sheetAccountMatch";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -134,34 +135,6 @@ function classify(status: string): { cancelled: boolean; invoice: "paid" | "open
   return { cancelled: false, invoice: null };
 }
 
-/** Normalise a business name for matching. Mirrors Code.gs's own fuzziness. */
-function normalizeName(v: string): string {
-  return v
-    .toLowerCase()
-    .replace(/\b(inc|llc|ltd|co|corp|company|the)\b/g, "")
-    .replace(/[^a-z0-9]+/g, "")
-    .trim();
-}
-
-/**
- * The Sheet's "Customer" column is written as `<legal entity> / <DBA>` —
- * "Sutro Syndicate LLC / 540 SF", "Andre Boudin Bakeries Inc. / Boudin Bakery
- * (Downstairs)" — which splits exactly onto the two fields an Account already
- * has. Sometimes the DBA half is blank ("El Canton De La Patrona / ").
- *
- * So try, in order of how specific the evidence is: the DBA against
- * businessName, the legal half against legalEntity, then either half against
- * either field, then the whole string. Matching on the whole string alone —
- * which is what a naive normalise does — matches nothing at all, because the
- * combined name exists in neither column.
- */
-function candidateNames(sheetCustomer: string): string[] {
-  const whole = sheetCustomer.trim();
-  const parts = whole.split("/").map((p) => p.trim()).filter(Boolean);
-  const out = [whole, ...parts.slice().reverse(), ...parts];
-  return [...new Set(out.filter(Boolean))];
-}
-
 async function main(): Promise<void> {
   console.log(DRY_RUN ? "DRY RUN — nothing will be written\n" : "Importing order history from the Sheet\n");
   console.log(`Apps Script: ${BASE.slice(0, 58)}…`);
@@ -182,25 +155,8 @@ async function main(): Promise<void> {
     db.order.findMany({ where: { invoiceNumber: { not: null } }, select: { invoiceNumber: true } }),
   ]);
 
-  // Two indexes, kept separate so a DBA can never accidentally match another
-  // account's legal entity when a more specific match was available.
-  type Acct = (typeof accounts)[number];
-  const byBusinessName = new Map<string, Acct>();
-  const byLegalEntity = new Map<string, Acct>();
-  for (const a of accounts) {
-    byBusinessName.set(normalizeName(a.businessName), a);
-    if (a.legalEntity) byLegalEntity.set(normalizeName(a.legalEntity), a);
-  }
+  const resolveAccount = buildAccountResolver(accounts);
 
-  const resolveAccount = (sheetCustomer: string): Acct | undefined => {
-    for (const name of candidateNames(sheetCustomer)) {
-      const norm = normalizeName(name);
-      if (!norm) continue;
-      const hit = byBusinessName.get(norm) ?? byLegalEntity.get(norm);
-      if (hit) return hit;
-    }
-    return undefined;
-  };
   const repByName = new Map(reps.map((r) => [r.name.trim().toLowerCase(), r]));
   const productBySku = new Map(products.map((p) => [p.skuCode.trim().toUpperCase(), p]));
   const alreadyImported = new Set(existing.map((o) => o.invoiceNumber));
