@@ -6,15 +6,28 @@
     selection: {}, // productId -> { formatCode: qty }
     invoiceEdit: null, // working copy of the invoice currently on screen-invoice, see openInvoice()
     customer: null,
+    customerPickerReturn: 'screen-order', // which screen screen-customers returns to
+    marketing: null, // working state for the marketing materials request, see openMarketingForm()
     customers: loadCachedCustomers() || (window.LM_CUSTOMERS || []).slice()
   };
 
   var screens = {};
   document.querySelectorAll('.screen').forEach(function (el) { screens[el.id] = el; });
 
+  // Screens that submit something own a sticky footer. Only the active
+  // screen's may show, and every other one has to be hidden explicitly --
+  // they're position:fixed, so a footer left visible would float over
+  // whatever screen comes next.
+  var SCREEN_FOOTERS = {
+    'screen-order': 'order-footer',
+    'screen-marketing': 'marketing-footer'
+  };
+
   function showScreen(id) {
     Object.keys(screens).forEach(function (k) { screens[k].classList.toggle('active', k === id); });
-    document.getElementById('order-footer').style.display = id === 'screen-order' ? 'flex' : 'none';
+    Object.keys(SCREEN_FOOTERS).forEach(function (screenId) {
+      document.getElementById(SCREEN_FOOTERS[screenId]).style.display = screenId === id ? 'flex' : 'none';
+    });
     window.scrollTo(0, 0);
   }
 
@@ -115,115 +128,19 @@
     enterHome();
   }
 
-  document.getElementById('login-form').addEventListener('submit', function (e) {
-    e.preventDefault();
-    var name = document.getElementById('login-name').value.trim();
-    var pin = document.getElementById('login-pin').value.trim();
-    var errEl = document.getElementById('login-error');
-    var btn = document.getElementById('login-submit');
-    errEl.textContent = '';
-
-    if (!apiConfigured()) {
-      // Dev fallback so the app is testable before Apps Script is deployed.
-      completeLogin(name, 'Rep');
-      return;
-    }
-
-    btn.disabled = true;
-    btn.textContent = 'Checking...';
-    apiGet({ action: 'login', name: name, pin: pin })
-      .then(function (res) {
-        if (res.ok) {
-          completeLogin(res.rep, res.role);
-        } else {
-          errEl.textContent = res.error || 'Invalid name or PIN';
-        }
-      })
-      .catch(function (err) { errEl.textContent = friendlyApiError(err); })
-      .finally(function () {
-        btn.disabled = false;
-        btn.textContent = 'Log In';
-      });
-  });
-
-  document.getElementById('login-use-form-link').addEventListener('click', function (e) {
-    e.preventDefault();
-    showLoginFallback();
-  });
-
-  function showLoginFallback() {
-    document.getElementById('login-step-pick').style.display = 'none';
-    document.getElementById('login-step-pin').style.display = 'none';
-    document.getElementById('login-form').style.display = 'flex';
-  }
-
-  // ---------- Tap-to-pick-name + PIN pad ----------
-  // Big-target tap flow so reps never have to type on the small login
-  // screen: pick your name from a list, then punch a 4-digit PIN. Falls
-  // back to the plain typed form (below) if the reps list can't load.
-  var pinState = { rep: null, digits: '' };
-
-  function loadRepPicker() {
-    var host = document.getElementById('rep-picker');
-    if (!apiConfigured()) {
-      var demoNames = Object.keys(window.LM_REP_REGIONS || {});
-      renderRepPicker(demoNames.length ? demoNames.map(function (n) { return { name: n, role: 'Rep' }; }) : [{ name: 'Demo Rep', role: 'Rep' }]);
-      return;
-    }
-    apiGet({ action: 'reps' })
-      .then(function (res) {
-        if (res.ok && Array.isArray(res.reps) && res.reps.length) {
-          renderRepPicker(res.reps);
-        } else {
-          host.innerHTML = '<div class="empty-note">Could not load reps.</div>';
-        }
-      })
-      .catch(function () {
-        host.innerHTML = '<div class="empty-note">Could not reach the server. Use "Log in a different way" below.</div>';
-      });
-  }
-
-  function renderRepPicker(reps) {
-    var host = document.getElementById('rep-picker');
-    host.innerHTML = reps.map(function (r) {
-      return '<button type="button" class="rep-tile" data-name="' + escapeHtml(r.name) + '" data-role="' + escapeHtml(r.role || 'Rep') + '" data-needs-pin="' + (r.needsPin ? '1' : '') + '">' + escapeHtml(r.name) + '</button>';
-    }).join('');
-    host.querySelectorAll('.rep-tile').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        openPinPad(btn.getAttribute('data-name'), btn.getAttribute('data-role'), btn.getAttribute('data-needs-pin') === '1');
-      });
-    });
-  }
-
-  // mode is 'login' (rep already has a PIN), 'create' (first digits of a new
-  // PIN), or 'confirm' (re-entering it to catch typos) -- 'create'/'confirm'
-  // only happen the very first time a rep taps their name with no PIN set.
-  function openPinPad(name, role, needsPin) {
-    pinState.rep = name;
-    pinState.role = role || 'Rep';
-    pinState.mode = needsPin ? 'create' : 'login';
-    pinState.firstPin = null;
-    pinState.digits = '';
-    document.getElementById('pin-rep-name').textContent = name;
-    document.getElementById('pin-error').textContent = '';
-    updatePinInstructions();
-    updatePinDots(false);
-    document.getElementById('login-step-pick').style.display = 'none';
-    document.getElementById('login-step-pin').style.display = 'flex';
-  }
-
-  function updatePinInstructions() {
-    var el = document.getElementById('pin-instructions');
-    if (pinState.mode === 'create') el.textContent = 'Choose a 4-digit PIN';
-    else if (pinState.mode === 'confirm') el.textContent = 'Re-enter your PIN to confirm';
-    else el.textContent = 'Enter your PIN';
-  }
-
-  document.getElementById('pin-back-link').addEventListener('click', function (e) {
-    e.preventDefault();
-    document.getElementById('login-step-pin').style.display = 'none';
-    document.getElementById('login-step-pick').style.display = 'flex';
-  });
+  // ---------- PIN login ----------
+  // One 4-digit PIN and nothing else. orders.tlmbg.co is rep-only, so the
+  // login is as short as it can be: punch four digits and you're in. The PIN
+  // identifies the rep by itself -- the Apps Script side (handlePinLogin)
+  // looks up whose it is and refuses outright if two active reps share one,
+  // rather than guessing and logging someone in as the wrong person.
+  //
+  // Removed with the name picker: the first-login "choose your own PIN"
+  // flow. With no name on screen there is nothing to attach a new PIN to,
+  // so PINs are assigned in the Reps tab by whoever manages it. Every
+  // active rep already has one; a rep who needs a reset asks for it.
+  var PIN_PROMPT = 'Enter your 4-digit PIN';
+  var pinState = { digits: '', busy: false };
 
   function updatePinDots(isError) {
     var dots = document.querySelectorAll('#pin-dots .pin-dot');
@@ -233,110 +150,77 @@
     });
   }
 
-  document.getElementById('pin-pad').addEventListener('click', function (e) {
-    var btn = e.target.closest('button[data-key]');
-    if (!btn) return;
-    var key = btn.getAttribute('data-key');
+  function resetPinPad() {
+    pinState.digits = '';
+    pinState.busy = false;
+    document.getElementById('pin-instructions').textContent = PIN_PROMPT;
+    updatePinDots(false);
+  }
+
+  function pinDigit(key) {
+    // `busy` guards the window between the fourth digit and the server's
+    // answer -- without it a double-tap starts a second login attempt, which
+    // on a wrong PIN costs the rep two throttle delays instead of one.
+    if (pinState.busy) return;
     if (key === 'back') {
       pinState.digits = pinState.digits.slice(0, -1);
+      document.getElementById('pin-error').textContent = '';
       updatePinDots(false);
       return;
     }
     if (pinState.digits.length >= 4) return;
     pinState.digits += key;
     updatePinDots(false);
-    if (pinState.digits.length === 4) handlePinComplete();
-  });
-
-  function handlePinComplete() {
-    if (pinState.mode === 'create') {
-      pinState.firstPin = pinState.digits;
-      pinState.digits = '';
-      pinState.mode = 'confirm';
-      updatePinInstructions();
-      updatePinDots(false);
-      return;
-    }
-    if (pinState.mode === 'confirm') {
-      if (pinState.digits !== pinState.firstPin) {
-        document.getElementById('pin-error').textContent = "PINs didn't match -- try again";
-        updatePinDots(true);
-        setTimeout(function () {
-          pinState.mode = 'create';
-          pinState.firstPin = null;
-          pinState.digits = '';
-          updatePinInstructions();
-          updatePinDots(false);
-        }, 500);
-        return;
-      }
-      submitSetPin();
-      return;
-    }
-    submitLogin();
+    if (pinState.digits.length === 4) submitPinLogin();
   }
 
-  function submitLogin() {
+  document.getElementById('pin-pad').addEventListener('click', function (e) {
+    var btn = e.target.closest('button[data-key]');
+    if (!btn) return;
+    pinDigit(btn.getAttribute('data-key'));
+  });
+
+  // Physical keyboard too -- reps on a laptop shouldn't have to mouse over
+  // twelve buttons. Only listens while the login screen is the active one.
+  document.addEventListener('keydown', function (e) {
+    if (!document.getElementById('screen-login').classList.contains('active')) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (/^[0-9]$/.test(e.key)) { e.preventDefault(); pinDigit(e.key); return; }
+    if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); pinDigit('back'); }
+  });
+
+  function submitPinLogin() {
     var errEl = document.getElementById('pin-error');
+    var instr = document.getElementById('pin-instructions');
     errEl.textContent = '';
-    var name = pinState.rep;
     var pin = pinState.digits;
 
     if (!apiConfigured()) {
-      completeLogin(name, pinState.role);
+      // Dev fallback so the app is testable before Apps Script is deployed.
+      completeLogin('Demo Rep', 'Rep');
+      resetPinPad();
       return;
     }
 
-    apiGet({ action: 'login', name: name, pin: pin })
+    pinState.busy = true;
+    instr.textContent = 'Checking\u2026';
+
+    apiGet({ action: 'pinLogin', pin: pin })
       .then(function (res) {
-        if (res.ok) {
+        if (res && res.ok) {
           completeLogin(res.rep, res.role);
-        } else {
-          errEl.textContent = res.error || 'Incorrect PIN';
-          updatePinDots(true);
-          setTimeout(function () { pinState.digits = ''; updatePinDots(false); }, 400);
+          resetPinPad();
+          return;
         }
+        errEl.textContent = (res && res.error) || 'Incorrect PIN';
+        pinState.busy = false;
+        instr.textContent = PIN_PROMPT;
+        updatePinDots(true);
+        setTimeout(resetPinPad, 500);
       })
       .catch(function (err) {
         errEl.textContent = friendlyApiError(err);
-        pinState.digits = '';
-        updatePinDots(false);
-      });
-  }
-
-  function submitSetPin() {
-    var errEl = document.getElementById('pin-error');
-    errEl.textContent = '';
-    var name = pinState.rep;
-    var pin = pinState.firstPin;
-
-    if (!apiConfigured()) {
-      completeLogin(name, pinState.role);
-      return;
-    }
-
-    apiPost({ action: 'setPin', name: name, pin: pin })
-      .then(function (res) {
-        if (res.ok) {
-          completeLogin(res.rep, res.role);
-        } else {
-          errEl.textContent = res.error || 'Could not save your PIN';
-          setTimeout(function () {
-            pinState.mode = 'create';
-            pinState.firstPin = null;
-            pinState.digits = '';
-            updatePinInstructions();
-            updatePinDots(false);
-          }, 600);
-        }
-      })
-      .catch(function (err) {
-        errEl.textContent = friendlyApiError(err);
-        pinState.mode = 'create';
-        pinState.firstPin = null;
-        pinState.digits = '';
-        updatePinInstructions();
-        updatePinDots(false);
+        resetPinPad();
       });
   }
 
@@ -351,11 +235,9 @@
     clearSession();
     state.rep = null;
     state.repRole = null;
-    document.getElementById('login-step-pin').style.display = 'none';
-    document.getElementById('login-form').style.display = 'none';
-    document.getElementById('login-step-pick').style.display = 'flex';
+    document.getElementById('pin-error').textContent = '';
+    resetPinPad();
     showScreen('screen-login');
-    loadRepPicker();
   });
 
   // ---------- Home / stats ----------
@@ -1374,12 +1256,24 @@
       (state.customer.region ? '<div class="oline"><span>Region</span><span>' + escapeHtml(state.customer.region) + '</span></div>' : '');
   }
 
-  document.getElementById('btn-pick-customer').addEventListener('click', function () {
+  // screen-customers is shared by the beer order screen and the marketing
+  // materials request, so it has to remember which one sent the rep here.
+  // Without that, picking an account from the marketing form would drop them
+  // onto the beer order screen with a customer set that they never chose
+  // there -- and their marketing request half-filled behind it.
+  function openCustomerPicker(returnScreen) {
+    state.customerPickerReturn = returnScreen;
     renderCustomerList('');
     document.getElementById('customer-search').value = '';
     showScreen('screen-customers');
+  }
+
+  document.getElementById('btn-pick-customer').addEventListener('click', function () {
+    openCustomerPicker('screen-order');
   });
-  document.getElementById('back-customers-to-order').addEventListener('click', function () { showScreen('screen-order'); });
+  document.getElementById('back-customers-to-order').addEventListener('click', function () {
+    showScreen(state.customerPickerReturn || 'screen-order');
+  });
 
   document.getElementById('customer-search').addEventListener('input', function (e) {
     renderCustomerList(e.target.value);
@@ -1425,8 +1319,10 @@
     var row = e.target.closest('.order-row');
     if (!row) return;
     var idx = parseInt(row.getAttribute('data-idx'), 10);
-    setCustomer(state.customers[idx]);
-    showScreen('screen-order');
+    var returnScreen = state.customerPickerReturn || 'screen-order';
+    if (returnScreen === 'screen-marketing') setMarketingAccount(state.customers[idx]);
+    else setCustomer(state.customers[idx]);
+    showScreen(returnScreen);
   });
 
   document.getElementById('btn-add-customer').addEventListener('click', function () {
@@ -1763,6 +1659,512 @@
       .catch(function (err) { finish(false, friendlyApiError(err)); });
   });
 
+  // ---------- Marketing materials request ----------
+  // The catalog lives in assets/js/marketing-materials.js (transcribed from
+  // the Marketing Materials & Merch Master Tracker). This section is the
+  // form over it: 78 items in 12 categories, an optional ship-to account,
+  // and the free-text request fields carried over from Firestone Walker's
+  // form for anything the catalog doesn't cover.
+  var MK_MAX_FILES = 5;
+  var MK_MAX_FILE_BYTES = 5 * 1024 * 1024;
+  var MK_MAX_TOTAL_BYTES = 15 * 1024 * 1024;
+  var MK_NO_SIZE = ''; // the size key used for items that aren't ordered by size
+
+  // itemId -> { item, category }. Built once; the catalog is a static bundle,
+  // and submit has to resolve a bare id back to its category and brand.
+  var mkIndex = (function () {
+    var map = {};
+    (window.LM_MARKETING_CATEGORIES || []).forEach(function (cat) {
+      cat.items.forEach(function (item) { map[item.id] = { item: item, category: cat }; });
+    });
+    return map;
+  })();
+
+  function mkState() {
+    if (!state.marketing) resetMarketingForm();
+    return state.marketing;
+  }
+
+  function resetMarketingForm() {
+    state.marketing = {
+      account: null,
+      selection: {}, // itemId -> { sizeKey: qty }
+      openCats: {},  // categoryId -> true when expanded
+      brand: 'All',
+      query: '',
+      files: []      // { file, name, size } -- read to base64 only at submit
+    };
+    document.getElementById('mk-email').value = '';
+    document.getElementById('mk-purpose').value = '';
+    document.getElementById('mk-needed-by').value = '';
+    document.getElementById('mk-event-name').value = '';
+    document.getElementById('mk-ship-address').value = '';
+    document.getElementById('mk-custom').value = '';
+    document.getElementById('mk-size').value = '';
+    document.getElementById('mk-other').value = '';
+    document.getElementById('mk-search').value = '';
+    document.getElementById('mk-files').value = '';
+    document.getElementById('mk-error').textContent = '';
+  }
+
+  function openMarketingForm() {
+    resetMarketingForm();
+    document.getElementById('mk-requestor').value = state.rep || '';
+
+    var sel = document.getElementById('mk-purpose');
+    if (sel.options.length <= 1) {
+      (window.LM_MARKETING_PURPOSES || []).forEach(function (p) {
+        var opt = document.createElement('option');
+        opt.value = p;
+        opt.textContent = p;
+        sel.appendChild(opt);
+      });
+    }
+
+    // Nothing can be needed in the past, and today is a legitimate answer
+    // (a rep standing in an account asking for stickers on the next run).
+    document.getElementById('mk-needed-by').min = new Date().toISOString().slice(0, 10);
+
+    var total = Object.keys(mkIndex).length;
+    document.getElementById('mk-catalog-hint').textContent =
+      'Tap a category, then set quantities. ' + total + ' items across ' +
+      (window.LM_MARKETING_CATEGORIES || []).length + ' categories.';
+
+    renderMarketingBrandFilter();
+    renderMarketingCatalog();
+    renderMarketingAccount();
+    renderMarketingFileList();
+    renderMarketingSummary();
+    showScreen('screen-marketing');
+  }
+
+  document.getElementById('btn-marketing-order').addEventListener('click', openMarketingForm);
+  document.getElementById('back-marketing-to-home').addEventListener('click', function () { showScreen('screen-home'); });
+  document.getElementById('mk-cancel').addEventListener('click', function () {
+    resetMarketingForm();
+    showScreen('screen-home');
+  });
+
+  // ---- Ship-to account (optional throughout) ----
+  function setMarketingAccount(c) {
+    var mk = mkState();
+    mk.account = c || null;
+    // Prefilled, not locked: the account is the usual answer for both fields,
+    // but a rep sending materials to an offsite event for that account needs
+    // to be able to type over them.
+    if (c) {
+      var nameField = document.getElementById('mk-event-name');
+      if (!nameField.value.trim()) nameField.value = c.establishmentName || '';
+      var addrField = document.getElementById('mk-ship-address');
+      if (!addrField.value.trim() && c.address) addrField.value = c.address;
+    }
+    renderMarketingAccount();
+  }
+
+  function renderMarketingAccount() {
+    var mk = mkState();
+    var label = document.getElementById('mk-account-label');
+    var detail = document.getElementById('mk-account-detail');
+    var clear = document.getElementById('mk-clear-account');
+    if (!mk.account) {
+      label.textContent = 'Select account →';
+      detail.style.display = 'none';
+      clear.style.display = 'none';
+      return;
+    }
+    label.textContent = mk.account.establishmentName + ' — change';
+    detail.style.display = 'block';
+    detail.innerHTML =
+      '<div class="oline"><span>Address</span><span>' + escapeHtml(mk.account.address || '—') + '</span></div>' +
+      (mk.account.region ? '<div class="oline"><span>Region</span><span>' + escapeHtml(mk.account.region) + '</span></div>' : '');
+    clear.style.display = 'block';
+  }
+
+  document.getElementById('mk-btn-pick-account').addEventListener('click', function () {
+    openCustomerPicker('screen-marketing');
+  });
+
+  document.getElementById('mk-clear-account').addEventListener('click', function (e) {
+    e.preventDefault();
+    mkState().account = null;
+    renderMarketingAccount();
+  });
+
+  // ---- Catalog ----
+  function renderMarketingBrandFilter() {
+    var brands = ['All'].concat(window.LM_MARKETING_BRANDS || []);
+    var mk = mkState();
+    document.getElementById('mk-brand-filter').innerHTML = brands.map(function (b) {
+      return '<button type="button" class="chip' + (mk.brand === b ? ' selected' : '') +
+        '" data-brand="' + escapeHtml(b) + '">' + escapeHtml(b) + '</button>';
+    }).join('');
+  }
+
+  function mkItemMatches(item, cat, mk) {
+    // Multi-Brand items stay visible under a specific brand filter -- they
+    // carry all three marks, so a rep filtered to Cantinesca still wants the
+    // shared bar mats and stadium cups in front of them.
+    if (mk.brand !== 'All' && item.brand !== mk.brand && item.brand !== 'Multi-Brand') return false;
+    if (!mk.query) return true;
+    var haystack = (item.name + ' ' + item.brand + ' ' + item.id + ' ' + cat.name + ' ' + (item.note || '')).toLowerCase();
+    return haystack.indexOf(mk.query) !== -1;
+  }
+
+  function mkItemQty(itemId) {
+    var sizes = mkState().selection[itemId];
+    if (!sizes) return 0;
+    return Object.keys(sizes).reduce(function (sum, k) { return sum + sizes[k]; }, 0);
+  }
+
+  function mkCategoryQty(cat) {
+    return cat.items.reduce(function (sum, item) { return sum + mkItemQty(item.id); }, 0);
+  }
+
+  function mkStepperHtml(itemId, sizeKey, qty) {
+    return '<div class="qty-stepper" data-item="' + itemId + '" data-size="' + escapeHtml(sizeKey) + '">' +
+      '<button type="button" data-step="-1">−</button>' +
+      '<span class="qty-val">' + qty + '</span>' +
+      '<button type="button" data-step="1">+</button>' +
+      '</div>';
+  }
+
+  function mkItemHtml(item, cat) {
+    var subParts = [item.brand];
+    if (item.note) subParts.push(item.note);
+    if (item.unit) subParts.push('per ' + item.unit);
+    var text =
+      '<div class="mk-item-text">' +
+        '<div class="mk-item-name">' + escapeHtml(item.name) + '</div>' +
+        '<div class="mk-item-sub">' + escapeHtml(subParts.join(' · ')) + '</div>' +
+        '<div class="mk-item-id">' + escapeHtml(item.id) + '</div>' +
+      '</div>';
+    var qty = mkItemQty(item.id);
+
+    if (!item.sizes) {
+      return '<div class="mk-item' + (qty ? ' has-qty' : '') + '" data-item="' + item.id + '">' +
+        text + mkStepperHtml(item.id, MK_NO_SIZE, qty) + '</div>';
+    }
+
+    // Sized items get a header row plus one stepper per size -- a single
+    // quantity on a garment isn't actionable for whoever places the order.
+    var sizeRows = item.sizes.map(function (sz) {
+      var szQty = (mkState().selection[item.id] || {})[sz] || 0;
+      return '<div class="mk-size-row">' +
+        '<span class="mk-size-label">' + escapeHtml(sz) + '</span>' +
+        mkStepperHtml(item.id, sz, szQty) +
+        '</div>';
+    }).join('');
+
+    return '<div class="mk-sized">' +
+      '<div class="mk-item' + (qty ? ' has-qty' : '') + '" data-item="' + item.id + '">' +
+        text +
+        '<span class="mk-item-sub">' + (qty ? qty + ' total' : 'by size') + '</span>' +
+      '</div>' +
+      '<div class="mk-size-grid">' + sizeRows + '</div>' +
+      '</div>';
+  }
+
+  function renderMarketingCatalog() {
+    var mk = mkState();
+    var host = document.getElementById('mk-catalog');
+    // A search or a brand filter force-opens every category that still has a
+    // match. Leaving them collapsed would show a rep who typed "sticker" a
+    // list of category headers and no stickers.
+    var forceOpen = !!mk.query || mk.brand !== 'All';
+    var anyShown = false;
+
+    var html = (window.LM_MARKETING_CATEGORIES || []).map(function (cat) {
+      var items = cat.items.filter(function (item) { return mkItemMatches(item, cat, mk); });
+      if (!items.length) return '';
+      anyShown = true;
+      var qty = mkCategoryQty(cat);
+      // A category holding a quantity always stays open, even if the rep
+      // then narrows the search past it -- so nothing they've already picked
+      // can end up hidden behind a collapsed header at submit time.
+      var open = forceOpen || !!mk.openCats[cat.id] || qty > 0;
+      return '<div class="mk-cat' + (qty ? ' has-qty' : '') + '" data-cat="' + cat.id + '">' +
+        '<button type="button" class="mk-cat-head" data-toggle-cat="' + cat.id + '">' +
+          '<span>' + escapeHtml(cat.name) +
+            '<span class="mk-cat-blurb">' + escapeHtml(cat.blurb) + '</span>' +
+          '</span>' +
+          '<span class="mk-cat-meta">' +
+            (qty ? '<span class="mk-cat-badge">' + qty + '</span>' : '') +
+            '<span class="mk-cat-count">' + items.length + '</span>' +
+            '<span class="mk-cat-caret">' + (open ? '▾' : '▸') + '</span>' +
+          '</span>' +
+        '</button>' +
+        (open ? '<div class="mk-cat-body">' + items.map(function (item) { return mkItemHtml(item, cat); }).join('') + '</div>' : '') +
+        '</div>';
+    }).join('');
+
+    host.innerHTML = anyShown ? html : '<div class="empty-note">No materials match that search. Try fewer words, or describe what you need under Custom Request below.</div>';
+  }
+
+  document.getElementById('mk-search').addEventListener('input', function (e) {
+    mkState().query = e.target.value.trim().toLowerCase();
+    renderMarketingCatalog();
+  });
+
+  document.getElementById('mk-brand-filter').addEventListener('click', function (e) {
+    var chip = e.target.closest('[data-brand]');
+    if (!chip) return;
+    mkState().brand = chip.getAttribute('data-brand');
+    renderMarketingBrandFilter();
+    renderMarketingCatalog();
+  });
+
+  document.getElementById('mk-catalog').addEventListener('click', function (e) {
+    var catBtn = e.target.closest('[data-toggle-cat]');
+    if (catBtn) {
+      var catId = catBtn.getAttribute('data-toggle-cat');
+      var mk = mkState();
+      mk.openCats[catId] = !mk.openCats[catId];
+      renderMarketingCatalog();
+      return;
+    }
+
+    var stepBtn = e.target.closest('button[data-step]');
+    if (!stepBtn) return;
+    var stepper = stepBtn.closest('.qty-stepper');
+    var itemId = stepper.getAttribute('data-item');
+    var sizeKey = stepper.getAttribute('data-size');
+    var mkS = mkState();
+    if (!mkS.selection[itemId]) mkS.selection[itemId] = {};
+    var current = mkS.selection[itemId][sizeKey] || 0;
+    var next = Math.max(0, current + parseInt(stepBtn.getAttribute('data-step'), 10));
+    if (next === 0) delete mkS.selection[itemId][sizeKey];
+    else mkS.selection[itemId][sizeKey] = next;
+    if (!Object.keys(mkS.selection[itemId]).length) delete mkS.selection[itemId];
+
+    // Patched in place rather than re-rendered: a full re-render on every tap
+    // would collapse the rep's scroll position back to the top of a 78-item
+    // list mid-way through setting quantities.
+    stepper.querySelector('.qty-val').textContent = next;
+    var itemTotal = mkItemQty(itemId);
+    var itemRow = document.querySelector('.mk-item[data-item="' + itemId + '"]');
+    if (itemRow) {
+      itemRow.classList.toggle('has-qty', itemTotal > 0);
+      var sizedTotal = itemRow.querySelector('.mk-item-sub:last-child');
+      if (sizedTotal && itemRow.parentElement.classList.contains('mk-sized')) {
+        sizedTotal.textContent = itemTotal ? itemTotal + ' total' : 'by size';
+      }
+    }
+    var cat = mkIndex[itemId] && mkIndex[itemId].category;
+    if (cat) {
+      var catEl = document.querySelector('.mk-cat[data-cat="' + cat.id + '"]');
+      var catQty = mkCategoryQty(cat);
+      if (catEl) {
+        catEl.classList.toggle('has-qty', catQty > 0);
+        var meta = catEl.querySelector('.mk-cat-meta');
+        var badge = meta.querySelector('.mk-cat-badge');
+        if (catQty > 0) {
+          if (badge) badge.textContent = catQty;
+          else meta.insertAdjacentHTML('afterbegin', '<span class="mk-cat-badge">' + catQty + '</span>');
+        } else if (badge) {
+          badge.remove();
+        }
+      }
+    }
+    renderMarketingSummary();
+  });
+
+  function collectMarketingLines() {
+    var mk = mkState();
+    var lines = [];
+    (window.LM_MARKETING_CATEGORIES || []).forEach(function (cat) {
+      cat.items.forEach(function (item) {
+        var sizes = mk.selection[item.id];
+        if (!sizes) return;
+        var keys = item.sizes ? item.sizes : [MK_NO_SIZE];
+        keys.forEach(function (sizeKey) {
+          var qty = sizes[sizeKey];
+          if (!qty) return;
+          lines.push({
+            itemId: item.id,
+            category: cat.name,
+            brand: item.brand,
+            item: item.name,
+            size: sizeKey,
+            qty: qty,
+            unit: item.unit || 'ea'
+          });
+        });
+      });
+    });
+    return lines;
+  }
+
+  function renderMarketingSummary() {
+    var lines = collectMarketingLines();
+    var box = document.getElementById('mk-summary');
+    if (!lines.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    var units = lines.reduce(function (sum, l) { return sum + l.qty; }, 0);
+    box.innerHTML =
+      lines.map(function (l) {
+        return '<div class="oline"><span>' + escapeHtml(l.item) +
+          (l.size ? ' — ' + escapeHtml(l.size) : '') + ' <small style="color:var(--silver-dim);">' + escapeHtml(l.brand) + '</small></span>' +
+          '<span>' + l.qty + ' ' + escapeHtml(l.unit) + '</span></div>';
+      }).join('') +
+      '<div class="oline"><strong>' + lines.length + ' line' + (lines.length === 1 ? '' : 's') + '</strong><strong>' + units + ' units</strong></div>';
+    box.style.display = 'block';
+  }
+
+  // ---- Attachments ----
+  function fmtBytes(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
+    return (n / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  function addMarketingFiles(fileList) {
+    var mk = mkState();
+    var rejected = [];
+    Array.prototype.forEach.call(fileList, function (f) {
+      if (mk.files.length >= MK_MAX_FILES) { rejected.push(f.name + ' (max ' + MK_MAX_FILES + ' files)'); return; }
+      if (f.size > MK_MAX_FILE_BYTES) { rejected.push(f.name + ' (over ' + fmtBytes(MK_MAX_FILE_BYTES) + ')'); return; }
+      var total = mk.files.reduce(function (sum, x) { return sum + x.size; }, 0);
+      if (total + f.size > MK_MAX_TOTAL_BYTES) { rejected.push(f.name + ' (over the ' + fmtBytes(MK_MAX_TOTAL_BYTES) + ' total)'); return; }
+      mk.files.push({ file: f, name: f.name, size: f.size, type: f.type || 'application/octet-stream' });
+    });
+    renderMarketingFileList();
+    if (rejected.length) toast('Skipped: ' + rejected.join(', '), true);
+  }
+
+  function renderMarketingFileList() {
+    var mk = mkState();
+    document.getElementById('mk-file-list').innerHTML = mk.files.map(function (f, i) {
+      return '<div class="file-row">' +
+        '<span class="fname">' + escapeHtml(f.name) + '</span>' +
+        '<span class="fsize">' + fmtBytes(f.size) + '</span>' +
+        '<button type="button" data-remove-file="' + i + '" aria-label="Remove ' + escapeHtml(f.name) + '">×</button>' +
+        '</div>';
+    }).join('');
+  }
+
+  document.getElementById('mk-file-btn').addEventListener('click', function () {
+    document.getElementById('mk-files').click();
+  });
+
+  document.getElementById('mk-files').addEventListener('change', function (e) {
+    addMarketingFiles(e.target.files);
+    e.target.value = ''; // so re-picking the same file still fires change
+  });
+
+  document.getElementById('mk-file-list').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-remove-file]');
+    if (!btn) return;
+    mkState().files.splice(parseInt(btn.getAttribute('data-remove-file'), 10), 1);
+    renderMarketingFileList();
+  });
+
+  ['dragenter', 'dragover'].forEach(function (evt) {
+    document.getElementById('mk-file-drop').addEventListener(evt, function (e) {
+      e.preventDefault();
+      this.classList.add('dragover');
+    });
+  });
+  ['dragleave', 'drop'].forEach(function (evt) {
+    document.getElementById('mk-file-drop').addEventListener(evt, function (e) {
+      e.preventDefault();
+      this.classList.remove('dragover');
+      if (evt === 'drop' && e.dataTransfer && e.dataTransfer.files) addMarketingFiles(e.dataTransfer.files);
+    });
+  });
+
+  // Reads the queued files to base64 for the JSON POST. Done at submit rather
+  // than at pick time so a rep who attaches a file and then removes it never
+  // pays for the read, and so nothing large sits in memory while they're
+  // still filling the form in.
+  function readMarketingAttachments() {
+    var files = mkState().files;
+    if (!files.length) return Promise.resolve([]);
+    return Promise.all(files.map(function (f) {
+      return new Promise(function (resolve, reject) {
+        var reader = new FileReader();
+        reader.onload = function () {
+          var result = String(reader.result || '');
+          resolve({ name: f.name, mimeType: f.type, dataBase64: result.slice(result.indexOf(',') + 1) });
+        };
+        reader.onerror = function () { reject(new Error('Could not read ' + f.name)); };
+        reader.readAsDataURL(f.file);
+      });
+    }));
+  }
+
+  // ---- Submit ----
+  document.getElementById('mk-submit').addEventListener('click', function () {
+    var mk = mkState();
+    var errEl = document.getElementById('mk-error');
+    errEl.textContent = '';
+
+    var email = document.getElementById('mk-email').value.trim();
+    var purpose = document.getElementById('mk-purpose').value;
+    var neededBy = document.getElementById('mk-needed-by').value;
+    var customRequest = document.getElementById('mk-custom').value.trim();
+    var lines = collectMarketingLines();
+
+    if (!purpose) { errEl.textContent = 'Choose what this request is for.'; return; }
+    if (!neededBy) { errEl.textContent = 'Enter the date you need this by.'; return; }
+    // The account is deliberately optional, so the thing that has to be
+    // present is the ask itself -- either picked items or a described one.
+    if (!lines.length && !customRequest) {
+      errEl.textContent = 'Add at least one material, or describe what you need under Custom Request.';
+      return;
+    }
+    if (email && email.indexOf('@') === -1) { errEl.textContent = 'That email address looks incomplete.'; return; }
+
+    var btn = document.getElementById('mk-submit');
+    var label = document.getElementById('mk-submit-label');
+    btn.disabled = true;
+    label.innerHTML = '<span class="spinner"></span> Submitting...';
+
+    var finish = function (ok, msg) {
+      btn.disabled = false;
+      label.textContent = 'Submit Request';
+      toast(msg, !ok);
+      if (ok) {
+        resetMarketingForm();
+        showScreen('screen-home');
+      } else {
+        errEl.textContent = msg;
+      }
+    };
+
+    if (!apiConfigured()) {
+      setTimeout(function () { finish(true, 'Request captured (demo mode — connect the sheet in config.js)'); }, 500);
+      return;
+    }
+
+    readMarketingAttachments()
+      .then(function (attachments) {
+        return apiPost({
+          action: 'marketingOrder',
+          rep: state.rep,
+          email: email,
+          purpose: purpose,
+          neededBy: neededBy,
+          requestDate: new Date().toISOString().slice(0, 10),
+          account: mk.account ? mk.account.establishmentName : '',
+          accountRegion: mk.account ? (mk.account.region || '') : '',
+          eventName: document.getElementById('mk-event-name').value.trim(),
+          shipAddress: document.getElementById('mk-ship-address').value.trim(),
+          customRequest: customRequest,
+          size: document.getElementById('mk-size').value.trim(),
+          otherDetails: document.getElementById('mk-other').value.trim(),
+          lines: lines,
+          attachments: attachments
+        });
+      })
+      .then(function (res) {
+        if (!res.ok) { finish(false, res.error || 'Request failed to submit'); return; }
+        var what = lines.length ? lines.length + ' line item(s)' : 'Custom request';
+        finish(true, what + ' sent to marketing' + (res.requestNumber ? ' — ' + res.requestNumber : ''));
+      })
+      .catch(function (err) {
+        finish(false, err && err.message === 'NOT_SIGNED_IN' ? friendlyApiError(err) : (err.message || 'Request failed to submit'));
+      });
+  });
+
   // ---------- Boot ----------
   var existing = loadSession();
   if (existing) {
@@ -1770,7 +2172,10 @@
     state.repRole = loadRole();
     enterHome();
   } else {
-    loadRepPicker();
+    // #screen-login already carries .active in the markup, so there is
+    // nothing to show -- just make sure the pad starts empty (a reload
+    // mid-entry would otherwise leave stale dots filled in).
+    resetPinPad();
   }
 
   if ('serviceWorker' in navigator) {

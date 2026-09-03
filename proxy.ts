@@ -18,9 +18,11 @@ import type { UserRole } from "@/app/generated/prisma/enums";
  * acceptance (§2 rule 1), so a rewrite that goes wrong is a DNS revert rather
  * than a redeploy.
  *
- * `orders.tlmbg.co` is deliberately absent: it keeps serving the rep-app PWA
- * from /rep-app exactly as it does today, via next.config.ts's redirect, until
- * the Phase R cutover. Never break the rep app (§13).
+ * `orders.tlmbg.co` is deliberately absent, but no longer for the old reason
+ * (it used to be waiting on the Phase R cutover). It now claims the root via
+ * the redirect in step 1b instead of a rewrite -- see there for why a rewrite
+ * would break every rep who has the PWA installed. Never break the rep app
+ * (§13).
  */
 const HOST_REWRITES: ReadonlyArray<[hostname: string, prefix: string]> = [
   ["ops.tlmbg.co", "/ops"],
@@ -52,6 +54,25 @@ export default auth((req) => {
     // bookmarks keep the hostname they were saved with, which is what makes the
     // DNS cutover reversible without breaking anyone's saved links.
     return NextResponse.rewrite(url);
+  }
+
+  // ---- 1b. The rep app owns the root --------------------------------------
+  // orders.tlmbg.co is the one place sales reps go, and the rep app is the
+  // only thing there, so the bare root sends them into it. What used to
+  // answer here -- the "Customer Ordering -- coming soon" placeholder in
+  // app/page.tsx -- is gone.
+  //
+  // A redirect, not a rewrite, and that distinction matters: the PWA's
+  // <base href>, its manifest scope and its service worker scope are all
+  // pinned to /rep-app/. Serving its HTML from / would leave the service
+  // worker registered out of scope and quietly break offline use for every
+  // rep who already has the app installed. Sending them to /rep-app keeps
+  // all three aligned with the URL their home-screen icon already uses.
+  //
+  // Runs after the host rewrites above on purpose: ops, inventory, bol and
+  // ach each claim their own root and have to keep it.
+  if (pathname === "/") {
+    return Response.redirect(new URL("/rep-app", req.nextUrl));
   }
 
   // ---- 2. Role gating -----------------------------------------------------

@@ -28,22 +28,17 @@
   <div id="toast" class="toast"></div>
 
   <!-- LOGIN -->
+  <!-- One 4-digit PIN, nothing else. The name picker that used to be step 1
+       is gone, along with the typed name/PIN fallback form: orders.tlmbg.co
+       is rep-only, so the PIN is the whole login and it identifies the rep
+       by itself (handlePinLogin in Code.gs looks up whose it is). That makes
+       PIN uniqueness a correctness requirement -- see auditRepPins(). -->
   <section id="screen-login" class="screen active">
     <img class="login-logo" src="assets/icons/brand/logo-alt.svg" alt="The Leopard Mark Brewing Co." />
     <div class="brand-sub">Sales Rep Orders</div>
 
-    <!-- Step 1: tap your name -->
-    <div class="login-step" id="login-step-pick">
-      <div class="rep-picker" id="rep-picker">
-        <div class="empty-note">Loading reps…</div>
-      </div>
-      <a href="#" class="back-link login-alt-link" id="login-use-form-link">Log in a different way</a>
-    </div>
-
-    <!-- Step 2: PIN pad -->
-    <div class="login-step" id="login-step-pin" style="display:none;">
-      <a href="#" class="back-link" id="pin-back-link">← Not <span id="pin-rep-name"></span>?</a>
-      <div class="pin-instructions" id="pin-instructions">Enter your PIN</div>
+    <div class="login-step" id="login-step-pin">
+      <div class="pin-instructions" id="pin-instructions">Enter your 4-digit PIN</div>
       <div class="pin-dots" id="pin-dots">
         <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
       </div>
@@ -62,21 +57,8 @@
         <button type="button" data-key="0">0</button>
         <button type="button" class="pin-key-back" data-key="back">⌫</button>
       </div>
+      <div class="pin-help">Forgot your PIN? Ask Jack to reset it.</div>
     </div>
-
-    <!-- Fallback: original typed name/PIN form -->
-    <form class="login-card" id="login-form" style="display:none;">
-      <div class="field">
-        <label for="login-name">Your Name</label>
-        <input id="login-name" name="name" autocomplete="username" required />
-      </div>
-      <div class="field">
-        <label for="login-pin">PIN</label>
-        <input id="login-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="current-password" required />
-      </div>
-      <div class="error-text" id="login-error"></div>
-      <button class="btn btn-primary btn-block" type="submit" id="login-submit">Log In</button>
-    </form>
   </section>
 
   <!-- LANDING / STATS -->
@@ -104,6 +86,10 @@
     <div class="cta-row">
       <button class="cta-btn" id="btn-new-order">
         <span>Place Order<small>Start a new order for an account</small></span>
+        <span>→</span>
+      </button>
+      <button class="cta-btn" id="btn-marketing-order">
+        <span>Order Marketing Materials<small>Stickers, signage, glassware, merch</small></span>
         <span>→</span>
       </button>
       <button class="cta-btn secondary" id="btn-add-account">
@@ -167,6 +153,124 @@
       <button class="btn btn-ghost" id="footer-cancel">Cancel</button>
       <button class="btn btn-primary btn-block" id="footer-submit">
         <span id="footer-submit-label">Submit Order</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- MARKETING MATERIALS REQUEST -->
+  <!-- Field order and labels mirror Firestone Walker's marketing request
+       form (Requestor / Email / What is this for / Name of Account or Event /
+       Needed By / Size WxH / Description / Any Other Details / Logo and
+       Supporting Graphics), with the item pick-list added in the middle --
+       theirs is a creative-request form with no catalog, ours has to be able
+       to order real stock. Submit lives in the sticky footer rather than
+       inline like theirs, matching how the beer order screen already
+       submits so reps get one consistent gesture. -->
+  <section id="screen-marketing" class="screen">
+    <a class="back-link" id="back-marketing-to-home">← Back</a>
+    <div class="section-title">Order Marketing Materials</div>
+
+    <div class="form-note">
+      <div class="form-note-title">Note:</div>
+      <p>Everything listed comes straight from the Marketing Materials tracker. Not every item is in stock yet — marketing will confirm timing on anything that still has to be produced.</p>
+      <p>If you need something that isn't listed, or in a custom size, describe it under <strong>Custom Request</strong>. If you need it in less than a week, say so under <strong>Any Other Details</strong> so we can confirm the date is possible.</p>
+    </div>
+
+    <div class="form-card">
+      <div class="form-card-title">Request</div>
+      <div class="field">
+        <label for="mk-requestor">Requestor Name <span class="req">*</span></label>
+        <input id="mk-requestor" readonly />
+        <div class="field-hint">Taken from your login — this request is logged against you.</div>
+      </div>
+      <div class="field">
+        <label for="mk-email">Email address</label>
+        <input id="mk-email" type="email" inputmode="email" autocomplete="email" placeholder="Enter your email address" />
+        <div class="field-hint">Optional. Where marketing should reply if they have questions.</div>
+      </div>
+      <div class="field">
+        <label for="mk-purpose">What is this for? <span class="req">*</span></label>
+        <select id="mk-purpose">
+          <option value="">Choose one</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="mk-needed-by">Needed By <span class="req">*</span></label>
+        <input id="mk-needed-by" type="date" />
+      </div>
+    </div>
+
+    <div class="form-card">
+      <div class="form-card-title">Ship To</div>
+      <div class="field-hint">Optional. Skip the account and the request just ships to you.</div>
+      <button class="cta-btn secondary" id="mk-btn-pick-account" type="button" style="width:100%;">
+        <span id="mk-account-label">Select account →</span>
+      </button>
+      <div id="mk-account-detail" class="order-summary" style="display:none; margin:0;"></div>
+      <a href="#" class="back-link" id="mk-clear-account" style="display:none; margin:0;">Clear account</a>
+      <div class="field">
+        <label for="mk-event-name">Name of Account / Event</label>
+        <input id="mk-event-name" placeholder="Enter your answer" />
+        <div class="field-hint">Fills in from the account above. Type an event name here if there's no account.</div>
+      </div>
+      <div class="field">
+        <label for="mk-ship-address">Shipping Address</label>
+        <textarea id="mk-ship-address" rows="3" placeholder="Enter your answer"></textarea>
+        <div class="field-hint">Fills in from the account above. Leave blank to ship to you.</div>
+      </div>
+    </div>
+
+    <div class="form-card">
+      <div class="form-card-title">Materials</div>
+      <div class="field-hint" id="mk-catalog-hint">Tap a category, then set quantities.</div>
+      <div class="field">
+        <input id="mk-search" placeholder="Search all materials" />
+      </div>
+      <div class="chip-row" id="mk-brand-filter"></div>
+      <div id="mk-catalog"></div>
+    </div>
+
+    <div class="form-card">
+      <div class="form-card-title">Custom Request</div>
+      <div class="field-hint">Only if what you need isn't in the list above.</div>
+      <div class="field">
+        <label for="mk-custom">Description and Supporting Content</label>
+        <textarea id="mk-custom" rows="4" placeholder="Enter your answer"></textarea>
+      </div>
+      <div class="field">
+        <label for="mk-size">Size (WxH)</label>
+        <input id="mk-size" placeholder="e.g. 24 x 36 in" />
+      </div>
+    </div>
+
+    <div class="form-card">
+      <div class="form-card-title">Details</div>
+      <div class="field">
+        <label for="mk-other">Any Other Details</label>
+        <textarea id="mk-other" rows="3" placeholder="Enter your answer"></textarea>
+      </div>
+      <div class="field">
+        <label>Logo and Supporting Graphics</label>
+        <div class="file-drop" id="mk-file-drop">
+          <input type="file" id="mk-files" multiple accept="image/*,application/pdf" hidden />
+          <button class="btn btn-ghost" type="button" id="mk-file-btn">Select files…</button>
+          <div class="file-drop-hint">or drag and drop files here</div>
+        </div>
+        <div id="mk-file-list" class="file-list"></div>
+        <div class="field-hint">Images or PDF. Up to 5 files, 5 MB each.</div>
+      </div>
+    </div>
+
+    <div class="order-summary" id="mk-summary" style="display:none;"></div>
+    <div class="error-text" id="mk-error"></div>
+    <div style="height:90px;"></div>
+  </section>
+
+  <div class="sticky-footer" id="marketing-footer" style="display:none;">
+    <div class="inner">
+      <button class="btn btn-ghost" id="mk-cancel">Cancel</button>
+      <button class="btn btn-primary btn-block" id="mk-submit">
+        <span id="mk-submit-label">Submit Request</span>
       </button>
     </div>
   </div>
@@ -513,6 +617,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="assets/js/config.js"></script>
   <script src="assets/js/products.js"></script>
+  <script src="assets/js/marketing-materials.js"></script>
   <script src="assets/js/customers.js"></script>
   <script src="assets/js/app.js"></script>
 </body>

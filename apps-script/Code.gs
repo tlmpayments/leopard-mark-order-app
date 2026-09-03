@@ -44,14 +44,19 @@ function doGet(e) {
   try {
     var action = e.parameter.action;
     if (action === 'login') return respond(handleLogin(e.parameter.name, e.parameter.pin));
+    if (action === 'pinLogin') return respond(handlePinLogin(e.parameter.pin));
     if (action === 'reps') return respond(handleReps());
     if (action === 'stats') return respond(handleStats(e.parameter.rep));
     if (action === 'customers') return respond(handleCustomers());
     if (action === 'debugHeaders') return respond(handleDebugHeaders());
+    if (action === 'debugSlackTest') return respond(handleDebugSlackTest(e.parameter.inventorySource));
+    if (action === 'backfillFirstOrderFlag') return respond(handleBackfillFirstOrderFlag());
+    if (action === 'debugSlackTeamInfo') return respond(handleDebugSlackTeamInfo());
     if (action === 'debugSales') return respond(handleDebugSales(e.parameter.rows));
     if (action === 'invoiceDetail') return respond(handleInvoiceDetail(e.parameter.invoiceNumber));
     if (action === 'customerOrders') return respond(handleCustomerOrders(e.parameter.customer));
     if (action === 'allOrders') return respond(handleAllOrders());
+    if (action === 'lastOrder') return respond(handleLastOrder(e.parameter.customer));
     if (action === 'allSalesRows') return respond(handleAllSalesRows());
     return respond({ ok: false, error: 'Unknown action' });
   } catch (err) {
@@ -67,6 +72,7 @@ function doPost(e) {
     if (body.action === 'updateCustomer') return respond(handleUpdateCustomer(body.customer));
     if (body.action === 'setPin') return respond(handleSetPin(body.name, body.pin));
     if (body.action === 'syncOrder') return respond(handleSyncOrder(body));
+    if (body.action === 'marketingOrder') return respond(handleMarketingOrder(body));
     if (body.action === 'writeOrderIds') return respond(handleWriteOrderIds(body));
     return respond({ ok: false, error: 'Unknown action' });
   } catch (err) {
@@ -439,6 +445,74 @@ function handleCustomerOrders(customerName) {
   };
 }
 
+// Powers the "Reorder Last Order" shortcut: the most recent order for one
+// customer, with productCode per line (handleCustomerOrders omits it --
+// fine for a history list, not enough to reconstruct a re-orderable
+// selection). Same invoice-grouping/sort as handleCustomerOrders, just
+// narrowed to the single newest group and one extra field per line.
+function handleLastOrder(customerName) {
+  if (!customerName) return { ok: false, error: 'Missing customer' };
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SALES_SHEET_NAME);
+  if (!sheet) return { ok: false, error: 'Sales tab not found' };
+  var hc = getSalesHeaderAndCol(sheet);
+  var header = hc.header, col = hc.col;
+  var dataStartRow = hc.headerRowNumber + 1;
+  var data = sheet.getRange(dataStartRow, 1, Math.max(0, sheet.getLastRow() - hc.headerRowNumber), sheet.getLastColumn()).getValues();
+
+  var customerIdx = salesCol(col, header, 'Customer', ['customer']);
+  var qtyIdx = salesCol(col, header, 'Qty', ['qty']);
+  var productIdx = salesCol(col, header, 'Product Name', ['product', 'name']);
+  var packagingIdx = salesCol(col, header, 'Packaging Format', ['packaging']);
+  var productCodeIdx = salesCol(col, header, 'Product Code', ['product', 'code']);
+  var poDateIdx = salesCol(col, header, 'PO Date', ['po', 'date']);
+  var invoiceIdx = salesCol(col, header, 'Invoice #', ['invoice', '#']);
+  var notesIdx = salesCol(col, header, 'Notes', ['notes']);
+
+  var target = String(customerName).trim().toLowerCase();
+  var invoiceMap = {};
+  var invoiceOrder = [];
+
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    if (customerIdx === -1) continue;
+    if (!customerMatches(row[customerIdx], target)) continue;
+
+    var invoiceNumber = invoiceIdx === -1 ? '' : String(row[invoiceIdx] || '');
+    var poDate = poDateIdx === -1 ? '' : row[poDateIdx];
+    var groupKey = invoiceNumber || ('__noinv_' + i);
+
+    if (!invoiceMap[groupKey]) {
+      invoiceMap[groupKey] = {
+        invoiceNumber: invoiceNumber,
+        poDate: poDate,
+        notes: notesIdx === -1 ? '' : row[notesIdx],
+        lines: []
+      };
+      invoiceOrder.push(groupKey);
+    }
+    invoiceMap[groupKey].lines.push({
+      product: productIdx === -1 ? '' : row[productIdx],
+      packaging: packagingIdx === -1 ? '' : row[packagingIdx],
+      productCode: productCodeIdx === -1 ? '' : row[productCodeIdx],
+      qty: Number(qtyIdx === -1 ? 0 : row[qtyIdx]) || 0
+    });
+  }
+
+  if (!invoiceOrder.length) return { ok: true, hasOrder: false };
+
+  var orders = invoiceOrder.map(function (k) { return invoiceMap[k]; });
+  orders.sort(function (a, b) { return new Date(b.poDate) - new Date(a.poDate); });
+  var last = orders[0];
+
+  return {
+    ok: true,
+    hasOrder: true,
+    poDate: last.poDate,
+    notes: last.notes,
+    lines: last.lines.filter(function (l) { return l.productCode && l.qty > 0; })
+  };
+}
+
 // Every order across every rep, most recent first -- powers the admin
 // "All Orders" dashboard. Same invoice-grouping logic as handleStats/
 // handleCustomerOrders, just with no rep/customer filter.
@@ -583,12 +657,97 @@ function nextInvoiceNumber(sheet, invoiceColIdx, headerRowNumber) {
   return 'INV' + next;
 }
 
-function customerHasPriorOrder(sheet, customerColIdx, headerRowNumber, customerName) {
-  if (!customerName) return false;
+// ---- First-order tracking (Customer Accounts tab, not the Sales tab) ----
+// Used to scan the Sales tab for "has this customer name ever appeared
+// before" -- unreliable, because historical/Ekos-imported rows store the
+// customer as "Legal Entity / DBA Name" (see customerMatches) while this
+// app always submits just the DBA name, so an account that has clearly
+// ordered from us for years could still read as "no prior row found" and
+// wrongly fire the :tada: FIRST ORDER Slack message. Tracked explicitly
+// instead: every account that already existed before this column was added
+// gets backfilled to TRUE one time (handleBackfillFirstOrderFlag) and can
+// never trigger it again; a brand-new account created via handleAddCustomer
+// starts blank, so its first-ever order through this app is the one and
+// only time it fires -- handleOrder then marks it TRUE immediately.
+// Fails safe in every ambiguous case (column not set up yet, account not
+// found) by treating it as "already sent" -- never claims FIRST ORDER
+// without being sure.
+var FIRST_ORDER_SENT_HEADER = 'First Order Sent';
+
+function findCustomerAccountRow(sheet, header, businessName) {
+  var col = {};
+  header.forEach(function (h, i) { col[String(h).trim()] = i; });
+  var nameIdx = col['Business Name'];
+  if (nameIdx === undefined) return null;
   var lastRow = sheet.getLastRow();
-  if (lastRow <= headerRowNumber) return false;
-  var values = sheet.getRange(headerRowNumber + 1, customerColIdx + 1, lastRow - headerRowNumber, 1).getValues();
-  return values.some(function (r) { return String(r[0] || '').trim() === customerName.trim(); });
+  if (lastRow < 3) return null;
+  var data = sheet.getRange(3, 1, lastRow - 2, sheet.getLastColumn()).getValues();
+  var target = String(businessName || '').trim().toLowerCase();
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][nameIdx] || '').trim().toLowerCase() === target) {
+      return { rowNumber: i + 3, col: col };
+    }
+  }
+  return null;
+}
+
+function hasSentFirstOrder(customerName) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CUSTOMERS_SHEET_NAME);
+  if (!sheet) return true;
+  var header = sheet.getRange(2, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var found = findCustomerAccountRow(sheet, header, customerName);
+  if (!found) return true; // unknown account -- don't guess, don't claim first order
+  var idx = found.col[FIRST_ORDER_SENT_HEADER];
+  if (idx === undefined) return true; // column not set up on this sheet yet
+  var value = sheet.getRange(found.rowNumber, idx + 1).getValue();
+  return value === true || value === 'TRUE' || String(value || '').trim() !== '';
+}
+
+function markFirstOrderSent(customerName) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CUSTOMERS_SHEET_NAME);
+  if (!sheet) return;
+  var header = sheet.getRange(2, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var found = findCustomerAccountRow(sheet, header, customerName);
+  if (!found) return;
+  var idx = found.col[FIRST_ORDER_SENT_HEADER];
+  if (idx === undefined) return;
+  sheet.getRange(found.rowNumber, idx + 1).setValue(true);
+}
+
+// One-time setup: marks every EXISTING Customer Accounts row as having
+// already sent its first-order notification, since (per the person who
+// asked for this) any account already in the system has already ordered
+// from us in the past -- only accounts created AFTER this rollout should
+// ever be eligible to fire FIRST ORDER. Only touches rows where the flag is
+// currently blank, so it's safe to run more than once, but it should only
+// ever be run once in practice -- running it again after real new accounts
+// with a genuinely blank flag exist would wrongly silence their first order.
+function handleBackfillFirstOrderFlag() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CUSTOMERS_SHEET_NAME);
+  if (!sheet) return { ok: false, error: 'Customer Accounts tab not found' };
+  var header = sheet.getRange(2, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var col = {};
+  header.forEach(function (h, i) { col[String(h).trim()] = i; });
+  var nameIdx = col['Business Name'];
+  var flagIdx = col[FIRST_ORDER_SENT_HEADER];
+  if (nameIdx === undefined) return { ok: false, error: 'Business Name column not found' };
+  if (flagIdx === undefined) return { ok: false, error: 'First Order Sent column not found -- add the header cell first' };
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 3) return { ok: true, updated: 0 };
+  var range = sheet.getRange(3, 1, lastRow - 2, sheet.getLastColumn());
+  var data = range.getValues();
+  var updated = 0;
+  for (var i = 0; i < data.length; i++) {
+    var name = String(data[i][nameIdx] || '').trim();
+    var flag = data[i][flagIdx];
+    if (name && String(flag || '').trim() === '') {
+      data[i][flagIdx] = true;
+      updated++;
+    }
+  }
+  range.setValues(data);
+  return { ok: true, updated: updated, totalRows: data.length };
 }
 
 function handleOrder(body) {
@@ -615,13 +774,15 @@ function handleOrder(body) {
     salesRep: salesCol(col, header, 'Sales Rep', ['sales', 'rep']),
     paymentMethod: salesCol(col, header, 'Payment Method', ['payment', 'method']),
     invoiceStatus: salesCol(col, header, 'Invoice Status', ['invoice', 'status']),
-    notes: salesCol(col, header, 'Notes', ['notes'])
+    notes: salesCol(col, header, 'Notes', ['notes']),
+    expectedEmptyKegs: salesCol(col, header, 'Expected Empty Kegs', ['expected', 'empty'])
   };
 
   var lines = body.lines || [];
   if (!lines.length) return { ok: false, error: 'No line items in order' };
 
-  var isFirstOrder = idx.customer !== -1 && !customerHasPriorOrder(sheet, idx.customer, hc.headerRowNumber, body.customer);
+  var isFirstOrder = !hasSentFirstOrder(body.customer);
+  if (isFirstOrder) markFirstOrderSent(body.customer);
 
   var warehouse = warehouseForRegion(body.region);
   // Not populated yet -- the app doesn't collect a delivery date until the
@@ -663,19 +824,40 @@ function handleOrder(body) {
     if (idx.paymentMethod !== -1) row[idx.paymentMethod] = body.paymentMethod || '';
     if (idx.invoiceStatus !== -1) row[idx.invoiceStatus] = 'Not Created';
     if (idx.notes !== -1) row[idx.notes] = body.notes || '';
+    if (idx.expectedEmptyKegs !== -1) row[idx.expectedEmptyKegs] = body.expectedEmptyKegs || '';
     sheet.appendRow(row);
     extendTableForNewRow(sheet);
   });
 
-  notifySlackForOrder(
-    body.region,
+  // Uses chat.postMessage (not the plain notifySlackForOrder webhook) so the
+  // response carries {channel, ts} -- the rep app's confirmation screen
+  // needs that message reference to deep-link straight to this order's
+  // thread. Falls back to the old webhook only if the bot token/channel
+  // aren't configured, so a Slack misconfiguration still notifies ops even
+  // though the app won't have a thread link to offer that rep.
+  var slackText =
     (isFirstOrder ? ':tada: *FIRST ORDER* ' : ':beer: *NEW ORDER* ') + 'from ' + (body.rep || 'a rep') + ' for *' + (body.customer || 'unknown account') + '*\n' +
     lineSummaries.join('\n') +
     (orderTotal ? '\n*Total:* $' + orderTotal.toFixed(2) : '') +
-    (isFirstOrder ? '\n:point_right: First order for this account — get tap handles out and confirm draft lines are clean.' : '')
-  );
+    (body.expectedEmptyKegs ? '\n:package: Expected empties to pick up: ' + body.expectedEmptyKegs : '') +
+    (body.tapHandleNeeded === 'Yes' ? '\n:beers: *Tap handle needed* -- bring one on this delivery.' : '') +
+    (isFirstOrder ? '\n:point_right: First order for this account — confirm draft lines are clean.' : '');
+  var slackResult = postSlackMessage(channelForInventorySource(warehouse), slackText);
+  if (!slackResult.ok) {
+    notifySlackForOrder(body.region, slackText);
+  } else {
+    // Best-effort -- a failure here never affects the order or the main
+    // notification, which have already both succeeded by this point.
+    postSlackThreadReply(slackResult.channel, slackResult.ts, ':clipboard: Reply here with fulfillment notes, lot numbers, or delivery updates for this order.');
+  }
 
-  return { ok: true, linesAdded: lines.length, invoiceNumber: invoiceNumber };
+  return {
+    ok: true,
+    linesAdded: lines.length,
+    invoiceNumber: invoiceNumber,
+    slackChannel: slackResult.ok ? slackResult.channel : undefined,
+    slackTs: slackResult.ok ? slackResult.ts : undefined
+  };
 }
 
 // Mirrors assets/js/products.js formats[].unit -- server-side copy because
@@ -725,7 +907,8 @@ function handleInvoiceDetail(invoiceNumber) {
     price: salesCol(col, header, 'Price (ea)', ['price']),
     lineTotal: salesCol(col, header, 'Line Total', ['line', 'total']),
     salesRep: salesCol(col, header, 'Sales Rep', ['sales', 'rep']),
-    paymentMethod: salesCol(col, header, 'Payment Method', ['payment', 'method'])
+    paymentMethod: salesCol(col, header, 'Payment Method', ['payment', 'method']),
+    expectedEmptyKegs: salesCol(col, header, 'Expected Empty Kegs', ['expected', 'empty'])
   };
 
   var lines = [];
@@ -745,7 +928,8 @@ function handleInvoiceDetail(invoiceNumber) {
         poDate: idx.poDate === -1 ? '' : row[idx.poDate],
         deliveryDate: idx.deliveryDate === -1 ? '' : row[idx.deliveryDate],
         salesRep: idx.salesRep === -1 ? '' : row[idx.salesRep],
-        paymentMethod: idx.paymentMethod === -1 ? '' : row[idx.paymentMethod]
+        paymentMethod: idx.paymentMethod === -1 ? '' : row[idx.paymentMethod],
+        expectedEmptyKegs: idx.expectedEmptyKegs === -1 ? '' : row[idx.expectedEmptyKegs]
       };
     }
 
@@ -789,6 +973,7 @@ function handleInvoiceDetail(invoiceNumber) {
     paymentTerms: paymentTerms,
     salesRep: shared.salesRep,
     paymentMethod: shared.paymentMethod,
+    expectedEmptyKegs: Number(shared.expectedEmptyKegs) || 0,
     shipTo: {
       name: shared.customer,
       address: (customerRecord && customerRecord.address) || '',
@@ -875,7 +1060,7 @@ function handleCustomers() {
       paymentMethod: get(row, 'Payment Method'),
       terms: get(row, 'Terms'),
       priority: get(row, 'Priority'),
-      tapHandleRequested: get(row, 'Tap Handle Requested') === true || get(row, 'Tap Handle Requested') === 'TRUE' || get(row, 'Tap Handle Requested') === 'Yes' ? 'Yes' : 'No',
+      tapHandleRequested: get(row, 'Tap Handles?') === true || get(row, 'Tap Handles?') === 'TRUE' || get(row, 'Tap Handles?') === 'Yes' ? 'Yes' : 'No',
       deliveryAddress: get(row, 'Billing Address (If not the same as shipping)'),
       importedToEkos: get(row, 'Imported to Ekos') === true || get(row, 'Imported to Ekos') === 'TRUE',
       lat: get(row, 'Latitude') !== '' && get(row, 'Latitude') != null ? Number(get(row, 'Latitude')) : null,
@@ -892,6 +1077,55 @@ function findColFuzzy(header, mustContainAll) {
     if (matchesAll) return i;
   }
   return -1;
+}
+
+// Dev-only diagnostic: calls postSlackMessage directly (not through
+// handleOrder, which silently swallows a failure into the old webhook
+// fallback) so a missing Script Property vs. a real Slack API error are
+// distinguishable from outside. Reports presence/absence of the two Script
+// Properties as booleans only -- never echoes the actual token/channel
+// values back over HTTP.
+function handleDebugSlackTest(inventorySource) {
+  var props = PropertiesService.getScriptProperties();
+  var hasToken = !!props.getProperty('SLACK_BOT_TOKEN');
+  var hasChannelBA = !!props.getProperty('SLACK_CHANNEL_BA');
+  var hasChannelLA = !!props.getProperty('SLACK_CHANNEL_LA');
+  var channel = channelForInventorySource(inventorySource || 'EWD');
+  var result = postSlackMessage(channel, ':mag: Diagnostic ping from handleDebugSlackTest -- safe to ignore.');
+  return {
+    ok: true,
+    hasToken: hasToken,
+    hasChannelBA: hasChannelBA,
+    hasChannelLA: hasChannelLA,
+    resolvedChannel: channel || null,
+    postResult: result
+  };
+}
+
+// One-time lookup: the workspace's Slack subdomain (e.g. "theleopardmark"
+// for theleopardmark.slack.com) isn't a secret -- it's visible in the
+// address bar to anyone using Slack in a browser -- but nothing in this
+// codebase had a copy of it until the confirmation screen's Slack link
+// needed to build a proper thread-reply permalink (the slack:// app-scheme
+// deep link has no equivalent of the web permalink's thread_ts parameter).
+// auth.test (not team.info) on purpose -- it's scope-exempt, works with
+// whatever token this bot already has, and its response includes the
+// workspace's own url, so this needs no new scope/reinstall round trip.
+function handleDebugSlackTeamInfo() {
+  var token = PropertiesService.getScriptProperties().getProperty('SLACK_BOT_TOKEN');
+  if (!token) return { ok: false, error: 'SLACK_BOT_TOKEN not configured' };
+  try {
+    var resp = UrlFetchApp.fetch('https://slack.com/api/auth.test', {
+      method: 'post',
+      headers: { Authorization: 'Bearer ' + token },
+      muteHttpExceptions: true
+    });
+    var json = JSON.parse(resp.getContentText());
+    if (!json.ok) return { ok: false, error: json.error || 'Slack API reported failure' };
+    return { ok: true, url: json.url, team: json.team };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 }
 
 function handleDebugHeaders() {
@@ -942,7 +1176,10 @@ function handleAddCustomer(customer) {
   set(row, col, 'Delivery Instructions', customer.deliveryInstructions);
   set(row, col, 'Billing Address (If not the same as shipping)', customer.deliveryAddress);
   set(row, col, 'Payment Method', customer.paymentMethod || 'Not Set Up');
-  set(row, col, 'Tap Handle Requested', customer.tapHandleRequested || 'No');
+  // The actual header is "Tap Handles?" -- this used to say 'Tap Handle
+  // Requested', which never matched, so this value was silently dropped on
+  // every new account until now.
+  set(row, col, 'Tap Handles?', customer.tapHandleRequested || 'No');
   set(row, col, 'Imported to Ekos', false);
   sheet.appendRow(row);
   extendTableForNewRow(sheet);
@@ -998,7 +1235,7 @@ function handleUpdateCustomer(customer) {
   setCell('Region', customer.region);
   setCell('Payment Method', customer.paymentMethod);
   setCell('Terms', customer.terms);
-  setCell('Tap Handle Requested', customer.tapHandleRequested);
+  setCell('Tap Handles?', customer.tapHandleRequested);
   if (customer.licenseNumber !== undefined && licenseIdx !== -1) {
     sheet.getRange(rowNum, licenseIdx + 1).setValue(customer.licenseNumber);
   }
@@ -1027,6 +1264,72 @@ function handleUpdateCustomer(customer) {
 // bucket without asking the wire protocol to carry a redundant region field.
 function regionHintForInventorySource(inventorySource) {
   return inventorySource === 'EWD' ? 'san francisco' : '';
+}
+
+// Same Bay-Area/LA bucketing as notifySlackForOrder, but returns a channel
+// ID (for chat.postMessage) instead of picking a webhook URL -- webhooks
+// can't return a message reference (channel+ts) to build a link back to,
+// which is what the rep app's post-submission "Open in Slack" button needs.
+// New Script Properties: SLACK_BOT_TOKEN, SLACK_CHANNEL_BA, SLACK_CHANNEL_LA.
+function channelForInventorySource(inventorySource) {
+  var props = PropertiesService.getScriptProperties();
+  var key = inventorySource === 'EWD' ? 'SLACK_CHANNEL_BA' : 'SLACK_CHANNEL_LA';
+  return props.getProperty(key);
+}
+
+// Posts via the Slack Web API (chat.postMessage), not an Incoming Webhook --
+// the only way to get back a {channel, ts} reference to the message just
+// posted, which is what a deep link to "open this exact thread" requires.
+// Returns {ok:true, channel, ts} on success, {ok:false, error} otherwise;
+// never throws (mirrors notifySlackUrl's swallow-on-failure philosophy --
+// the order/sync already succeeded by the time this runs, a Slack outage
+// must not turn into a caller-visible error here, it just means no deep
+// link on the confirmation screen this time).
+function postSlackMessage(channelId, text) {
+  var token = PropertiesService.getScriptProperties().getProperty('SLACK_BOT_TOKEN');
+  if (!token || !channelId) return { ok: false, error: 'Slack bot token or channel not configured' };
+  try {
+    var resp = UrlFetchApp.fetch('https://slack.com/api/chat.postMessage', {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + token },
+      payload: JSON.stringify({ channel: channelId, text: text }),
+      muteHttpExceptions: true
+    });
+    var json = JSON.parse(resp.getContentText());
+    if (!json.ok) return { ok: false, error: json.error || 'Slack API reported failure' };
+    return { ok: true, channel: json.channel, ts: json.ts };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+// Posts a threaded reply under an existing message. Used to seed a real
+// thread on every order notification the moment it's posted -- a message
+// with zero replies has no persistent "N replies" affordance in Slack's UI,
+// so a rep opening the parent message (e.g. via a client/platform that
+// doesn't honor the thread_ts/cid permalink params -- confirmed Slack's own
+// desktop app doesn't, though mobile does) would otherwise land on a plain
+// message with nothing marking it as a thread at all. Seeding one guarantees
+// "N replies" is always visible and one click away, on every platform,
+// regardless of how the confirmation screen's link itself got opened.
+function postSlackThreadReply(channelId, threadTs, text) {
+  var token = PropertiesService.getScriptProperties().getProperty('SLACK_BOT_TOKEN');
+  if (!token || !channelId || !threadTs) return { ok: false, error: 'Slack bot token, channel, or threadTs missing' };
+  try {
+    var resp = UrlFetchApp.fetch('https://slack.com/api/chat.postMessage', {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + token },
+      payload: JSON.stringify({ channel: channelId, thread_ts: threadTs, text: text }),
+      muteHttpExceptions: true
+    });
+    var json = JSON.parse(resp.getContentText());
+    if (!json.ok) return { ok: false, error: json.error || 'Slack API reported failure' };
+    return { ok: true, channel: json.channel, ts: json.ts };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 }
 
 // Same shape as customerHasPriorOrder -- scans the Order ID column directly
@@ -1058,12 +1361,33 @@ function handleSyncOrder(body) {
   // Best-effort Slack ping, deliberately outside the lock -- a Slack POST
   // has no business holding up other concurrent syncOrder requests waiting
   // on the same script lock (see notifySlackUrl's own swallow-on-failure
-  // comment for why this never affects the response either way).
+  // comment for why this never affects the response either way). Rich
+  // message (line items, total, first-order detection) matching what
+  // handleOrder's rep-app path has always sent -- an earlier version of
+  // this notification was a bare ":link: Synced order..." line, a real
+  // regression once this became the only path new rep-app orders take.
+  // isFirstOrder comes from the caller (Postgres knows an account's order
+  // history; this Apps Script project doesn't) rather than being
+  // recomputed here from the Sheet.
   if (outcome.ok && !outcome.alreadySynced) {
-    notifySlackForOrder(
-      regionHintForInventorySource(body.inventorySource),
-      ':link: Synced order ' + (body.invoiceNumber || body.orderId) + ' from platform'
-    );
+    var orderTotal = 0;
+    var lineSummaries = lines.map(function (line) {
+      var qty = Number(line.qty) || 0;
+      if (line.lineTotal) orderTotal += Number(line.lineTotal);
+      return '• ' + formatOrderLineForSlack(line, qty);
+    });
+    var text =
+      (body.isFirstOrder ? ':tada: *FIRST ORDER* ' : ':beer: *NEW ORDER* ') +
+      'from ' + (body.salesRep || 'a rep') + ' for *' + (body.customer || 'unknown account') + '*\n' +
+      lineSummaries.join('\n') +
+      (orderTotal ? '\n*Total:* $' + orderTotal.toFixed(2) : '') +
+      (body.isFirstOrder ? '\n:point_right: First order for this account — get tap handles out and confirm draft lines are clean.' : '');
+
+    var slackResult = postSlackMessage(channelForInventorySource(body.inventorySource), text);
+    if (slackResult.ok) {
+      outcome.slackChannel = slackResult.channel;
+      outcome.slackTs = slackResult.ts;
+    }
   }
   return outcome;
 }
@@ -1560,4 +1884,371 @@ function setupSyncTriggers() {
   ScriptApp.newTrigger('onEditInstallable').forSpreadsheet(ss).onEdit().create();
   ScriptApp.newTrigger('drainDirtySyncRows').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('hourlyReconcileSyncRows').timeBased().everyHours(1).create();
+}
+
+// ============================================================================
+// Marketing materials requests (rep app -> "Marketing Orders" tab)
+// ============================================================================
+// The rep app's "Order Marketing Materials" flow posts here. Its catalog is
+// bundled at public/rep-app/assets/js/marketing-materials.js, transcribed
+// from the Marketing Materials & Merch Master Tracker workbook -- every line
+// carries that tracker's LM-### id, so a request always reconciles back to a
+// tracker row without this script needing access to that workbook.
+//
+// Deliberately a separate tab from Sales, not extra Sales rows: these aren't
+// billable product, they have no invoice/BOL/keg-deposit lifecycle, and
+// mixing them in would corrupt every Sales-derived figure (handleStats,
+// handleAllOrders, the Postgres sync) at once. onEditInstallable filters on
+// SALES_SHEET_NAME, so this tab is invisible to the sync pipeline by
+// construction.
+var MARKETING_SHEET_NAME = 'Marketing Orders';
+
+// Created on first request if the tab doesn't exist, so deploying this needs
+// no manual sheet setup. Order matters -- it's the on-sheet column order.
+var MARKETING_HEADERS = [
+  'Request #', 'Request Date', 'Needed By', 'Sales Rep', 'Rep Email', 'Purpose',
+  'Account', 'Account / Event Name', 'Ship To Address', 'Region',
+  'Item ID', 'Category', 'Brand', 'Item', 'Size', 'Qty', 'Unit',
+  'Custom Request', 'Custom Size (WxH)', 'Other Details', 'Attachments',
+  'Status', 'Fulfilled Date', 'Tracking #', 'Notes'
+];
+
+// Mirrors the rep app's own caps (MK_MAX_FILES / MK_MAX_FILE_BYTES /
+// MK_MAX_TOTAL_BYTES in app.js) -- re-checked here because the client's
+// limits are a courtesy, not a control: this endpoint is deployed
+// ANYONE_ANONYMOUS, so anything it will write to Drive has to be bounded
+// server-side too.
+var MARKETING_MAX_FILES = 5;
+var MARKETING_MAX_FILE_BYTES = 5 * 1024 * 1024;
+var MARKETING_MAX_TOTAL_BYTES = 15 * 1024 * 1024;
+var MARKETING_ALLOWED_MIME_PREFIXES = ['image/', 'application/pdf'];
+
+// Reps tab columns are Name | PIN | Active | Role (see handleLogin). Only the
+// name is checked here, not the PIN -- the rep app has already authenticated
+// by the time it can reach this screen, and re-posting a PIN just to file a
+// sticker request would mean the app holding one in memory for the session.
+// The point of the check is narrower: this endpoint accepts attachments and
+// writes them to the deploying user's Drive, so it must not do that for a
+// caller who isn't one of our reps at all.
+function isActiveRep(name) {
+  var clean = String(name || '').trim().toLowerCase();
+  if (!clean) return false;
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(REPS_SHEET_NAME);
+  if (!sheet) return false;
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    var rowName = String(rows[i][0] || '').trim().toLowerCase();
+    var active = rows[i][2];
+    if (rowName === clean && (active === true || active === 'TRUE' || active === '')) return true;
+  }
+  return false;
+}
+
+function getOrCreateMarketingSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(MARKETING_SHEET_NAME);
+  if (sheet) return sheet;
+  sheet = ss.insertSheet(MARKETING_SHEET_NAME);
+  sheet.getRange(1, 1, 1, MARKETING_HEADERS.length).setValues([MARKETING_HEADERS]);
+  sheet.getRange(1, 1, 1, MARKETING_HEADERS.length).setFontWeight('bold');
+  sheet.setFrozenRows(1);
+  return sheet;
+}
+
+// Same shape as nextInvoiceNumber (scan the column, take the highest numeric
+// suffix, keep the digit width) so both series behave identically -- MKT00001
+// for the first request on a fresh tab.
+function nextMarketingRequestNumber(sheet) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return 'MKT00001';
+  var values = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  var maxNum = 0, digitWidth = 5;
+  values.forEach(function (r) {
+    var m = /^MKT(\d+)$/i.exec(String(r[0] || '').trim());
+    if (m) {
+      var n = parseInt(m[1], 10);
+      if (n > maxNum) maxNum = n;
+      digitWidth = m[1].length;
+    }
+  });
+  var next = String(maxNum + 1);
+  while (next.length < digitWidth) next = '0' + next;
+  return 'MKT' + next;
+}
+
+// Attachments land in one Drive folder, resolved once and remembered in
+// script properties. Set MARKETING_ATTACHMENTS_FOLDER_ID by hand to point
+// somewhere specific; otherwise a folder is created next to the spreadsheet
+// on first use.
+function marketingAttachmentsFolder() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('MARKETING_ATTACHMENTS_FOLDER_ID');
+  if (id) {
+    try { return DriveApp.getFolderById(id); } catch (err) { /* stale id -- fall through and re-create */ }
+  }
+  var parents = DriveApp.getFileById(SpreadsheetApp.getActiveSpreadsheet().getId()).getParents();
+  var parent = parents.hasNext() ? parents.next() : DriveApp.getRootFolder();
+  var folder = parent.createFolder('Marketing Order Attachments');
+  props.setProperty('MARKETING_ATTACHMENTS_FOLDER_ID', folder.getId());
+  return folder;
+}
+
+// Best-effort by design: the request itself is what matters, so a Drive
+// failure (scope not granted on this deployment yet, quota, a stale folder
+// id) records a marker in the Attachments column and lets the write proceed
+// rather than losing the whole request. Returns {text, count} -- text is
+// what goes in the cell.
+function saveMarketingAttachments(attachments, requestNumber) {
+  var list = attachments || [];
+  if (!list.length) return { text: '', count: 0 };
+  try {
+    var folder = marketingAttachmentsFolder();
+    var urls = [];
+    var totalBytes = 0;
+    for (var i = 0; i < list.length && urls.length < MARKETING_MAX_FILES; i++) {
+      var a = list[i];
+      var mime = String(a.mimeType || '');
+      var allowed = MARKETING_ALLOWED_MIME_PREFIXES.some(function (prefix) { return mime.indexOf(prefix) === 0; });
+      if (!allowed) continue;
+      var bytes = Utilities.base64Decode(String(a.dataBase64 || ''));
+      if (!bytes.length || bytes.length > MARKETING_MAX_FILE_BYTES) continue;
+      if (totalBytes + bytes.length > MARKETING_MAX_TOTAL_BYTES) break;
+      totalBytes += bytes.length;
+      var safeName = String(a.name || 'attachment').replace(/[\/\\]/g, '-');
+      var file = folder.createFile(Utilities.newBlob(bytes, mime, requestNumber + ' - ' + safeName));
+      urls.push(file.getUrl());
+    }
+    return { text: urls.join('\n'), count: urls.length };
+  } catch (err) {
+    console.error('saveMarketingAttachments failed (non-fatal): ' + err.message);
+    return { text: list.length + ' file(s) could not be saved: ' + err.message, count: 0 };
+  }
+}
+
+function marketingSlackChannel() {
+  return PropertiesService.getScriptProperties().getProperty('SLACK_CHANNEL_MARKETING');
+}
+
+function notifySlackForMarketing(text) {
+  var props = PropertiesService.getScriptProperties();
+  notifySlackUrl(
+    props.getProperty('SLACK_WEBHOOK_URL_MARKETING') || props.getProperty('SLACK_WEBHOOK_URL'),
+    text
+  );
+}
+
+function handleMarketingOrder(body) {
+  if (!isActiveRep(body.rep)) return { ok: false, error: 'Unrecognized rep -- log out and back in, then try again' };
+
+  var lines = body.lines || [];
+  var customRequest = String(body.customRequest || '').trim();
+  // The rep app enforces this too; repeated here because a request with
+  // neither picked items nor a description is just an empty row.
+  if (!lines.length && !customRequest) return { ok: false, error: 'No materials selected and no custom request described' };
+
+  var sheet = getOrCreateMarketingSheet();
+  var header = sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), MARKETING_HEADERS.length)).getValues()[0];
+  var col = {};
+  header.forEach(function (h, i) { col[String(h).trim()] = i; });
+
+  var requestNumber = nextMarketingRequestNumber(sheet);
+  var attachments = saveMarketingAttachments(body.attachments, requestNumber);
+
+  // A custom-request-only submission still gets exactly one row, so every
+  // request has a presence on the tab and a Request # that can be replied to.
+  var rows = lines.length ? lines : [null];
+
+  rows.forEach(function (line, rowIndex) {
+    var row = new Array(header.length).fill('');
+    var put = function (name, value) {
+      var idx = col[name];
+      if (idx !== undefined && idx < row.length) row[idx] = value;
+    };
+
+    // Request-level fields repeat on every line so any single row can be
+    // filtered or pivoted on its own -- same convention the Sales tab uses
+    // for Customer/PO Date/Sales Rep.
+    put('Request #', requestNumber);
+    put('Request Date', body.requestDate || '');
+    put('Needed By', body.neededBy || '');
+    put('Sales Rep', body.rep || '');
+    put('Rep Email', body.email || '');
+    put('Purpose', body.purpose || '');
+    put('Account', body.account || '');
+    put('Account / Event Name', body.eventName || '');
+    put('Ship To Address', body.shipAddress || '');
+    put('Region', body.accountRegion || '');
+    put('Status', 'Requested');
+
+    if (line) {
+      put('Item ID', line.itemId || '');
+      put('Category', line.category || '');
+      put('Brand', line.brand || '');
+      put('Item', line.item || '');
+      put('Size', line.size || '');
+      put('Qty', Number(line.qty) || '');
+      put('Unit', line.unit || 'ea');
+    } else {
+      put('Item', '(Custom request -- see Custom Request column)');
+    }
+
+    // The long free-text fields go on the first row only. Repeating a
+    // paragraph and a list of Drive links down twelve rows makes the tab
+    // unreadable, and unlike the short fields above nobody filters on them.
+    if (rowIndex === 0) {
+      put('Custom Request', customRequest);
+      put('Custom Size (WxH)', body.size || '');
+      put('Other Details', body.otherDetails || '');
+      put('Attachments', attachments.text);
+    }
+
+    sheet.appendRow(row);
+    extendTableForNewRow(sheet);
+  });
+
+  var shipTo = body.account || body.eventName || (body.shipAddress ? 'a custom address' : (body.rep || 'the rep'));
+  var slackText =
+    ':art: *MARKETING MATERIALS REQUEST* ' + requestNumber + ' from ' + (body.rep || 'a rep') + '\n' +
+    '*For:* ' + (body.purpose || 'unspecified') + '  ·  *Ship to:* ' + shipTo + '  ·  *Needed by:* ' + (body.neededBy || 'not given') + '\n' +
+    (lines.length
+      ? lines.map(function (l) {
+          return '• ' + l.qty + ' x ' + l.item + (l.size ? ' (' + l.size + ')' : '') + ' — ' + l.brand + '  `' + l.itemId + '`';
+        }).join('\n')
+      : '• _No catalog items — custom request only_') +
+    (customRequest ? '\n:pencil2: *Custom request:* ' + customRequest : '') +
+    (body.size ? '\n:straight_ruler: *Size:* ' + body.size : '') +
+    (body.otherDetails ? '\n:speech_balloon: ' + body.otherDetails : '') +
+    (attachments.count ? '\n:paperclip: ' + attachments.count + ' attachment(s) saved to Drive' : '') +
+    (body.shipAddress ? '\n:mailbox: ' + body.shipAddress.replace(/\n/g, ', ') : '');
+
+  var slackResult = postSlackMessage(marketingSlackChannel(), slackText);
+  if (!slackResult.ok) {
+    notifySlackForMarketing(slackText);
+  } else {
+    postSlackThreadReply(slackResult.channel, slackResult.ts, ':clipboard: Reply here with sourcing notes, ship dates, or tracking for ' + requestNumber + '.');
+  }
+
+  return {
+    ok: true,
+    requestNumber: requestNumber,
+    linesAdded: rows.length,
+    attachmentsSaved: attachments.count,
+    slackChannel: slackResult.ok ? slackResult.channel : undefined,
+    slackTs: slackResult.ok ? slackResult.ts : undefined
+  };
+}
+
+// ============================================================================
+// PIN-only login (rep app)
+// ============================================================================
+// The rep app dropped its name picker: orders.tlmbg.co is rep-only and the
+// login is now four digits and nothing else. So the PIN has to identify the
+// rep on its own, which turns PIN uniqueness from hygiene into a correctness
+// requirement -- two active reps sharing a PIN means either could file orders
+// as the other and neither would know. This refuses that case outright
+// instead of guessing. Run auditRepPins() from the editor to find duplicates.
+//
+// handleLogin (name + PIN) is deliberately left in place: a rep whose
+// installed PWA hasn't picked up the new bundle yet is still calling it, and
+// it keeps working through the rollout.
+
+// A 4-digit PIN with no name in front of it is a 10,000-guess secret sitting
+// on an ANYONE_ANONYMOUS endpoint, so a wrong PIN has to cost the caller
+// time. The delay scales with how many wrong PINs have arrived recently and
+// is never a lockout: a rep who fat-fingers theirs waits a moment, a script
+// grinding the keyspace waits the full cap on every single try. Reps can
+// always get in, which a lockout could not promise.
+var PIN_FAIL_CACHE_KEY = 'rep_pin_failures';
+var PIN_FAIL_WINDOW_SECONDS = 600;
+var PIN_FAIL_DELAY_STEP_MS = 250;
+var PIN_FAIL_DELAY_CAP_MS = 8000;
+
+function throttleFailedPin() {
+  try {
+    var cache = CacheService.getScriptCache();
+    var count = parseInt(cache.get(PIN_FAIL_CACHE_KEY) || '0', 10) + 1;
+    cache.put(PIN_FAIL_CACHE_KEY, String(count), PIN_FAIL_WINDOW_SECONDS);
+    Utilities.sleep(Math.min(count * PIN_FAIL_DELAY_STEP_MS, PIN_FAIL_DELAY_CAP_MS));
+  } catch (err) {
+    // Cache unavailable -- still make the attempt cost something.
+    Utilities.sleep(PIN_FAIL_DELAY_STEP_MS);
+  }
+}
+
+function clearPinFailures() {
+  try { CacheService.getScriptCache().remove(PIN_FAIL_CACHE_KEY); } catch (err) {}
+}
+
+function handlePinLogin(pin) {
+  var cleanPin = String(pin || '').trim();
+  if (!/^\d{4}$/.test(cleanPin)) return { ok: false, error: 'Enter your 4-digit PIN' };
+
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(REPS_SHEET_NAME);
+  if (!sheet) return { ok: false, error: 'Reps tab not found' };
+  var rows = sheet.getDataRange().getValues();
+
+  var matches = [];
+  for (var i = 1; i < rows.length; i++) {
+    var rowName = String(rows[i][0] || '').trim();
+    var rowPin = String(rows[i][1] || '').trim();
+    var active = rows[i][2];
+    if (!rowName || !rowPin) continue;
+    if (!(active === true || active === 'TRUE' || active === '')) continue;
+    if (rowPin !== cleanPin) continue;
+    var role = String(rows[i][3] || '').trim();
+    matches.push({ rep: rowName, role: role.toLowerCase() === 'admin' ? 'Admin' : 'Rep' });
+  }
+
+  if (matches.length > 1) {
+    // Named in the message so the rep knows this is a setup problem to
+    // report, not their own typo -- otherwise they'd just keep retrying a
+    // PIN that is genuinely theirs.
+    return { ok: false, error: 'That PIN is set for more than one rep. Ask Jack for a unique PIN.' };
+  }
+  if (!matches.length) {
+    throttleFailedPin();
+    return { ok: false, error: 'Incorrect PIN' };
+  }
+
+  clearPinFailures();
+  return { ok: true, rep: matches[0].rep, role: matches[0].role };
+}
+
+// Editor-only, and deliberately not exposed over HTTP: "these two reps share
+// a PIN" narrows the keyspace for anyone who can reach the web app. Run it
+// from the Apps Script editor (Run > auditRepPins) after changing PINs and
+// read the log. It never logs a PIN itself, only names.
+function auditRepPins() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(REPS_SHEET_NAME);
+  if (!sheet) { Logger.log('Reps tab not found'); return { ok: false }; }
+  var rows = sheet.getDataRange().getValues();
+
+  var byPin = {};
+  var noPin = [];
+  var badFormat = [];
+  var activeCount = 0;
+
+  for (var i = 1; i < rows.length; i++) {
+    var name = String(rows[i][0] || '').trim();
+    var pin = String(rows[i][1] || '').trim();
+    var active = rows[i][2];
+    if (!name) continue;
+    if (!(active === true || active === 'TRUE' || active === '')) continue;
+    activeCount++;
+    if (!pin) { noPin.push(name + ' (row ' + (i + 1) + ')'); continue; }
+    if (!/^\d{4}$/.test(pin)) badFormat.push(name + ' (row ' + (i + 1) + ')');
+    if (!byPin[pin]) byPin[pin] = [];
+    byPin[pin].push(name);
+  }
+
+  var collisions = Object.keys(byPin)
+    .filter(function (p) { return byPin[p].length > 1; })
+    .map(function (p) { return byPin[p].join(' + '); });
+
+  Logger.log('Active reps: ' + activeCount);
+  Logger.log('PIN collisions (these reps CANNOT log in): ' + (collisions.length ? collisions.join(' ; ') : 'none'));
+  Logger.log('No PIN set (cannot log in, needs one assigned): ' + (noPin.length ? noPin.join(' ; ') : 'none'));
+  Logger.log('PIN not exactly 4 digits (cannot log in): ' + (badFormat.length ? badFormat.join(' ; ') : 'none'));
+
+  return { ok: true, activeReps: activeCount, collisions: collisions, noPin: noPin, badFormat: badFormat };
 }

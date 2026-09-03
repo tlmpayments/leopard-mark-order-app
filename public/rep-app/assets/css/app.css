@@ -154,6 +154,16 @@ a { color: var(--accent); }
 .pin-pad button:active { border-color: var(--accent); transform: scale(0.97); }
 .pin-pad .pin-key-back { font-size: 16px; color: var(--silver-dim); background: transparent; border-color: transparent; }
 
+/* Sits under the PIN pad. The only route out of a forgotten PIN now that
+   the app can't offer a self-serve reset -- with no name on the login
+   screen there's nothing to prove you own the account you're resetting. */
+.pin-help {
+  text-align: center;
+  color: var(--silver-dim);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
 .yn-toggle { display: flex; gap: 10px; }
 .yn-btn {
   flex: 1;
@@ -792,3 +802,202 @@ table.inv-items td:first-child::before { content: none; }
   border-radius: 8px;
 }
 .leaflet-popup-content { font-size: 13px; color: var(--white); }
+
+/* ---------- Marketing materials request ---------- */
+
+/* The "Note:" block that opens Firestone Walker's form -- plain body copy
+   above the first field, not a card, so it reads as instructions rather
+   than as another section to fill in. */
+.form-note {
+  margin-bottom: 20px;
+  color: var(--silver);
+  font-size: 13px;
+  line-height: 1.55;
+  text-align: left;
+}
+.form-note-title {
+  font-family: var(--font-display);
+  font-size: 19px;
+  color: var(--white);
+  margin-bottom: 8px;
+}
+.form-note p { margin: 0 0 10px; }
+.form-note p:last-child { margin-bottom: 0; }
+.form-note strong { color: var(--white); font-weight: 600; }
+
+/* Required-field marker. Red asterisk after the label, as on the FW form. */
+.req { color: #e35b5b; font-weight: 700; }
+
+/* A readonly input still needs to look like an input (it's showing real
+   data, not a placeholder) but must not look tappable. */
+input[readonly] {
+  background: var(--navy-800);
+  border-color: var(--navy-600);
+  color: var(--silver);
+}
+input[readonly]:focus { outline: none; border-color: var(--navy-600); }
+
+/* Brand filter above the catalog. Wraps rather than scrolls -- four brands
+   fit two rows on the narrowest phone, and a horizontal scroller inside an
+   already-scrolling form is easy to miss entirely. */
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  border: 1px solid var(--navy-500);
+  background: var(--navy-700);
+  color: var(--silver);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  width: auto;
+}
+.chip:active { transform: scale(0.96); }
+.chip.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* Category accordion. 78 items can't all be on screen at once on a phone,
+   so each category is collapsed until tapped -- except that a search or a
+   brand filter force-opens every category with a match, which is what makes
+   "type three letters and set a quantity" the fast path. */
+.mk-cat {
+  border: 1px solid var(--navy-600);
+  border-radius: var(--radius);
+  background: var(--navy-800);
+  overflow: hidden;
+}
+.mk-cat + .mk-cat { margin-top: 10px; }
+.mk-cat.has-qty { border-color: var(--accent); }
+.mk-cat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 14px;
+  background: transparent;
+  border: none;
+  color: var(--white);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+.mk-cat-head:active { background: var(--navy-700); }
+.mk-cat-head .mk-cat-blurb {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--silver-dim);
+  margin-top: 3px;
+}
+.mk-cat-meta { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.mk-cat-count {
+  font-size: 11px;
+  color: var(--silver-dim);
+  font-variant-numeric: tabular-nums;
+}
+.mk-cat-badge {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.mk-cat-caret { color: var(--silver-dim); font-size: 12px; }
+.mk-cat-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 14px 14px;
+  border-top: 1px solid var(--navy-700);
+  padding-top: 12px;
+}
+
+/* One orderable line. Same visual language as .format-row on the beer order
+   screen so the two ordering flows feel like the same app. */
+.mk-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--navy-900);
+  border: 1px solid var(--navy-600);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.mk-item.has-qty { border-color: var(--accent); }
+.mk-item-text { min-width: 0; }
+.mk-item-name { font-size: 13px; font-weight: 600; }
+.mk-item-sub { font-size: 11px; color: var(--silver-dim); margin-top: 2px; }
+.mk-item-id {
+  font-size: 10px;
+  color: var(--silver-dim);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+/* A sized item (garments) becomes a header row plus one stepper per size,
+   indented under it -- ordering 12 tees is useless without the size split. */
+.mk-sized { display: flex; flex-direction: column; gap: 0; }
+.mk-sized .mk-item { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.mk-size-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 8px;
+  background: var(--navy-900);
+  border: 1px solid var(--navy-600);
+  border-top: none;
+  border-radius: 0 0 10px 10px;
+  padding: 10px 12px;
+}
+.mk-size-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.mk-size-label { font-size: 12px; font-weight: 600; color: var(--silver); }
+.mk-size-row .qty-stepper { gap: 6px; }
+.mk-size-row .qty-stepper button { width: 26px; height: 26px; font-size: 15px; }
+.mk-size-row .qty-stepper .qty-val { width: 20px; font-size: 13px; }
+
+/* Firestone Walker's "Select files... / or drag and drop files here" box. */
+.file-drop {
+  border: 1px dashed var(--navy-500);
+  border-radius: 10px;
+  padding: 20px 14px;
+  text-align: center;
+  background: var(--navy-800);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.file-drop.dragover { border-color: var(--accent); background: var(--navy-700); }
+.file-drop .btn { width: auto; display: inline-flex; padding: 10px 18px; min-height: auto; }
+.file-drop-hint { color: var(--silver-dim); font-size: 12px; margin-top: 10px; }
+.file-list { display: flex; flex-direction: column; gap: 6px; }
+.file-list:empty { display: none; }
+.file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--navy-900);
+  border: 1px solid var(--navy-600);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+.file-row .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-row .fsize { color: var(--silver-dim); flex-shrink: 0; }
+.file-row button {
+  background: transparent;
+  border: none;
+  color: var(--silver-dim);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 2px;
+  width: auto;
+  flex-shrink: 0;
+}
+.file-row button:active { color: #e35b5b; }
