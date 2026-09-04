@@ -1220,6 +1220,13 @@ input:focus, select:focus, textarea:focus { outline-color: var(--coral); border-
 
 .form-card-title, .form-note-title { color: var(--ink); }
 .form-card-title { border-bottom-color: #efe4d2; }
+.availability-note {
+  margin: 7px 1px 0;
+  color: var(--silver-dim);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.availability-note span { color: var(--coral); font-weight: 700; margin-right: 2px; }
 .chip { background: #fffdf8; border-color: var(--line); color: var(--ink); }
 .chip.selected { background: var(--ink); border-color: var(--ink); }
 .mk-cat-head { color: var(--ink); }
