@@ -1209,11 +1209,11 @@ body {
   font: 600 12px var(--font-body);
   cursor: pointer;
 }
-.territory-legend { display: flex; gap: 14px; padding: 0 4px 13px; color: rgba(255,253,248,.86); font-size: 12px; font-weight: 600; }
+.territory-legend { display: flex; flex-wrap: wrap; gap: 8px 14px; padding: 0 4px 13px; color: rgba(255,253,248,.86); font-size: 12px; font-weight: 600; }
+.territory-legend:empty { display: none; }
 .territory-legend span { display: inline-flex; align-items: center; gap: 6px; }
-.territory-dot { width: 10px; height: 10px; border: 2px solid #fffdf8; border-radius: 50%; }
-.territory-dot.ricardo { background: #efb11d; }
-.territory-dot.james { background: #e85d86; }
+.territory-legend b { font-weight: 700; color: rgba(255,253,248,.62); }
+.territory-dot { flex: 0 0 auto; width: 10px; height: 10px; border: 2px solid #fffdf8; border-radius: 50%; background: #9aa3b2; }
 .home-territory-map {
   width: 100%;
   height: 244px;

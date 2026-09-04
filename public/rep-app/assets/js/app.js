@@ -939,13 +939,31 @@
     });
   }
 
-  // The home map is intentionally a small, shared LA territory view. It only
-  // distinguishes the two reps who work this area, so a pin's color is useful
-  // information instead of decoration.
+  // Pin colour is keyed to the rep who added the account, matched by LAST
+  // NAME -- Customer Accounts writes "J. Williams" while the Reps tab writes
+  // "James Williams", so territoryRep has to resolve both to one person.
+  // That's the same mismatch repLastName() already exists for above.
+  //
+  // Deliberately NOT limited to the two reps who work LA most. An account
+  // added by anyone -- someone covering the area for a week, a new hire not
+  // listed here yet -- still belongs on the map, so an unrecognised rep
+  // falls through to UNKNOWN_TERRITORY_REP instead of being dropped. The
+  // previous ricardo/james lookup matched on first name and so silently
+  // matched nothing at all: "R. Villanueva" contains no "ricardo".
   var LA_TERRITORY_REPS = {
-    ricardo: { name: 'Ricardo', color: '#efb11d' },
-    james: { name: 'James', color: '#e85d86' }
+    villanueva: { name: 'Ricardo', color: '#efb11d' },
+    williams:   { name: 'James', color: '#e85d86' },
+    krause:     { name: 'D. Krause', color: '#4bb3a5' },
+    sprague:    { name: 'S. Sprague', color: '#8a6fd4' },
+    gilbert:    { name: 'T. Gilbert', color: '#3f7fd4' }
   };
+  var UNKNOWN_TERRITORY_REP = { name: 'Unassigned', color: '#9aa3b2' };
+
+  // `region` is the rep-confirmed field (see inferRegion), so it -- not a
+  // raw city string -- decides what counts as "in Los Angeles". Long Beach
+  // and Arcadia are separate DELIVERY regions but the same LA County map;
+  // Orange County and San Diego are their own runs and stay off it.
+  var LA_MAP_REGIONS = ['los angeles', 'long beach', 'arcadia'];
   var LA_CITY_COORDINATES = {
     'los angeles': [34.0522, -118.2437],
     'hollywood': [34.0928, -118.3287],
@@ -959,38 +977,147 @@
     'inglewood': [33.9617, -118.3531],
     'torrance': [33.8358, -118.3406],
     'el segundo': [33.9192, -118.4165],
-    'downey': [33.9401, -118.1332]
+    'downey': [33.9401, -118.1332],
+    'northridge': [34.2283, -118.5368],
+    'redondo beach': [33.8492, -118.3884],
+    'malibu': [34.0259, -118.7798],
+    'arcadia': [34.1397, -118.0353],
+    'whittier': [33.9792, -118.0328],
+    'la mirada': [33.9172, -118.0120]
   };
 
+  // Addresses are hand-typed and inconsistent: "8 Mission St., San Francisco,
+  // CA, 94105" puts the city in its own comma field, "201 E Broadway Long
+  // Beach, CA 90802" does not. So take everything before the state token and
+  // match the LONGEST known city name that ends it. Longest-first is what
+  // makes "long beach" win over a trailing "beach", and it's why five Long
+  // Beach accounts aren't stranded by a plain split(',').
+  var CITY_ALIASES = { 'rendondo beach': 'redondo beach' };
+
+  function cityFromAddress(address) {
+    var head = String(address || '').split(/,?\s*\b(?:CA|California)\b/i)[0];
+    var words = head.toLowerCase().replace(/[.,]/g, ' ').split(/\s+/).filter(Boolean);
+    for (var take = Math.min(3, words.length); take >= 1; take--) {
+      var candidate = words.slice(words.length - take).join(' ');
+      candidate = CITY_ALIASES[candidate] || candidate;
+      if (LA_CITY_COORDINATES[candidate]) return candidate;
+    }
+    return '';
+  }
+
   function territoryRep(customer) {
-    var rep = String((customer && customer.salesRep) || '').toLowerCase();
-    return Object.keys(LA_TERRITORY_REPS).map(function (key) {
-      return rep.indexOf(key) !== -1 ? LA_TERRITORY_REPS[key] : null;
-    }).filter(Boolean)[0] || null;
+    var last = repLastName(customer && customer.salesRep);
+    if (!last || last === 'n/a') return UNKNOWN_TERRITORY_REP;
+    return LA_TERRITORY_REPS[last] || UNKNOWN_TERRITORY_REP;
   }
 
   // A newly added account gets a stable, city-level point immediately. That
   // keeps the route useful while the full address is awaiting geocoding.
-  function accountCoordinates(city, accountName) {
+  //
+  // The scatter around the city centre is a positional hash, not jitter: the
+  // same account must land on the same spot every render. A plain sum of
+  // char codes collided (BiergartenLA and Birds Bar & Cafe drew identical
+  // offsets, so one pin sat invisibly under the other), so this uses djb2
+  // and takes the two axes from separate halves of the hash.
+  // `attempt` is the collision probe (see spreadApproximatePins): 0 is the
+  // account's natural cell, and each retry re-hashes to a different one.
+  function accountCoordinates(city, accountName, attempt) {
     var normalizedCity = String(city || '').trim().toLowerCase();
     var base = LA_CITY_COORDINATES[normalizedCity] || LA_CITY_COORDINATES['los angeles'];
-    var seed = String(accountName || normalizedCity).split('').reduce(function (sum, char) {
-      return sum + char.charCodeAt(0);
-    }, 0);
-    var latOffset = ((seed % 9) - 4) * 0.003;
-    var lngOffset = ((Math.floor(seed / 9) % 9) - 4) * 0.003;
+    var text = String(accountName || normalizedCity) + (attempt ? '#' + attempt : '');
+    var hash = 5381;
+    for (var i = 0; i < text.length; i++) {
+      hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
+    }
+    hash = Math.abs(hash);
+    var STEPS = 13;      // odd, so the grid has a true centre
+    var SPACING = 0.0022; // ~0.24 km -- inside the city, clear of its neighbours
+    var latOffset = ((hash % STEPS) - (STEPS - 1) / 2) * SPACING;
+    var lngOffset = ((Math.floor(hash / STEPS) % STEPS) - (STEPS - 1) / 2) * SPACING;
     return { lat: +(base[0] + latOffset).toFixed(6), lng: +(base[1] + lngOffset).toFixed(6) };
   }
 
+  // Membership is by region, not by rep -- every LA County account is on the
+  // map regardless of who owns it, and the rep only decides the colour.
+  //
+  // The lat/lng fallback is load-bearing rather than defensive: not one of
+  // the LA accounts in the sheet has been geocoded yet, so requiring real
+  // coordinates (as this did before) rendered an empty map. A city-level
+  // point is flagged `approximate` so the UI can say so instead of implying
+  // a precision it doesn't have.
   function territoryEntries() {
-    return state.customers.map(function (customer) {
-      var rep = territoryRep(customer);
-      if (!rep) return null;
+    var entries = state.customers.map(function (customer) {
+      var region = String((customer && customer.region) || '').trim().toLowerCase();
+      if (LA_MAP_REGIONS.indexOf(region) === -1) return null;
       var lat = Number(customer.lat);
       var lng = Number(customer.lng);
-      if (!isFinite(lat) || !isFinite(lng)) return null;
-      return { customer: customer, rep: rep, lat: lat, lng: lng };
+      var approximate = false;
+      if (!isFinite(lat) || !isFinite(lng) || (lat === 0 && lng === 0)) {
+        var point = accountCoordinates(cityFromAddress(customer.address), customer.establishmentName);
+        lat = point.lat;
+        lng = point.lng;
+        approximate = true;
+      }
+      return {
+        customer: customer,
+        rep: territoryRep(customer),
+        lat: lat,
+        lng: lng,
+        approximate: approximate,
+        city: approximate ? cityFromAddress(customer.address) : ''
+      };
     }).filter(Boolean);
+    return spreadApproximatePins(entries);
+  }
+
+  // Two city-level pins landing in the same grid cell hides one account
+  // under the other. The hash alone can't prevent that -- four accounts
+  // share El Segundo, and a finite grid will collide eventually -- so
+  // duplicates re-hash to the next free cell instead.
+  //
+  // Real geocoded coordinates are never moved: they're the truth, and two
+  // businesses genuinely can share an address. Only approximate pins probe.
+  // Sorting by name first keeps the outcome stable no matter what order the
+  // sheet returns rows in.
+  function spreadApproximatePins(entries) {
+    var taken = {};
+    entries.forEach(function (entry) {
+      if (!entry.approximate) taken[entry.lat + ',' + entry.lng] = true;
+    });
+    entries.slice().sort(function (a, b) {
+      return String(a.customer.establishmentName).localeCompare(String(b.customer.establishmentName));
+    }).forEach(function (entry) {
+      if (!entry.approximate) return;
+      var attempt = 0;
+      while (taken[entry.lat + ',' + entry.lng] && attempt < 50) {
+        attempt++;
+        var point = accountCoordinates(entry.city, entry.customer.establishmentName, attempt);
+        entry.lat = point.lat;
+        entry.lng = point.lng;
+      }
+      taken[entry.lat + ',' + entry.lng] = true;
+    });
+    return entries;
+  }
+
+  // Built from the accounts actually on the map, so a rep who isn't in
+  // LA_TERRITORY_REPS still gets a swatch the moment they add a stop.
+  function renderTerritoryLegend(entries) {
+    var legend = document.getElementById('territory-legend');
+    if (!legend) return;
+    var order = [];
+    var counts = {};
+    entries.forEach(function (entry) {
+      var name = entry.rep.name;
+      if (!counts[name]) { counts[name] = { rep: entry.rep, count: 0 }; order.push(name); }
+      counts[name].count++;
+    });
+    legend.innerHTML = order.map(function (name) { return counts[name]; })
+      .sort(function (a, b) { return b.count - a.count; })
+      .map(function (row) {
+        return '<span><i class="territory-dot" style="background:' + row.rep.color +
+          ';" aria-hidden="true"></i>' + escapeHtml(row.rep.name) + ' <b>' + row.count + '</b></span>';
+      }).join('');
   }
 
   function territoryPin(rep) {
@@ -1010,9 +1137,12 @@
     if (!mapEl || !window.L) return;
     var entries = territoryEntries();
     var status = document.getElementById('territory-status');
+    var approximate = entries.filter(function (e) { return e.approximate; }).length;
     status.textContent = entries.length
-      ? entries.length + ' new ' + (entries.length === 1 ? 'account is' : 'accounts are') + ' on the map.'
-      : 'New stops added by Ricardo and James appear here.';
+      ? entries.length + ' LA ' + (entries.length === 1 ? 'account' : 'accounts') + ' on the map' +
+        (approximate ? ' \u00b7 ' + approximate + ' placed by city, awaiting geocoding' : '') + '.'
+      : 'Accounts in Los Angeles will appear here.';
+    renderTerritoryLegend(entries);
 
     if (!homeTerritoryMapInstance) {
       homeTerritoryMapInstance = L.map('home-territory-map', { zoomControl: false, attributionControl: false, scrollWheelZoom: false });
@@ -1029,7 +1159,11 @@
 
     var markers = entries.map(function (entry) {
       var marker = L.marker([entry.lat, entry.lng], { icon: territoryPin(entry.rep) }).addTo(homeTerritoryMapInstance);
-      marker.bindPopup('<strong>' + escapeHtml(entry.customer.establishmentName) + '</strong><br/>' + escapeHtml(entry.customer.address || '') + '<br/>' + entry.rep.name);
+      marker.bindPopup(
+        '<strong>' + escapeHtml(entry.customer.establishmentName) + '</strong><br/>' +
+        escapeHtml(entry.customer.address || '') + '<br/>' + escapeHtml(entry.rep.name) +
+        (entry.approximate ? '<br/><em>Approximate \u2014 city-level pin</em>' : '')
+      );
       return marker;
     });
 
@@ -1057,10 +1191,11 @@
       var c = entry.customer;
       return '<div class="order-row clickable" data-map-idx="' + i + '">' +
         '<div><div class="oname">' + escapeHtml(c.establishmentName) + '</div>' +
-        '<div class="osub">' + escapeHtml(c.address || '') + ' · ' + entry.rep.name + '</div></div>' +
+        '<div class="osub">' + escapeHtml(c.address || '') + ' \u00b7 ' + escapeHtml(entry.rep.name) +
+        (entry.approximate ? ' \u00b7 approx.' : '') + '</div></div>' +
         '<span>→</span>' +
         '</div>';
-    }).join('') || '<div class="empty-note">New Los Angeles accounts will appear here.</div>';
+    }).join('') || '<div class="empty-note">Los Angeles accounts will appear here.</div>';
 
     setTimeout(function () {
       if (!accountsMapInstance) {
@@ -1082,7 +1217,9 @@
         var marker = L.marker([entry.lat, entry.lng], { icon: territoryPin(entry.rep) }).addTo(accountsMapInstance);
         marker.bindPopup(
           '<strong>' + escapeHtml(c.establishmentName) + '</strong><br/>' + escapeHtml(c.address || '') +
-          '<br/><a href="#" class="popup-view-orders" data-map-idx="' + i + '">View Orders →</a>'
+          '<br/>' + escapeHtml(entry.rep.name) +
+          (entry.approximate ? ' \u00b7 <em>approximate</em>' : '') +
+          '<br/><a href="#" class="popup-view-orders" data-map-idx="' + i + '">View Orders \u2192</a>'
         );
         markers.push(marker);
       });
