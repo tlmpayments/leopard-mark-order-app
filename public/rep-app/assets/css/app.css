@@ -1058,12 +1058,12 @@ input[readonly]:focus { outline: none; border-color: var(--navy-600); }
   --line: #e8d8bd;
 }
 
-html, body { background: var(--cream); color: var(--ink); }
+html, body { background: #d7d8d4; color: var(--ink); }
 body {
   background:
-    radial-gradient(circle at 10% -15%, rgba(255, 189, 40, .37), transparent 31rem),
-    radial-gradient(circle at 96% 12%, rgba(129, 212, 183, .30), transparent 26rem),
-    var(--cream);
+    radial-gradient(circle at 100% 0, rgba(38, 59, 120, .12), transparent 31rem),
+    radial-gradient(circle at 0 100%, rgba(83, 89, 88, .10), transparent 29rem),
+    #d7d8d4;
 }
 
 .screen {
