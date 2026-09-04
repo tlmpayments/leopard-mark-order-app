@@ -1055,6 +1055,7 @@ function handleCustomers() {
       orderingContact: get(row, 'Ordering Contact'),
       phone: get(row, 'Phone Number'),
       email: get(row, 'Ordering Contact Email'),
+      billingEmail: get(row, 'Billing Contact Email'),
       address: get(row, 'Delivery Address'),
       deliveryInstructions: get(row, 'Delivery Instructions'),
       paymentMethod: get(row, 'Payment Method'),
@@ -1172,6 +1173,10 @@ function handleAddCustomer(customer) {
   set(row, col, 'Ordering Contact', customer.orderingContact);
   set(row, col, 'Phone Number', customer.phone);
   set(row, col, 'Ordering Contact Email', customer.email);
+  // Distinct column from Ordering Contact Email -- invoices go to accounts
+  // payable, order confirmations go to the bar. Blank is fine: §6.2's
+  // resolution order falls back to the ordering contact.
+  set(row, col, 'Billing Contact Email', customer.billingEmail);
   set(row, col, 'Delivery Address', customer.address);
   set(row, col, 'Delivery Instructions', customer.deliveryInstructions);
   set(row, col, 'Billing Address (If not the same as shipping)', customer.deliveryAddress);
@@ -1229,6 +1234,7 @@ function handleUpdateCustomer(customer) {
   setCell('Ordering Contact', customer.orderingContact);
   setCell('Phone Number', customer.phone);
   setCell('Ordering Contact Email', customer.email);
+  setCell('Billing Contact Email', customer.billingEmail);
   setCell('Delivery Address', customer.address);
   setCell('Delivery Instructions', customer.deliveryInstructions);
   setCell('Billing Address (If not the same as shipping)', customer.deliveryAddress);

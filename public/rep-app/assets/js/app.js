@@ -1376,6 +1376,7 @@
     document.getElementById('ea-phone').value = c.phone || '';
     document.getElementById('ea-email').value = c.email || '';
     document.getElementById('ea-address').value = c.address || '';
+    document.getElementById('ea-billing-email').value = c.billingEmail || '';
     document.getElementById('ea-billing-address').value = c.deliveryAddress || '';
     document.getElementById('ea-delivery-instructions').value = c.deliveryInstructions || '';
     document.getElementById('ea-region').value = c.region || '';
@@ -1411,6 +1412,17 @@
       terms: document.getElementById('ea-terms').value.trim(),
       tapHandleRequested: getYnToggle('ea-tap-handle')
     };
+
+    // Send billingEmail only when we can tell "the rep cleared it" apart from
+    // "this client never had it". state.customers is cached in localStorage,
+    // so a rep still holding a list fetched before billingEmail was returned
+    // would render a blank field and, on any unrelated edit, write that blank
+    // over a real Billing Contact Email. Omitting the key entirely makes
+    // setCell in Code.gs skip the cell (its `value === undefined` guard).
+    var billingEmailInput = document.getElementById('ea-billing-email').value.trim();
+    if (billingEmailInput || Object.prototype.hasOwnProperty.call(c, 'billingEmail')) {
+      updates.billingEmail = billingEmailInput;
+    }
 
     btn.disabled = true;
     btn.textContent = 'Saving...';
@@ -1697,6 +1709,13 @@
       orderingContact: [val('nc-contact-first'), val('nc-contact-last')].filter(Boolean).join(' '),
       phone: val('nc-phone'),
       email: val('nc-email'),
+      // Separate from the ordering contact's email on purpose: invoices go
+      // to accounts payable, orders go to whoever runs the bar. Optional,
+      // because the billing-email resolution is billingEmail -> ordering
+      // contact email -> none, and a missing one blocks the INVOICE, never
+      // the order (prisma Account.billingContactEmail, lib/ops/checklist).
+      // Requiring it here would reject accounts the pipeline handles fine.
+      billingEmail: val('nc-billing-email'),
       // Confusingly named on the Sheet side (see handleAddCustomer in
       // Code.gs): this actually lands in "Billing Address (If not the same
       // as shipping)", left blank when it matches the business address.

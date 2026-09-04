@@ -424,6 +424,11 @@
       <div class="form-card">
         <div class="form-card-title">Billing</div>
         <div class="field">
+          <label>Billing Email</label>
+          <input id="nc-billing-email" type="email" placeholder="accounts payable, if different" />
+          <div class="field-hint">Where invoices go. Leave blank to use the ordering contact&rsquo;s email.</div>
+        </div>
+        <div class="field">
           <label>Is the Billing Address the Same as the Business Address?</label>
           <div class="yn-toggle" id="nc-billing-same" data-value="Yes">
             <button type="button" class="yn-btn selected" data-value="Yes">Yes</button>
@@ -533,6 +538,7 @@
       <div class="field"><label>Phone Number</label><input id="ea-phone" type="tel" /></div>
       <div class="field"><label>Email</label><input id="ea-email" type="email" /></div>
       <div class="field"><label>Delivery Address (Ship To)</label><input id="ea-address" /></div>
+      <div class="field"><label>Billing Email</label><input id="ea-billing-email" type="email" placeholder="Falls back to the ordering contact" /></div>
       <div class="field"><label>Billing Address (if different)</label><input id="ea-billing-address" /></div>
       <div class="field"><label>Delivery Instructions</label><textarea id="ea-delivery-instructions" rows="2"></textarea></div>
       <div class="field">
