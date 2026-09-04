@@ -29,6 +29,9 @@
       document.getElementById(SCREEN_FOOTERS[screenId]).style.display = screenId === id ? 'flex' : 'none';
     });
     window.scrollTo(0, 0);
+    if (id === 'screen-home') {
+      window.setTimeout(renderHomeTerritoryMap, 0);
+    }
   }
 
   function toast(msg, isError) {
@@ -132,6 +135,7 @@
             renderCustomerList(document.getElementById('customer-search').value);
           }
           updateMyMapButton();
+          renderHomeTerritoryMap();
         }
       })
       .catch(function () {
@@ -926,9 +930,108 @@
     });
   }
 
+  // The home map is intentionally a small, shared LA territory view. It only
+  // distinguishes the two reps who work this area, so a pin's color is useful
+  // information instead of decoration.
+  var LA_TERRITORY_REPS = {
+    ricardo: { name: 'Ricardo', color: '#efb11d' },
+    james: { name: 'James', color: '#e85d86' }
+  };
+  var LA_CITY_COORDINATES = {
+    'los angeles': [34.0522, -118.2437],
+    'hollywood': [34.0928, -118.3287],
+    'west hollywood': [34.0900, -118.3617],
+    'santa monica': [34.0195, -118.4912],
+    'culver city': [34.0211, -118.3965],
+    'pasadena': [34.1478, -118.1445],
+    'burbank': [34.1808, -118.3090],
+    'glendale': [34.1425, -118.2551],
+    'long beach': [33.7701, -118.1937],
+    'inglewood': [33.9617, -118.3531],
+    'torrance': [33.8358, -118.3406],
+    'el segundo': [33.9192, -118.4165],
+    'downey': [33.9401, -118.1332]
+  };
+
+  function territoryRep(customer) {
+    var rep = String((customer && customer.salesRep) || '').toLowerCase();
+    return Object.keys(LA_TERRITORY_REPS).map(function (key) {
+      return rep.indexOf(key) !== -1 ? LA_TERRITORY_REPS[key] : null;
+    }).filter(Boolean)[0] || null;
+  }
+
+  // A newly added account gets a stable, city-level point immediately. That
+  // keeps the route useful while the full address is awaiting geocoding.
+  function accountCoordinates(city, accountName) {
+    var normalizedCity = String(city || '').trim().toLowerCase();
+    var base = LA_CITY_COORDINATES[normalizedCity] || LA_CITY_COORDINATES['los angeles'];
+    var seed = String(accountName || normalizedCity).split('').reduce(function (sum, char) {
+      return sum + char.charCodeAt(0);
+    }, 0);
+    var latOffset = ((seed % 9) - 4) * 0.003;
+    var lngOffset = ((Math.floor(seed / 9) % 9) - 4) * 0.003;
+    return { lat: +(base[0] + latOffset).toFixed(6), lng: +(base[1] + lngOffset).toFixed(6) };
+  }
+
+  function territoryEntries() {
+    return state.customers.map(function (customer) {
+      var rep = territoryRep(customer);
+      if (!rep) return null;
+      var lat = Number(customer.lat);
+      var lng = Number(customer.lng);
+      if (!isFinite(lat) || !isFinite(lng)) return null;
+      return { customer: customer, rep: rep, lat: lat, lng: lng };
+    }).filter(Boolean);
+  }
+
+  function territoryPin(rep) {
+    return L.divIcon({
+      className: '',
+      html: '<div class="lm-pin" style="background:' + rep.color + ';"></div>',
+      iconSize: [26, 26],
+      iconAnchor: [13, 26],
+      popupAnchor: [0, -26]
+    });
+  }
+
+  var homeTerritoryMapInstance = null;
+
+  function renderHomeTerritoryMap() {
+    var mapEl = document.getElementById('home-territory-map');
+    if (!mapEl || !window.L) return;
+    var entries = territoryEntries();
+    var status = document.getElementById('territory-status');
+    status.textContent = entries.length
+      ? entries.length + ' new ' + (entries.length === 1 ? 'account is' : 'accounts are') + ' on the map.'
+      : 'New stops added by Ricardo and James appear here.';
+
+    if (!homeTerritoryMapInstance) {
+      homeTerritoryMapInstance = L.map('home-territory-map', { zoomControl: false, attributionControl: false, scrollWheelZoom: false });
+      L.control.zoom({ position: 'bottomright' }).addTo(homeTerritoryMapInstance);
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        maxZoom: 19,
+        subdomains: 'abcd'
+      }).addTo(homeTerritoryMapInstance);
+    } else {
+      homeTerritoryMapInstance.eachLayer(function (layer) {
+        if (layer instanceof L.Marker) homeTerritoryMapInstance.removeLayer(layer);
+      });
+    }
+
+    var markers = entries.map(function (entry) {
+      var marker = L.marker([entry.lat, entry.lng], { icon: territoryPin(entry.rep) }).addTo(homeTerritoryMapInstance);
+      marker.bindPopup('<strong>' + escapeHtml(entry.customer.establishmentName) + '</strong><br/>' + escapeHtml(entry.customer.address || '') + '<br/>' + entry.rep.name);
+      return marker;
+    });
+
+    if (markers.length) homeTerritoryMapInstance.fitBounds(L.featureGroup(markers).getBounds(), { padding: [30, 30], maxZoom: 10 });
+    else homeTerritoryMapInstance.setView([34.0522, -118.2437], 9);
+    homeTerritoryMapInstance.invalidateSize();
+  }
+
   function updateMyMapButton() {
     var btn = document.getElementById('btn-my-map');
-    btn.style.display = myMappedAccounts().length ? 'flex' : 'none';
+    btn.style.display = 'inline-flex';
   }
 
   document.getElementById('btn-my-map').addEventListener('click', openAccountsMap);
@@ -938,20 +1041,22 @@
 
   function openAccountsMap() {
     showScreen('screen-map');
-    var accounts = myMappedAccounts();
+    var entries = territoryEntries();
+    var accounts = entries.map(function (entry) { return entry.customer; });
 
-    document.getElementById('map-account-list').innerHTML = accounts.map(function (c, i) {
+    document.getElementById('map-account-list').innerHTML = entries.map(function (entry, i) {
+      var c = entry.customer;
       return '<div class="order-row clickable" data-map-idx="' + i + '">' +
         '<div><div class="oname">' + escapeHtml(c.establishmentName) + '</div>' +
-        '<div class="osub">' + escapeHtml(c.address || '') + '</div></div>' +
+        '<div class="osub">' + escapeHtml(c.address || '') + ' · ' + entry.rep.name + '</div></div>' +
         '<span>→</span>' +
         '</div>';
-    }).join('') || '<div class="empty-note">No mapped accounts yet.</div>';
+    }).join('') || '<div class="empty-note">New Los Angeles accounts will appear here.</div>';
 
     setTimeout(function () {
       if (!accountsMapInstance) {
         accountsMapInstance = L.map('accounts-map');
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
           maxZoom: 19,
           subdomains: 'abcd',
           attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; OpenStreetMap contributors'
@@ -962,21 +1067,10 @@
         });
       }
 
-      var pinIcon = function (color) {
-        return L.divIcon({
-          className: '',
-          html: '<div class="lm-pin" style="background:' + color + ';"></div>',
-          iconSize: [26, 26],
-          iconAnchor: [13, 26],
-          popupAnchor: [0, -26]
-        });
-      };
-      var orangeIcon = pinIcon('#ff7a30');
-      var pinkIcon = pinIcon('#ff2d78');
-
       var markers = [];
-      accounts.forEach(function (c, i) {
-        var marker = L.marker([c.lat, c.lng], { icon: i % 2 === 0 ? orangeIcon : pinkIcon }).addTo(accountsMapInstance);
+      entries.forEach(function (entry, i) {
+        var c = entry.customer;
+        var marker = L.marker([entry.lat, entry.lng], { icon: territoryPin(entry.rep) }).addTo(accountsMapInstance);
         marker.bindPopup(
           '<strong>' + escapeHtml(c.establishmentName) + '</strong><br/>' + escapeHtml(c.address || '') +
           '<br/><a href="#" class="popup-view-orders" data-map-idx="' + i + '">View Orders →</a>'
@@ -987,7 +1081,7 @@
       if (markers.length) {
         accountsMapInstance.fitBounds(L.featureGroup(markers).getBounds(), { padding: [24, 24] });
       } else {
-        accountsMapInstance.setView([37.77, -122.42], 11);
+        accountsMapInstance.setView([34.0522, -118.2437], 9);
       }
 
       accountsMapInstance.off('popupopen').on('popupopen', function (e) {
@@ -1474,6 +1568,9 @@
       // No more Fintech/ACH choice -- every account goes on Stripe now.
       paymentMethod: 'ACH / Stripe ACH'
     };
+    var mapPoint = accountCoordinates(val('nc-address-city'), newCustomer.establishmentName);
+    newCustomer.lat = mapPoint.lat;
+    newCustomer.lng = mapPoint.lng;
 
     var required = ['establishmentName', 'phone', 'email'];
     if (!val('nc-address-street') || !val('nc-address-city') || !val('nc-address-state') || !val('nc-address-zip')) {
@@ -1503,6 +1600,8 @@
 
     var finish = function () {
       state.customers.unshift(newCustomer);
+      cacheCustomers(state.customers);
+      updateMyMapButton();
       btn.disabled = false;
       btn.textContent = 'Save Customer';
       toast('Account added');

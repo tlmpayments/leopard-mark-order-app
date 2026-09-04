@@ -65,7 +65,7 @@
   <!-- LANDING / STATS -->
   <section id="screen-home" class="screen">
     <div class="topbar">
-      <img class="topbar-logo" src="assets/icons/brand/logo-lmc-light.svg" alt="The Leopard Mark Brewing Co." />
+      <img class="topbar-logo" src="assets/icons/brand/logo-alt.svg" alt="The Leopard Mark Brewing Co." />
       <button class="icon-btn" id="logout-btn">Log Out</button>
     </div>
     <div class="rep-block">
@@ -86,27 +86,39 @@
     </div>
 
     <div class="cta-row">
-      <button class="cta-btn" id="btn-new-order">
-        <span>Build an order<small>Choose an account and stock them up</small></span>
-        <span aria-hidden="true">→</span>
+      <button class="cta-btn cta-btn--new-account" id="btn-add-account">
+        <span>Add New Account<small>Put a new stop on your route</small></span>
+        <span class="cta-btn-icon" aria-hidden="true">+</span>
       </button>
-      <button class="cta-btn" id="btn-marketing-order">
+      <button class="cta-btn cta-btn--order" id="btn-new-order">
+        <span>Place an Order<small>Choose an account and stock them up</small></span>
+        <span class="cta-btn-icon" aria-hidden="true">→</span>
+      </button>
+      <button class="cta-btn cta-btn--marketing" id="btn-marketing-order">
         <span>Order Marketing Materials<small>Stickers, signage, glassware, merch</small></span>
-        <span>→</span>
-      </button>
-      <button class="cta-btn secondary" id="btn-add-account">
-        <span>Add Account<small>Set up a new customer</small></span>
-        <span>→</span>
-      </button>
-      <button class="cta-btn secondary" id="btn-my-map" style="display:none;">
-        <span>My Accounts<small>See your accounts, list and map</small></span>
-        <span>→</span>
-      </button>
-      <button class="cta-btn admin" id="btn-admin-orders" style="display:none;">
-        <span>Admin: All Orders<small>See every incoming order and its status</small></span>
-        <span>→</span>
+        <span class="cta-btn-icon" aria-hidden="true">→</span>
       </button>
     </div>
+
+    <section class="territory-module" aria-labelledby="territory-title">
+      <div class="territory-heading">
+        <div>
+          <h2 id="territory-title">New accounts in Los Angeles</h2>
+          <p id="territory-status">New stops added by Ricardo and James appear here.</p>
+        </div>
+        <button class="territory-open" id="btn-my-map" type="button">View list</button>
+      </div>
+      <div class="territory-legend" aria-label="Sales rep map legend">
+        <span><i class="territory-dot ricardo" aria-hidden="true"></i>Ricardo</span>
+        <span><i class="territory-dot james" aria-hidden="true"></i>James</span>
+      </div>
+      <div id="home-territory-map" class="home-territory-map" role="img" aria-label="Map of Los Angeles and surrounding area, showing new accounts for Ricardo and James"></div>
+    </section>
+
+    <button class="cta-btn admin" id="btn-admin-orders" style="display:none; margin-bottom:29px;">
+      <span>Admin: All Orders<small>See every incoming order and its status</small></span>
+      <span>→</span>
+    </button>
 
     <div class="section-title">Recent Orders</div>
     <div class="order-history" id="order-history">
@@ -502,7 +514,7 @@
   <!-- ACCOUNTS MAP -->
   <section id="screen-map" class="screen">
     <a class="back-link" id="back-map-to-home">← Back</a>
-    <div class="section-title">My Accounts Map</div>
+    <div class="section-title">Los Angeles Account Map</div>
     <div id="accounts-map" class="accounts-map"></div>
     <div id="map-account-list" class="order-history" style="margin-top:14px;"></div>
   </section>

@@ -1152,6 +1152,92 @@ body {
 .cta-btn.secondary small { color: var(--silver-dim); }
 .cta-btn.admin { background: linear-gradient(135deg, #513d85, #7657ab); box-shadow: 0 8px 0 #3e2c70, 0 14px 26px rgba(70,43,110,.17); }
 
+/* Home is the app's front door: the same saturated navy, cream, and happy
+   pressure points used by the public brand, with one clear first action. */
+#screen-home .topbar { margin-bottom: 20px; }
+#screen-home .topbar-logo { height: 56px; }
+#screen-home .cta-row { gap: 19px; margin: 8px 0 30px; }
+#screen-home .cta-btn {
+  min-height: 100px;
+  padding: 21px 22px;
+  text-align: left;
+}
+#screen-home .cta-btn--new-account {
+  background: #263b78;
+  border-color: #263b78;
+  box-shadow: 0 11px 0 #182852, 0 21px 32px rgba(38,59,120,.22);
+}
+#screen-home .cta-btn--new-account:active { box-shadow: 0 4px 0 #182852, 0 9px 17px rgba(38,59,120,.2); }
+#screen-home .cta-btn--order {
+  background: #efb11d;
+  border-color: #d59609;
+  color: #263b78;
+  box-shadow: 0 9px 0 #c78708, 0 17px 27px rgba(151,96,0,.16);
+}
+#screen-home .cta-btn--order:active { box-shadow: 0 4px 0 #c78708, 0 8px 15px rgba(151,96,0,.14); }
+#screen-home .cta-btn--order small { color: rgba(38,59,120,.78); }
+#screen-home .cta-btn--marketing {
+  background: #fffdf8;
+  border-color: #d8c6a6;
+  color: #263b78;
+  box-shadow: 0 8px 0 #e2d3b9, 0 15px 24px rgba(89,57,15,.08);
+}
+#screen-home .cta-btn--marketing:active { box-shadow: 0 3px 0 #e2d3b9, 0 8px 15px rgba(89,57,15,.07); }
+#screen-home .cta-btn--marketing small { color: var(--silver-dim); }
+.cta-btn-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(255,253,248,.19);
+  font-size: 25px;
+  font-weight: 400;
+  line-height: 1;
+}
+.cta-btn--order .cta-btn-icon { background: rgba(38,59,120,.13); }
+.cta-btn--marketing .cta-btn-icon { background: #263b78; color: #fffdf8; }
+
+.territory-module {
+  margin: 0 0 29px;
+  padding: 21px 16px 16px;
+  overflow: hidden;
+  border-radius: 25px;
+  background: #263b78;
+  color: #fffdf8;
+  box-shadow: 0 16px 31px rgba(38,59,120,.18);
+}
+.territory-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 0 4px 14px; }
+.territory-heading h2 { margin: 0; color: #fffdf8; font-family: var(--font-serif); font-size: 23px; line-height: 1.05; }
+.territory-heading p { max-width: 260px; margin: 7px 0 0; color: rgba(255,253,248,.72); font-size: 12px; line-height: 1.4; }
+.territory-open {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  border: 1px solid rgba(255,253,248,.48);
+  border-radius: 999px;
+  background: transparent;
+  color: #fffdf8;
+  font: 600 12px var(--font-body);
+  cursor: pointer;
+}
+.territory-legend { display: flex; gap: 14px; padding: 0 4px 13px; color: rgba(255,253,248,.86); font-size: 12px; font-weight: 600; }
+.territory-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.territory-dot { width: 10px; height: 10px; border: 2px solid #fffdf8; border-radius: 50%; }
+.territory-dot.ricardo { background: #efb11d; }
+.territory-dot.james { background: #e85d86; }
+.home-territory-map {
+  width: 100%;
+  height: 244px;
+  overflow: hidden;
+  border: 4px solid rgba(255,253,248,.95);
+  border-radius: 16px;
+  background: #dce4dd;
+}
+.home-territory-map .leaflet-control-zoom a { color: #263b78; }
+.home-territory-map .leaflet-control-attribution { display: none; }
+.territory-open:focus-visible, .cta-btn:focus-visible { outline: 3px solid #e85d86; outline-offset: 3px; }
+
 input, select, textarea {
   background: #fffdf8;
   border-color: var(--line);
