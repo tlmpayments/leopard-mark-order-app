@@ -38,6 +38,34 @@
     setTimeout(function () { t.className = 'toast'; }, 2600);
   }
 
+  // A small confirmation moment is more useful than decorative motion: it
+  // makes a completed order feel unambiguous before the app moves on. It only
+  // appears after a successful write and respects the user's motion setting.
+  function celebrate(title, detail) {
+    var layer = document.getElementById('celebration-layer');
+    if (!layer) return;
+    layer.innerHTML = '';
+    var card = document.createElement('div');
+    card.className = 'success-burst';
+    card.innerHTML = '<strong>' + escapeHtml(title) + '</strong><span>' + escapeHtml(detail) + '</span>';
+    layer.appendChild(card);
+
+    if (!window.matchMedia || !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      var colors = ['#ffbd28', '#ed633f', '#8bd7bd', '#fffdf8'];
+      for (var i = 0; i < 15; i++) {
+        var piece = document.createElement('i');
+        piece.className = 'confetti-dot';
+        piece.style.left = (8 + Math.random() * 84) + '%';
+        piece.style.background = colors[i % colors.length];
+        piece.style.setProperty('--x', (Math.random() * 36 - 18) + 'px');
+        piece.style.setProperty('--drift', (Math.random() * 110 - 55) + 'px');
+        piece.style.animationDelay = (Math.random() * .18) + 's';
+        layer.appendChild(piece);
+      }
+    }
+    setTimeout(function () { layer.innerHTML = ''; }, 3000);
+  }
+
   function apiConfigured() {
     return API && API.indexOf('PASTE_YOUR') === -1;
   }
@@ -1640,6 +1668,7 @@
       label.textContent = 'Submit Order';
       toast(msg, !ok);
       if (ok) {
+        celebrate('Order sent', 'Nice work — the team has it.');
         loadStats();
         if (invoiceNumber) openInvoice(invoiceNumber);
         else showScreen('screen-home');
@@ -2164,6 +2193,7 @@
       label.textContent = 'Submit Request';
       toast(msg, !ok);
       if (ok) {
+        celebrate('Request sent', 'Marketing has your request.');
         resetMarketingForm();
         showScreen('screen-home');
       } else {

@@ -1028,3 +1028,225 @@ input[readonly]:focus { outline: none; border-color: var(--navy-600); }
   color: var(--silver-dim);
   white-space: nowrap;
 }
+
+/* --------------------------------------------------------------------------
+   Bright ordering refresh
+   The app should feel like a rep's favorite field tool: sunny, tactile, and
+   fast. These overrides intentionally retain the Leopard Mark type and beer
+   brand assets while moving away from the all-navy internal-dashboard look.
+   -------------------------------------------------------------------------- */
+:root {
+  --navy-950: #fff8ec;
+  --navy-900: #fffdf8;
+  --navy-800: #ffffff;
+  --navy-700: #f6ead5;
+  --navy-600: #e8d8bd;
+  --navy-500: #cfbfa6;
+  --silver: #34485a;
+  --silver-dim: #697a86;
+  --white: #102f44;
+  --good: #16866f;
+  --warn: #ad6b07;
+  --accent: #ed633f;
+  --radius: 20px;
+  --ink: #102f44;
+  --cream: #fff8ec;
+  --foam: #fffdf8;
+  --lager: #ffbd28;
+  --coral: #ed633f;
+  --mint: #bcebd5;
+  --line: #e8d8bd;
+}
+
+html, body { background: var(--cream); color: var(--ink); }
+body {
+  background:
+    radial-gradient(circle at 10% -15%, rgba(255, 189, 40, .37), transparent 31rem),
+    radial-gradient(circle at 96% 12%, rgba(129, 212, 183, .30), transparent 26rem),
+    var(--cream);
+}
+
+.screen {
+  max-width: 560px;
+  padding: max(24px, env(safe-area-inset-top)) 20px calc(112px + env(safe-area-inset-bottom));
+  animation: screen-arrive .32s cubic-bezier(.2,.8,.2,1);
+}
+@keyframes screen-arrive { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+.topbar { align-items: center; margin-bottom: 28px; }
+.topbar-logo { height: 62px; }
+.icon-btn, .btn-ghost {
+  background: rgba(255,255,255,.72);
+  border-color: var(--line);
+  color: var(--ink);
+  box-shadow: 0 4px 14px rgba(89, 59, 20, .06);
+}
+.icon-btn { border-radius: 999px; padding: 10px 15px; }
+
+/* Login becomes the front door to a beer brand, not a security terminal. */
+#screen-login { gap: 16px; }
+.login-logo { filter: none; width: min(275px, 80%); }
+.brand-sub, .rep-block .rep-label, .section-title, label { color: var(--silver-dim); }
+.brand-sub { letter-spacing: .11em; font-size: 11px; }
+.pin-instructions { color: var(--ink); font-size: 16px; }
+.pin-dot { background: #fff; border-color: var(--line); }
+.pin-dot.filled { background: var(--coral); border-color: var(--coral); }
+.pin-pad button {
+  background: rgba(255,255,255,.88);
+  border-color: var(--line);
+  color: var(--ink);
+  border-radius: 18px;
+  box-shadow: 0 7px 0 #eadcc4, 0 10px 20px rgba(72,45,12,.08);
+}
+.pin-pad button:active { transform: translateY(4px); box-shadow: 0 3px 0 #eadcc4; border-color: var(--coral); }
+.pin-pad .pin-key-back { color: var(--silver-dim); box-shadow: none; background: transparent; }
+
+.route-kicker {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-bottom: 8px;
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: var(--mint);
+  color: #17634f;
+  font-size: 12px;
+  font-weight: 600;
+}
+.rep-block { margin-bottom: 22px; }
+.rep-block .name { color: var(--ink); font-size: clamp(32px, 8vw, 42px); letter-spacing: -.025em; }
+.rep-block .rep-label { letter-spacing: .08em; }
+
+/* Replace the repeated dark-card system with soft paper, warmer depth, and
+   a single, useful color signal per kind of action. */
+.stat-card, .form-card, .order-summary, .product-details-card, .mk-cat {
+  background: rgba(255,255,255,.82);
+  border-color: rgba(207,191,166,.78);
+  box-shadow: 0 12px 30px rgba(90,57,15,.08);
+}
+.stat-card { border-radius: 18px; padding: 17px; }
+.stat-card .value { color: var(--ink); font-size: 30px; letter-spacing: -.04em; }
+.stat-card .label, label, .section-title { text-transform: none; letter-spacing: .01em; font-weight: 600; }
+.stat-card .label { font-size: 12px; }
+.section-title { font-size: 14px; margin: 10px 0 10px; }
+
+.cta-row { gap: 12px; }
+.cta-btn {
+  min-height: 92px;
+  background: linear-gradient(135deg, #ed633f, #f1844e);
+  border: 1px solid rgba(156,65,33,.18);
+  border-radius: 22px;
+  color: #fffdf8;
+  padding: 19px 20px;
+  box-shadow: 0 12px 0 #c74c30, 0 18px 30px rgba(193,67,34,.19);
+  transition: transform .16s ease, box-shadow .16s ease;
+}
+.cta-btn:active { transform: translateY(7px); box-shadow: 0 5px 0 #c74c30, 0 9px 18px rgba(193,67,34,.16); }
+.cta-btn small { color: rgba(255,253,248,.84); font-size: 13px; }
+.cta-btn.secondary {
+  background: linear-gradient(135deg, #fffdf8, #fff4de);
+  border-color: var(--line);
+  color: var(--ink);
+  box-shadow: 0 7px 0 #e6d8c0, 0 12px 24px rgba(92,57,14,.07);
+}
+.cta-btn.secondary small { color: var(--silver-dim); }
+.cta-btn.admin { background: linear-gradient(135deg, #513d85, #7657ab); box-shadow: 0 8px 0 #3e2c70, 0 14px 26px rgba(70,43,110,.17); }
+
+input, select, textarea {
+  background: #fffdf8;
+  border-color: var(--line);
+  color: var(--ink);
+  border-radius: 14px;
+  box-shadow: inset 0 1px 2px rgba(92,57,14,.04);
+}
+input::placeholder, textarea::placeholder { color: #98a0a0; }
+input:focus, select:focus, textarea:focus { outline-color: var(--coral); border-color: var(--coral); }
+.yn-btn { background: #fffdf8; border-color: var(--line); color: var(--ink); border-radius: 14px; }
+.yn-btn.selected, .btn-primary { background: var(--coral); border-color: var(--coral); color: #fffdf8; }
+.btn { border-radius: 14px; }
+
+.order-row {
+  background: rgba(255,255,255,.8);
+  border-color: var(--line);
+  border-radius: 16px;
+  padding: 14px;
+  box-shadow: 0 5px 14px rgba(90,57,15,.045);
+}
+.order-row .oname { color: var(--ink); }
+.order-row .osub, .field-hint { color: var(--silver-dim); }
+.pill { background: #f1e7d6; color: #645442; text-transform: none; letter-spacing: 0; padding: 5px 9px; }
+.pill.pending { background: #fff0bd; color: #98610b; }
+.pill.confirmed, .pill.invoiced { background: #d9f4e8; color: #126f5a; }
+.empty-note { color: var(--silver-dim); }
+
+/* Product browse takes visual priority, like a modern order surface. */
+.product-grid { gap: 14px; }
+.product-tile {
+  background: rgba(255,255,255,.88);
+  border-color: var(--line);
+  border-radius: 22px;
+  padding: 12px 10px 16px;
+  box-shadow: 0 9px 18px rgba(90,57,15,.07);
+}
+.product-tile.selected { box-shadow: 0 0 0 3px color-mix(in srgb, var(--tile-accent, var(--accent)) 40%, transparent), 0 11px 22px rgba(90,57,15,.1); }
+.tile-check { background: #fffdf8; border-color: var(--line); color: var(--ink); }
+.tile-logo { background-color: #fff6e9; border-radius: 16px; background-image: radial-gradient(circle at 50% 22%, color-mix(in srgb, var(--tile-accent, var(--accent)) 26%, #fff8ec), #fff6e9 74%); }
+.tile-name { color: var(--ink); }
+.tile-sub { color: var(--silver-dim); }
+.product-details-card { padding: 14px; border-radius: 20px; }
+.details-title { color: var(--ink); }
+.format-list { border-top-color: #f1e7d7; }
+.format-row, .mk-item {
+  background: #fffdf8;
+  border-color: #ecdfcb;
+  border-radius: 14px;
+}
+.format-row .fdetail, .format-row .fcode, .mk-item-sub, .mk-item-id { color: var(--silver-dim); }
+.qty-stepper button {
+  background: #fff0cb;
+  border-color: #f5d889;
+  color: var(--ink);
+  border-radius: 10px;
+}
+.qty-stepper button:last-child { background: var(--lager); border-color: var(--lager); }
+.order-summary .oline { border-bottom-color: #f0e6d7; color: var(--ink); }
+
+.sticky-footer {
+  background: linear-gradient(180deg, rgba(255,248,236,0), rgba(255,248,236,.92) 32%, var(--cream) 55%);
+  padding-top: 24px;
+}
+.sticky-footer .inner { max-width: 520px; }
+.sticky-footer .btn-primary { box-shadow: 0 6px 0 #c74c30, 0 11px 18px rgba(193,67,34,.17); }
+
+.form-card-title, .form-note-title { color: var(--ink); }
+.form-card-title { border-bottom-color: #efe4d2; }
+.chip { background: #fffdf8; border-color: var(--line); color: var(--ink); }
+.chip.selected { background: var(--ink); border-color: var(--ink); }
+.mk-cat-head { color: var(--ink); }
+.mk-cat-head:active { background: #fff4e1; }
+.mk-cat-body { border-top-color: #f1e7d7; }
+.mk-section { color: var(--silver-dim); border-bottom-color: #eadcc6; }
+.file-drop { background: #fffaf1; border-color: #d7b875; }
+
+.back-link { color: #566c78; }
+.back-link:hover { color: var(--coral); }
+.toast { background: var(--ink); border-radius: 999px; box-shadow: 0 8px 24px rgba(13,43,59,.22); }
+
+/* A brief, deliberate reward moment after a real successful request. */
+.celebration-layer { position: fixed; inset: 0; z-index: 80; pointer-events: none; overflow: hidden; }
+.success-burst {
+  position: absolute; left: 50%; top: 18%; transform: translateX(-50%);
+  width: min(330px, calc(100vw - 40px)); padding: 18px 20px;
+  border-radius: 22px; background: var(--ink); color: #fffdf8;
+  box-shadow: 0 18px 50px rgba(13,43,59,.27); text-align: left;
+  animation: success-pop 2.9s cubic-bezier(.2,.9,.25,1) forwards;
+}
+.success-burst strong { display: block; font-size: 19px; margin-bottom: 3px; }
+.success-burst span { color: #c9eee0; font-size: 13px; }
+.confetti-dot { position: absolute; width: 10px; height: 16px; border-radius: 5px; animation: confetti-fall 1.5s ease-out forwards; }
+@keyframes success-pop { 0% { opacity: 0; transform: translateX(-50%) translateY(18px) scale(.92); } 12%, 80% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); } 100% { opacity: 0; transform: translateX(-50%) translateY(-9px) scale(.98); } }
+@keyframes confetti-fall { from { opacity: 1; transform: translate(var(--x), -10vh) rotate(0); } to { opacity: 0; transform: translate(calc(var(--x) + var(--drift)), 72vh) rotate(320deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
+}

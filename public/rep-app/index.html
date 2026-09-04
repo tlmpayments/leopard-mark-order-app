@@ -16,7 +16,7 @@
   <base href="/rep-app/" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Leopard Mark — Rep Orders</title>
-  <meta name="theme-color" content="#0a1730" />
+  <meta name="theme-color" content="#fff7e7" />
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png" />
   <link rel="icon" href="assets/icons/icon-192.png" />
@@ -25,7 +25,8 @@
 </head>
 <body>
 
-  <div id="toast" class="toast"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="celebration-layer" class="celebration-layer" aria-live="polite" aria-atomic="true"></div>
 
   <!-- LOGIN -->
   <!-- One 4-digit PIN, nothing else. The name picker that used to be step 1
@@ -68,6 +69,7 @@
       <button class="icon-btn" id="logout-btn">Log Out</button>
     </div>
     <div class="rep-block">
+      <div class="route-kicker">Your route, ready to pour</div>
       <div class="name" id="home-rep-name">—</div>
       <div class="rep-label" id="home-rep-region">Sales Rep</div>
     </div>
@@ -85,8 +87,8 @@
 
     <div class="cta-row">
       <button class="cta-btn" id="btn-new-order">
-        <span>Place Order<small>Start a new order for an account</small></span>
-        <span>→</span>
+        <span>Build an order<small>Choose an account and stock them up</small></span>
+        <span aria-hidden="true">→</span>
       </button>
       <button class="cta-btn" id="btn-marketing-order">
         <span>Order Marketing Materials<small>Stickers, signage, glassware, merch</small></span>
