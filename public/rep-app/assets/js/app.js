@@ -136,6 +136,7 @@
           }
           updateMyMapButton();
           renderHomeTerritoryMap();
+          renderAccountMetric();
         }
       })
       .catch(function () {
@@ -298,7 +299,7 @@
     if (!res || !res.ok) return;
     state.stats = res;
     document.getElementById('stat-orders').textContent = res.totalLineItems || 0;
-    document.getElementById('stat-units').textContent = res.totalQty || 0;
+    renderAccountMetric();
 
     var host = document.getElementById('order-history');
     var orders = res.recentOrders || [];
@@ -319,6 +320,14 @@
         '<span class="pill ' + statusClass + '">' + escapeHtml(o.status || 'Pending') + '</span>' +
         '</div>';
     }).join('');
+  }
+
+  function renderAccountMetric() {
+    var mine = repLastName(state.rep);
+    var count = mine ? state.customers.filter(function (customer) {
+      return repLastName(customer.addedBy || customer.salesRep) === mine;
+    }).length : 0;
+    document.getElementById('stat-accounts').textContent = count;
   }
 
   document.getElementById('order-history').addEventListener('click', function (e) {
@@ -1602,6 +1611,7 @@
       state.customers.unshift(newCustomer);
       cacheCustomers(state.customers);
       updateMyMapButton();
+      renderAccountMetric();
       btn.disabled = false;
       btn.textContent = 'Save Customer';
       toast('Account added');
