@@ -1101,18 +1101,6 @@ body {
 .pin-pad button:active { transform: translateY(4px); box-shadow: 0 3px 0 #eadcc4; border-color: var(--coral); }
 .pin-pad .pin-key-back { color: var(--silver-dim); box-shadow: none; background: transparent; }
 
-.route-kicker {
-  display: inline-flex;
-  align-items: center;
-  width: fit-content;
-  margin-bottom: 8px;
-  padding: 7px 11px;
-  border-radius: 999px;
-  background: var(--mint);
-  color: #17634f;
-  font-size: 12px;
-  font-weight: 600;
-}
 .rep-block { margin-bottom: 22px; }
 .rep-block .name { color: var(--ink); font-size: clamp(32px, 8vw, 42px); letter-spacing: -.025em; }
 .rep-block .rep-label { letter-spacing: .08em; }
