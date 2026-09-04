@@ -1,149 +1,65 @@
 // Marketing materials catalog for the rep app's "Order Marketing Materials"
 // flow.
 //
-// STRUCTURE: the taxonomy below is the merchandising tree supplied by Jack on
-// 2026-09-03 -- Merchandise / Packaging / Point-of-Sales / Trade Support, with
-// the deeper branches flattened into one accordion group per leaf-bearing
-// node. `section` is the top-level bucket and `name` is the remaining path
-// ("Apparel > Clothing > Men"), so the full classification is still visible on
-// a phone without four levels of nested collapse.
+// SCOPE: three categories -- Barware, Drinkware, Ephemera and Paper -- per
+// Jack 2026-09-03. This replaces the four-bucket merchandising tree
+// (Merchandise / Packaging / Point-of-Sales / Trade Support) that was
+// supplied earlier the same day: reps order the same handful of things, and
+// an 18-group accordion made them hunt for it. Everything below is a single
+// `section` ("Merchandise") so the catalog renders as one flat run of three
+// groups rather than a tree.
 //
-// Empty branches are NOT listed. Six leaf-less nodes (Women, Footwear,
-// Carried, Cold and Carry, Packaging, Off-Premise) previously rendered as
-// "Coming soon" so the rep's tree matched the tree ops maintains; per Jack
-// 2026-09-03 they are removed entirely -- a rep ordering materials should
-// see only what can actually be ordered. Removing Packaging drops the
-// Packaging section with it, since that was its only category. Re-adding
-// any of them is just a category object with a non-empty `items`.
+// Posters (LM-032 / LM-006 / LM-007) moved here from Point-of-Sales >
+// Indistinct rather than being recreated -- same tracker rows, same brands,
+// new home under Ephemera and Paper.
 //
-// SCOPE: this is a literal catalog -- only the leaves in that tree are
-// orderable. 31 items previously listed here have no leaf in the new tree and
-// are therefore not orderable from the rep app any more:
-//   LM-008 Premium Business Cards      LM-040 Acrylic Holders
-//   LM-009 QR Reorder Cards            LM-050 Frosted Handle Glass
-//   LM-010 NFC Reorder Stickers        LM-052 Beer Towers
-//   LM-011 Coolers                     LM-058 Pop-up Tent
-//   LM-012 Tap Handle (redesign)       LM-059 Table Cloth
-//   LM-020 Character Duo Stickers      LM-062 Women's Uniform
-//   LM-021 Girl Stickers               LM-063 Dickies Jackets
-//   LM-023 Shipping Box - Exterior     LM-064 Hats (Sunlight Groove)
-//   LM-024 Shipping Box - Interior     LM-065 Hats (Leopard Mark)
-//   LM-025 Packaging Tape              LM-067 Golden Bullion Crest Patch
-//   LM-026 Custom Tissue Paper         LM-068 Premium Notepads
-//   LM-027 Interior Product Cut-Out    LM-069 Premium Portfolios
-//   LM-028 Hand Stamp                  LM-083 Coffee Mug (engraved)
-//   LM-029 Blank Note Cards            LM-086 Enamel Pins
-//   LM-031 Product Information Card
-//   LM-037 Mirrors
-//   LM-039 Triangle Tent Menus
-// They still exist in the Master Tracker; they just have nowhere to hang here.
-// Several have an obvious home if the tree is ever extended -- Coolers under
-// Cold and Carry, and the four box/tape/tissue/insert rows under Packaging.
-//
-// BRANDS: brand assignments are NOT invented. Every carried-over leaf keeps
-// the brand(s) the Master Tracker
+// NOT ORDERABLE FROM THE REP APP any more, having lost their category:
+//   Promotional Products  Pens, Token, Keychains, Medal
+//   Toys and Games        Dominoes Set, Playing Cards
+//   Apparel               Polo, Sweater, T-Shirt, Sweatshirt, Lanyards
+//   Point-of-Sales        Print Standee, Neon Sign, Tin Tacker, A-Frames,
+//                         Pennant String, Table Tents, Patio Umbrellas
+//   Trade Support         Sales Sheet
+// Every one still exists in the Master Tracker
 // (docs.google.com/spreadsheets/d/1SCFBf5h9OUUqVGrwOJCy83PNxNkU7bRyHFrF7nm5CMM)
-// already records for it, which is why some leaves have three brand rows, some
-// have two, and the genuinely shared physical items (bar mats, blades, napkin
-// holders, pitchers, stadium cups, lanyards, keychains, A-frames) stay a single
-// Multi-Brand row instead of being split three ways.
+// and ops can still order them -- they just have nowhere to hang here.
+// Restoring any of them is a category object with a non-empty `items`.
 //
-// NEW IDS: six leaves in the tree have no tracker row yet. They are numbered
-// LM-090 through LM-107 continuing the tracker's own sequence, and those
-// numbers need reserving in the tracker so a future row can't collide:
-//   LM-090..092 Dominoes Set        LM-099..101 Print, Standee
-//   LM-093..095 Playing Cards       LM-102..104 Tin Tacker
-//   LM-096..098 Medal               LM-105..107 Pennant String
+// BRANDS: brand assignments are NOT invented. Every leaf keeps the brand(s)
+// the Master Tracker already records for it, which is why the genuinely
+// shared physical items (bar mats, blades, napkin holders, pitchers, stadium
+// cups) stay a single Multi-Brand row instead of being split three ways.
+//
+// NEW IDS: LM-108..110 (Print, Infographic) have no tracker row yet. They
+// continue the tracker's own sequence past LM-107 and follow how Print,
+// Standee was numbered -- one row per brand. THESE NUMBERS NEED RESERVING IN
+// THE TRACKER so a future row can't collide with them, and the artwork
+// itself does not exist yet: the leaf is orderable here before ops has
+// something to fulfil it with.
 //
 // Deliberately NOT copied from the tracker: Status, Qty, Vendor, Priority.
-// Those change constantly and the tracker owns them -- duplicating them into a
-// bundled JS file would just guarantee the rep app shows stale availability.
-// Reps see the full range and ops fields what isn't in stock yet.
+// Those change constantly and the tracker owns them -- duplicating them into
+// a bundled JS file would just guarantee the rep app shows stale
+// availability. Reps see the full range and ops fields what isn't in stock.
 //
 // `id` is the tracker's row ID and is what gets written to the Marketing
 // Orders tab, so a request always reconciles back to a tracker row.
-// `sizes`, when present, means the item is ordered per size (one quantity line
-// each) rather than as a single quantity.
+// `sizes`, when present, means the item is ordered per size (one quantity
+// line each) rather than as a single quantity. Nothing in the current three
+// categories is size-ordered -- the renderer still supports it, and the
+// apparel that used it can come back without a code change.
 (function () {
-  var GARMENT = ['S', 'M', 'L', 'XL', '2XL'];
-
   var LM = 'Leopard Mark';
   var CN = 'Cantinesca';
   var SG = 'Sunlight Groove';
   var MB = 'Multi-Brand';
 
   window.LM_MARKETING_CATEGORIES = [
-    // ---- Merchandise ------------------------------------------------------
-    {
-      id: 'promotional-products',
-      section: 'Merchandise',
-      name: 'Promotional Products',
-      blurb: 'Hand-outs and giveaways.',
-      items: [
-        { id: 'LM-070', name: 'Pens', brand: LM },
-        { id: 'LM-071', name: 'Pens', brand: CN },
-        { id: 'LM-072', name: 'Pens', brand: SG },
-        { id: 'LM-089', name: 'Token', brand: MB, note: 'Custom coin' },
-        { id: 'LM-087', name: 'Keychains', brand: MB },
-        { id: 'LM-096', name: 'Medal', brand: LM },
-        { id: 'LM-097', name: 'Medal', brand: CN },
-        { id: 'LM-098', name: 'Medal', brand: SG }
-      ]
-    },
-    {
-      id: 'toys-and-games',
-      section: 'Merchandise',
-      name: 'Toys and Games',
-      blurb: 'Bar games and table play.',
-      items: [
-        { id: 'LM-090', name: 'Dominoes Set', brand: LM },
-        { id: 'LM-091', name: 'Dominoes Set', brand: CN },
-        { id: 'LM-092', name: 'Dominoes Set', brand: SG },
-        { id: 'LM-093', name: 'Playing Cards, Poker', brand: LM },
-        { id: 'LM-094', name: 'Playing Cards, Poker', brand: CN },
-        { id: 'LM-095', name: 'Playing Cards, Poker', brand: SG }
-      ]
-    },
-    {
-      id: 'apparel-clothing-men',
-      section: 'Merchandise',
-      name: 'Apparel › Clothing › Men',
-      blurb: "Men's cut. Ordered by size.",
-      items: [
-        { id: 'LM-066', name: 'Polo, Color', brand: CN, sizes: GARMENT },
-        { id: 'LM-075', name: 'Sweater, Quarter Zip', brand: LM, sizes: GARMENT },
-        { id: 'LM-078', name: 'Sweater, Quarter Zip', brand: CN, sizes: GARMENT },
-        { id: 'LM-081', name: 'Sweater, Quarter Zip', brand: SG, sizes: GARMENT }
-      ]
-    },
-    {
-      id: 'apparel-clothing-unisex',
-      section: 'Merchandise',
-      name: 'Apparel › Clothing › Unisex',
-      blurb: 'Unisex cut. Ordered by size.',
-      items: [
-        { id: 'LM-076', name: 'T-Shirt, Graphic', brand: LM, sizes: GARMENT },
-        { id: 'LM-079', name: 'T-Shirt, Graphic', brand: CN, sizes: GARMENT },
-        { id: 'LM-082', name: 'T-Shirt, Graphic', brand: SG, sizes: GARMENT },
-        { id: 'LM-074', name: 'Sweatshirt, Hoodie', brand: LM, sizes: GARMENT },
-        { id: 'LM-077', name: 'Sweatshirt, Hoodie', brand: CN, sizes: GARMENT },
-        { id: 'LM-080', name: 'Sweatshirt, Hoodie', brand: SG, sizes: GARMENT }
-      ]
-    },
-    {
-      id: 'apparel-accessories-worn',
-      section: 'Merchandise',
-      name: 'Apparel › Accessories › Worn',
-      blurb: 'Worn on the body.',
-      items: [
-        { id: 'LM-088', name: 'Lanyards', brand: MB }
-      ]
-    },
     {
       id: 'barware',
       section: 'Merchandise',
       name: 'Barware',
-      blurb: 'Behind-the-bar placement items.',
+      blurb: 'Behind-the-bar service kit.',
       items: [
         { id: 'LM-054', name: 'Ice Buckets', brand: CN },
         { id: 'LM-015', name: 'Keg Jacket', brand: LM },
@@ -161,7 +77,7 @@
       id: 'drinkware',
       section: 'Merchandise',
       name: 'Drinkware',
-      blurb: 'Glassware and cups for service.',
+      blurb: 'Glassware and cups.',
       items: [
         { id: 'LM-047', name: 'Glass, Pint', brand: CN },
         { id: 'LM-046', name: 'Glass, Pint', brand: SG },
@@ -174,69 +90,19 @@
       id: 'ephemera-and-paper',
       section: 'Merchandise',
       name: 'Ephemera and Paper',
-      blurb: 'Stickers and labels to hand out on account visits.',
+      blurb: 'Stickers, posters and printed collateral.',
       items: [
         { id: 'LM-017', name: 'Adhesive Label, Sticker, Circle', brand: CN },
         { id: 'LM-019', name: 'Adhesive Label, Sticker, Logo', brand: LM, note: 'Shield' },
         { id: 'LM-016', name: 'Adhesive Label, Sticker, Logo', brand: CN },
         { id: 'LM-022', name: 'Adhesive Label, Sticker, Logo', brand: SG },
-        { id: 'LM-018', name: 'Adhesive Label, Roll Label', brand: CN }
-      ]
-    },
-
-    // ---- Point-of-Sales ---------------------------------------------------
-    {
-      id: 'pos-indistinct',
-      section: 'Point-of-Sales',
-      name: 'Indistinct',
-      blurb: 'Works on- or off-premise.',
-      items: [
+        { id: 'LM-018', name: 'Adhesive Label, Roll Label', brand: CN },
         { id: 'LM-032', name: 'Print, Poster (11x17)', brand: MB },
         { id: 'LM-006', name: 'Print, Poster (11x17)', brand: CN },
         { id: 'LM-007', name: 'Print, Poster (11x17)', brand: SG },
-        { id: 'LM-099', name: 'Print, Standee', brand: LM },
-        { id: 'LM-100', name: 'Print, Standee', brand: CN },
-        { id: 'LM-101', name: 'Print, Standee', brand: SG }
-      ]
-    },
-    {
-      id: 'pos-onpremise-environmental',
-      section: 'Point-of-Sales',
-      name: 'On-Premise › Environmental',
-      blurb: 'Walls, windows and bar tops.',
-      items: [
-        { id: 'LM-036', name: 'Neon Sign', brand: CN },
-        { id: 'LM-035', name: 'Neon Sign', brand: SG },
-        { id: 'LM-102', name: 'Tin Tacker', brand: LM },
-        { id: 'LM-103', name: 'Tin Tacker', brand: CN },
-        { id: 'LM-104', name: 'Tin Tacker', brand: SG },
-        { id: 'LM-038', name: 'Blackboard A-Frames', brand: MB },
-        { id: 'LM-105', name: 'Pennant String', brand: LM },
-        { id: 'LM-106', name: 'Pennant String', brand: CN },
-        { id: 'LM-107', name: 'Pennant String', brand: SG },
-        { id: 'LM-033', name: 'Print, Table Tents (4x6)', brand: CN },
-        { id: 'LM-034', name: 'Print, Table Tents (4x6)', brand: SG }
-      ]
-    },
-    {
-      id: 'pos-onpremise-equipment',
-      section: 'Point-of-Sales',
-      name: 'On-Premise › Equipment',
-      blurb: 'Patio and outdoor fixtures.',
-      items: [
-        { id: 'LM-085', name: 'Patio Umbrellas', brand: CN }
-      ]
-    },
-
-    // ---- Trade Support ----------------------------------------------------
-    {
-      id: 'trade-support',
-      section: 'Trade Support',
-      name: 'Trade Support',
-      blurb: 'Leave-behinds for buyer meetings.',
-      items: [
-        { id: 'LM-004', name: 'Sales Sheet', brand: CN },
-        { id: 'LM-005', name: 'Sales Sheet', brand: SG }
+        { id: 'LM-108', name: 'Print, Infographic', brand: LM },
+        { id: 'LM-109', name: 'Print, Infographic', brand: CN },
+        { id: 'LM-110', name: 'Print, Infographic', brand: SG }
       ]
     }
   ];
