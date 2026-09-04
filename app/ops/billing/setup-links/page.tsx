@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
+import { resolveBillingEmail } from "@/lib/ops/checklist";
 import { stamp } from "@/lib/ops/format";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +24,16 @@ export default async function SetupLinksPage() {
       stripeCustomerId: true,
       stripeDefaultPaymentMethod: true,
       stripeSetupLinkSentAt: true,
-      contacts: { select: { email: true }, take: 1 },
+      // Every contact WITH an address, not `take: 1` -- an arbitrary single
+      // contact could be the one row that has no email, which made this
+      // screen report "cannot send" for an account sendPaymentSetupLink
+      // would have happily mailed.
+      contacts: {
+        where: { email: { not: null } },
+        orderBy: { createdAt: "asc" },
+        select: { email: true },
+        take: 1,
+      },
     },
     orderBy: { businessName: "asc" },
   });
@@ -96,7 +106,15 @@ export default async function SetupLinksPage() {
               </thead>
               <tbody>
                 {[...awaiting, ...notSent].map((a) => {
-                  const email = a.billingContactEmail ?? a.contacts[0]?.email ?? null;
+                  // The same resolution sendPaymentSetupLink uses, so what
+                  // this column shows is genuinely where the link would go.
+                  // It used to inline its own `??` chain, which drifted: the
+                  // send path read the ordering contact directly and ignored
+                  // billingContactEmail entirely.
+                  const billing = resolveBillingEmail({
+                    billingContactEmail: a.billingContactEmail,
+                    contactEmail: a.contacts[0]?.email ?? null,
+                  });
                   return (
                     <tr className="row" key={a.id}>
                       <td>
@@ -106,7 +124,16 @@ export default async function SetupLinksPage() {
                       </td>
                       <td>{a.region ? <span className="region">{a.region}</span> : "—"}</td>
                       <td className="small">
-                        {email ?? <span style={{ color: "var(--serious-ink)" }}>none — cannot send</span>}
+                        {billing.email ? (
+                          <>
+                            {billing.email}{" "}
+                            <span className="muted">
+                              ({billing.source === "account_billing_contact" ? "account" : "ordering contact"})
+                            </span>
+                          </>
+                        ) : (
+                          <span style={{ color: "var(--serious-ink)" }}>none — cannot send</span>
+                        )}
                       </td>
                       <td>
                         {a.stripeCustomerId ? (

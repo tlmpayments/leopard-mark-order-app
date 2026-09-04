@@ -81,13 +81,24 @@ export default async function AccountDetail({ params }: PageProps<"/ops/accounts
           <Link className="btn ghost" href="/ops/accounts">
             ← Accounts
           </Link>
+          {/* An account with no resolvable billing email cannot receive the
+              link at all, so the button says why instead of enqueueing a job
+              that skips. Previously it rendered enabled, the click looked
+              like it worked, and the only trace was a console.warn on the
+              server. */}
           {canWrite && !account.stripeDefaultPaymentMethod ? (
-            <form action={sendSetupLinkAction}>
-              <input type="hidden" name="accountId" value={account.id} />
-              <button className="btn primary" type="submit">
-                Send payment setup link
+            billing.email ? (
+              <form action={sendSetupLinkAction}>
+                <input type="hidden" name="accountId" value={account.id} />
+                <button className="btn primary" type="submit" title={`Sends to ${billing.email}`}>
+                  Send payment setup link
+                </button>
+              </form>
+            ) : (
+              <button className="btn" type="button" disabled title="Add a billing email first">
+                No billing email — cannot send
               </button>
-            </form>
+            )
           ) : null}
         </div>
       </div>

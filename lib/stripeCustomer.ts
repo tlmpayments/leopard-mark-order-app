@@ -9,20 +9,29 @@
 import { db } from "@/lib/db";
 import { stripe } from "@/lib/stripeClient";
 import { sendEmail, appBaseUrl } from "@/lib/email";
+import { resolveBillingEmail } from "@/lib/ops/checklist";
 
 export async function ensureStripeCustomer(accountId: string): Promise<string> {
   const account = await db.account.findUniqueOrThrow({
     where: { id: accountId },
-    include: { contacts: true },
+    include: { contacts: { orderBy: { createdAt: "asc" } } },
   });
   if (account.stripeCustomerId) return account.stripeCustomerId;
 
-  const primaryContact =
-    account.contacts.find((c) => c.email) ?? account.contacts[0];
+  // resolveBillingEmail, not the first contact with an address: this has to
+  // agree with lib/billing/issue.ts, which resolves the SAME way and then
+  // corrects the Stripe customer's email to match at invoice time. Creating
+  // the customer with the ordering contact and letting the first invoice
+  // rewrite it meant the Stripe dashboard showed the wrong payer for the
+  // whole gap between account creation and first delivery.
+  const billing = resolveBillingEmail({
+    billingContactEmail: account.billingContactEmail,
+    contactEmail: account.contacts.find((c) => c.email)?.email ?? null,
+  });
 
   const customer = await stripe.customers.create({
     name: account.businessName,
-    email: primaryContact?.email ?? undefined,
+    email: billing.email ?? undefined,
     metadata: { accountId: account.id },
   });
 
@@ -35,24 +44,46 @@ export async function ensureStripeCustomer(accountId: string): Promise<string> {
 }
 
 // Creates a Stripe Checkout Session in `setup` mode (bank account or card,
-// no charge) and emails the hosted link to the account's ordering contact.
-// Best-effort: an account with no contact email can't receive this today
-// (logged, not thrown) -- ops still has ensureStripeCustomer's Stripe
-// Customer to attach a payment method to manually via the Stripe dashboard
-// in that case.
-export async function sendPaymentSetupLink(accountId: string): Promise<void> {
+// no charge) and emails the hosted link to the account's BILLING email.
+//
+// Billing email, not the ordering contact: whoever can authorise a bank
+// debit is frequently not whoever places the beer order, which is the entire
+// reason Account.billingContactEmail exists. This used to read
+// `contacts.find(c => c.email)` directly, so an account with accounts-payable
+// in billingContactEmail still had its ACH link mailed to the bar manager --
+// and the invoice that followed went somewhere else again, since
+// lib/billing/issue.ts has always resolved the billing email properly.
+// resolveBillingEmail is now the single source of that precedence.
+//
+// Returns whether it actually sent, rather than returning void after a
+// console.warn. An account with no address at all is a permanent data
+// problem, not a transient failure: throwing would put it on the job
+// runner's retry ladder and Slack-alert on the third attempt, and returning
+// silently made the job log claim "setup link emailed" for an email that was
+// never sent. The caller reports the skip instead (see lib/jobs/handlers.ts).
+export async function sendPaymentSetupLink(
+  accountId: string,
+): Promise<{ sent: boolean; email: string | null; reason?: "no_billing_email" }> {
+  // Oldest-first, matching /ops/accounts/[id] and ensureStripeCustomer: with
+  // more than one emailed contact, "the ordering contact" has to resolve to
+  // the same row in the screen that previews the recipient and the code that
+  // mails it, and an unordered relation gives no such guarantee.
   const account = await db.account.findUniqueOrThrow({
     where: { id: accountId },
-    include: { contacts: true },
+    include: { contacts: { orderBy: { createdAt: "asc" } } },
   });
   const customerId = await ensureStripeCustomer(accountId);
-  const contact = account.contacts.find((c) => c.email);
-  if (!contact?.email) {
-    console.warn(
-      `sendPaymentSetupLink: account ${accountId} ("${account.businessName}") has no contact email on file -- skipping.`,
-    );
-    return;
+  const billing = resolveBillingEmail({
+    billingContactEmail: account.billingContactEmail,
+    contactEmail: account.contacts.find((c) => c.email)?.email ?? null,
+  });
+  if (!billing.email) {
+    return { sent: false, email: null, reason: "no_billing_email" };
   }
+  // Only used to personalise the greeting, and only when the address we
+  // resolved is genuinely that contact's -- addressing an accounts-payable
+  // inbox by the ordering contact's first name would be worse than no name.
+  const contact = account.contacts.find((c) => c.email === billing.email);
 
   const base = appBaseUrl();
   const session = await stripe.checkout.sessions.create({
@@ -67,10 +98,10 @@ export async function sendPaymentSetupLink(accountId: string): Promise<void> {
   }
 
   await sendEmail({
-    to: contact.email,
+    to: billing.email,
     subject: "Set up payment for your Leopard Mark wholesale account",
     html: `
-      <p>Hi${contact.name ? ` ${contact.name}` : ""},</p>
+      <p>Hi${contact?.name ? ` ${contact.name}` : ""},</p>
       <p>Add a payment method for <strong>${account.businessName}</strong>'s
       Leopard Mark wholesale account -- this lets us bill you automatically
       instead of mailing an invoice each time:</p>
@@ -84,4 +115,6 @@ export async function sendPaymentSetupLink(accountId: string): Promise<void> {
     where: { id: accountId },
     data: { stripeSetupLinkSentAt: new Date() },
   });
+
+  return { sent: true, email: billing.email };
 }

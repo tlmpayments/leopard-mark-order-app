@@ -58,8 +58,15 @@ export const HANDLERS: Record<JobKind, JobHandler> = {
     ) {
       return "skipped: a link was sent within the last 7 days";
     }
-    await sendPaymentSetupLink(accountId);
-    return "setup link emailed";
+    const result = await sendPaymentSetupLink(accountId);
+    // Reported, not thrown. A missing billing email won't fix itself on a
+    // retry, so putting it on the backoff ladder would just Slack-alert on
+    // attempt 3 about a data problem. It shows up in the run log as an
+    // explicit skip, which is what /ops/automations renders -- the previous
+    // version returned "setup link emailed" unconditionally and so logged a
+    // success for an email nobody was ever sent.
+    if (!result.sent) return "skipped: no billing email on file -- add one, then resend";
+    return `setup link emailed to ${result.email}`;
   },
 
   // ---- ② New order ----
