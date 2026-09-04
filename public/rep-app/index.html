@@ -16,7 +16,7 @@
   <base href="/rep-app/" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Leopard Mark — Rep Orders</title>
-  <meta name="theme-color" content="#0a1730" />
+  <meta name="theme-color" content="#fff7e7" />
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png" />
   <link rel="icon" href="assets/icons/icon-192.png" />
@@ -25,25 +25,21 @@
 </head>
 <body>
 
-  <div id="toast" class="toast"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="celebration-layer" class="celebration-layer" aria-live="polite" aria-atomic="true"></div>
 
   <!-- LOGIN -->
+  <!-- One 4-digit PIN, nothing else. The name picker that used to be step 1
+       is gone, along with the typed name/PIN fallback form: orders.tlmbg.co
+       is rep-only, so the PIN is the whole login and it identifies the rep
+       by itself (handlePinLogin in Code.gs looks up whose it is). That makes
+       PIN uniqueness a correctness requirement -- see auditRepPins(). -->
   <section id="screen-login" class="screen active">
     <img class="login-logo" src="assets/icons/brand/logo-alt.svg" alt="The Leopard Mark Brewing Co." />
     <div class="brand-sub">Sales Rep Orders</div>
 
-    <!-- Step 1: tap your name -->
-    <div class="login-step" id="login-step-pick">
-      <div class="rep-picker" id="rep-picker">
-        <div class="empty-note">Loading reps…</div>
-      </div>
-      <a href="#" class="back-link login-alt-link" id="login-use-form-link">Log in a different way</a>
-    </div>
-
-    <!-- Step 2: PIN pad -->
-    <div class="login-step" id="login-step-pin" style="display:none;">
-      <a href="#" class="back-link" id="pin-back-link">← Not <span id="pin-rep-name"></span>?</a>
-      <div class="pin-instructions" id="pin-instructions">Enter your PIN</div>
+    <div class="login-step" id="login-step-pin">
+      <div class="pin-instructions" id="pin-instructions">Enter your 4-digit PIN</div>
       <div class="pin-dots" id="pin-dots">
         <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
       </div>
@@ -62,27 +58,14 @@
         <button type="button" data-key="0">0</button>
         <button type="button" class="pin-key-back" data-key="back">⌫</button>
       </div>
+      <div class="pin-help">Forgot your PIN? Ask Jack to reset it.</div>
     </div>
-
-    <!-- Fallback: original typed name/PIN form -->
-    <form class="login-card" id="login-form" style="display:none;">
-      <div class="field">
-        <label for="login-name">Your Name</label>
-        <input id="login-name" name="name" autocomplete="username" required />
-      </div>
-      <div class="field">
-        <label for="login-pin">PIN</label>
-        <input id="login-pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="current-password" required />
-      </div>
-      <div class="error-text" id="login-error"></div>
-      <button class="btn btn-primary btn-block" type="submit" id="login-submit">Log In</button>
-    </form>
   </section>
 
   <!-- LANDING / STATS -->
   <section id="screen-home" class="screen">
     <div class="topbar">
-      <img class="topbar-logo" src="assets/icons/brand/logo-lmc-light.svg" alt="The Leopard Mark Brewing Co." />
+      <img class="topbar-logo" src="assets/icons/brand/logo-alt.svg" alt="The Leopard Mark Brewing Co." />
       <button class="icon-btn" id="logout-btn">Log Out</button>
     </div>
     <div class="rep-block">
@@ -96,29 +79,47 @@
         <div class="label">Orders Logged</div>
       </div>
       <div class="stat-card">
-        <div class="value" id="stat-units">0</div>
-        <div class="label">Units Ordered</div>
+        <div class="value" id="stat-accounts">0</div>
+        <div class="label">Accounts Added</div>
       </div>
     </div>
 
     <div class="cta-row">
-      <button class="cta-btn" id="btn-new-order">
-        <span>Place Order<small>Start a new order for an account</small></span>
-        <span>→</span>
+      <button class="cta-btn cta-btn--new-account" id="btn-add-account">
+        <span>Add New Account<small>Put a new stop on your route</small></span>
+        <span class="cta-btn-icon" aria-hidden="true">+</span>
       </button>
-      <button class="cta-btn secondary" id="btn-add-account">
-        <span>Add Account<small>Set up a new customer</small></span>
-        <span>→</span>
+      <button class="cta-btn cta-btn--order" id="btn-new-order">
+        <span>Place an Order<small>Choose an account and stock them up</small></span>
+        <span class="cta-btn-icon" aria-hidden="true">→</span>
       </button>
-      <button class="cta-btn secondary" id="btn-my-map" style="display:none;">
-        <span>My Accounts<small>See your accounts, list and map</small></span>
-        <span>→</span>
+      <button class="cta-btn cta-btn--marketing" id="btn-marketing-order">
+        <span>Order Marketing Materials<small>Stickers, signage, glassware, merch</small></span>
+        <span class="cta-btn-icon" aria-hidden="true">→</span>
       </button>
-      <button class="cta-btn admin" id="btn-admin-orders" style="display:none;">
-        <span>Admin: All Orders<small>See every incoming order and its status</small></span>
-        <span>→</span>
+      <button class="cta-btn cta-btn--accounts" id="btn-my-accounts">
+        <span>Manage My Accounts<small>Your accounts, their orders and invoices</small></span>
+        <span class="cta-btn-icon" aria-hidden="true">→</span>
       </button>
     </div>
+
+    <section class="territory-module" aria-labelledby="territory-title">
+      <div class="territory-heading">
+        <div>
+          <h2 id="territory-title">Accounts in Los Angeles</h2>
+          <p id="territory-status">Accounts in Los Angeles will appear here.</p>
+        </div>
+        <button class="territory-open" id="btn-my-map" type="button">View list</button>
+      </div>
+      <div class="territory-legend" id="territory-legend" aria-label="Sales rep map legend">
+      </div>
+      <div id="home-territory-map" class="home-territory-map" role="img" aria-label="Map of Los Angeles County, showing accounts coloured by the rep who added them"></div>
+    </section>
+
+    <button class="cta-btn admin" id="btn-admin-orders" style="display:none; margin-bottom:29px;">
+      <span>Admin: All Orders<small>See every incoming order and its status</small></span>
+      <span>→</span>
+    </button>
 
     <div class="section-title">Recent Orders</div>
     <div class="order-history" id="order-history">
@@ -167,6 +168,125 @@
       <button class="btn btn-ghost" id="footer-cancel">Cancel</button>
       <button class="btn btn-primary btn-block" id="footer-submit">
         <span id="footer-submit-label">Submit Order</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- MARKETING MATERIALS REQUEST -->
+  <!-- Field order and labels mirror Firestone Walker's marketing request
+       form (Requestor / Email / What is this for / Name of Account or Event /
+       Needed By / Size WxH / Description / Any Other Details / Logo and
+       Supporting Graphics), with the item pick-list added in the middle --
+       theirs is a creative-request form with no catalog, ours has to be able
+       to order real stock. Submit lives in the sticky footer rather than
+       inline like theirs, matching how the beer order screen already
+       submits so reps get one consistent gesture. -->
+  <section id="screen-marketing" class="screen">
+    <a class="back-link" id="back-marketing-to-home">← Back</a>
+    <div class="section-title">Order Marketing Materials</div>
+
+    <div class="form-note">
+      <div class="form-note-title">Note:</div>
+      <p>Everything listed comes straight from the Marketing Materials tracker. Not every item is in stock yet — marketing will confirm timing on anything that still has to be produced.</p>
+      <p>If you need something that isn't listed, or in a custom size, describe it under <strong>Custom Request</strong>. If you need it in less than a week, say so under <strong>Any Other Details</strong> so we can confirm the date is possible.</p>
+    </div>
+
+    <div class="form-card">
+      <div class="form-card-title">Request</div>
+      <div class="field">
+        <label for="mk-requestor">Requestor Name <span class="req">*</span></label>
+        <input id="mk-requestor" readonly />
+        <div class="field-hint">Taken from your login — this request is logged against you.</div>
+      </div>
+      <div class="field">
+        <label for="mk-email">Email address</label>
+        <input id="mk-email" type="email" inputmode="email" autocomplete="email" placeholder="Enter your email address" />
+        <div class="field-hint">Optional. Where marketing should reply if they have questions.</div>
+      </div>
+      <div class="field">
+        <label for="mk-purpose">What is this for? <span class="req">*</span></label>
+        <select id="mk-purpose">
+          <option value="">Choose one</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="mk-needed-by">Needed By <span class="req">*</span></label>
+        <input id="mk-needed-by" type="date" />
+        <p class="availability-note"><span aria-hidden="true">*</span> This is subject to availability and approval.</p>
+      </div>
+    </div>
+
+    <div class="form-card">
+      <div class="form-card-title">Ship To</div>
+      <div class="field-hint">Optional. Skip the account and the request just ships to you.</div>
+      <button class="cta-btn secondary" id="mk-btn-pick-account" type="button" style="width:100%;">
+        <span id="mk-account-label">Select account →</span>
+      </button>
+      <div id="mk-account-detail" class="order-summary" style="display:none; margin:0;"></div>
+      <a href="#" class="back-link" id="mk-clear-account" style="display:none; margin:0;">Clear account</a>
+      <div class="field">
+        <label for="mk-event-name">Name of Account / Event</label>
+        <input id="mk-event-name" placeholder="Enter your answer" />
+        <div class="field-hint">Fills in from the account above. Type an event name here if there's no account.</div>
+      </div>
+      <div class="field">
+        <label for="mk-ship-address">Shipping Address</label>
+        <textarea id="mk-ship-address" rows="3" placeholder="Enter your answer"></textarea>
+        <div class="field-hint">Fills in from the account above. Leave blank to ship to you.</div>
+      </div>
+    </div>
+
+    <div class="form-card">
+      <div class="form-card-title">Materials</div>
+      <div class="field-hint" id="mk-catalog-hint">Tap a category, then set quantities.</div>
+      <div class="field">
+        <input id="mk-search" placeholder="Search all materials" />
+      </div>
+      <div class="chip-row" id="mk-brand-filter"></div>
+      <div id="mk-catalog"></div>
+    </div>
+
+    <div class="form-card">
+      <div class="form-card-title">Custom Request</div>
+      <div class="field-hint">Only if what you need isn't in the list above.</div>
+      <div class="field">
+        <label for="mk-custom">Description and Supporting Content</label>
+        <textarea id="mk-custom" rows="4" placeholder="Enter your answer"></textarea>
+      </div>
+      <div class="field">
+        <label for="mk-size">Size (WxH)</label>
+        <input id="mk-size" placeholder="e.g. 24 x 36 in" />
+      </div>
+    </div>
+
+    <div class="form-card">
+      <div class="form-card-title">Details</div>
+      <div class="field">
+        <label for="mk-other">Any Other Details</label>
+        <textarea id="mk-other" rows="3" placeholder="Enter your answer"></textarea>
+      </div>
+      <div class="field">
+        <label>Logo and Supporting Graphics</label>
+        <div class="file-drop" id="mk-file-drop">
+          <input type="file" id="mk-files" multiple accept="image/*,application/pdf" hidden />
+          <button class="btn btn-ghost" type="button" id="mk-file-btn">Select files…</button>
+          <div class="file-drop-hint">or drag and drop files here</div>
+        </div>
+        <div id="mk-file-list" class="file-list"></div>
+        <div class="field-hint">Images or PDF. Up to 5 files, 5 MB each.</div>
+      </div>
+    </div>
+
+    <div class="order-summary" id="mk-summary" style="display:none;"></div>
+    <div class="error-text" id="mk-error"></div>
+    <div style="height:90px;"></div>
+  </section>
+
+  <div class="sticky-footer" id="marketing-footer" style="display:none;">
+    <div class="inner">
+      <button class="btn btn-ghost" id="mk-cancel">Cancel</button>
+      <button class="btn btn-primary btn-block" id="mk-submit">
+        <span id="mk-submit-label">Submit Request</span>
       </button>
     </div>
   </div>
@@ -308,6 +428,11 @@
       <div class="form-card">
         <div class="form-card-title">Billing</div>
         <div class="field">
+          <label>Billing Email</label>
+          <input id="nc-billing-email" type="email" placeholder="accounts payable, if different" />
+          <div class="field-hint">Where invoices go. Leave blank to use the ordering contact&rsquo;s email.</div>
+        </div>
+        <div class="field">
           <label>Is the Billing Address the Same as the Business Address?</label>
           <div class="yn-toggle" id="nc-billing-same" data-value="Yes">
             <button type="button" class="yn-btn selected" data-value="Yes">Yes</button>
@@ -392,17 +517,44 @@
     </div>
   </section>
 
+  <!-- MY ACCOUNTS -->
+  <!-- Every account linked to the logged-in rep, not just the geocoded LA
+       ones screen-map can plot. Both screens hand off to screen-account,
+       which is why openAccountDetail takes a return screen -- its back link
+       used to be hardwired to screen-map. -->
+  <section id="screen-my-accounts" class="screen">
+    <a class="back-link" id="back-myaccounts-to-home">← Back</a>
+    <div class="section-title">My Accounts</div>
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="value" id="my-accounts-count">0</div>
+        <div class="label">Linked Accounts</div>
+      </div>
+      <div class="stat-card">
+        <div class="value" id="my-accounts-regions">0</div>
+        <div class="label">Regions Covered</div>
+      </div>
+    </div>
+    <div class="field" style="margin-bottom:14px;">
+      <input id="my-accounts-search" placeholder="Search by name, region, or city" />
+    </div>
+    <div class="field-hint" style="margin-bottom:10px;">Tap an account to see every order it has placed, its invoices, and the Slack thread for each one.</div>
+    <div id="my-accounts-list" class="order-history">
+      <div class="empty-note">Loading…</div>
+    </div>
+  </section>
+
   <!-- ACCOUNTS MAP -->
   <section id="screen-map" class="screen">
     <a class="back-link" id="back-map-to-home">← Back</a>
-    <div class="section-title">My Accounts Map</div>
+    <div class="section-title">Los Angeles Account Map</div>
     <div id="accounts-map" class="accounts-map"></div>
     <div id="map-account-list" class="order-history" style="margin-top:14px;"></div>
   </section>
 
   <!-- ACCOUNT DETAIL -->
   <section id="screen-account" class="screen">
-    <a class="back-link" id="back-account-to-map">← Back</a>
+    <a class="back-link" id="back-account">← Back</a>
     <div class="rep-block" style="margin-bottom:14px; display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
       <div>
         <div class="name" id="account-name" style="font-size:22px;">—</div>
@@ -417,6 +569,7 @@
       <div class="field"><label>Phone Number</label><input id="ea-phone" type="tel" /></div>
       <div class="field"><label>Email</label><input id="ea-email" type="email" /></div>
       <div class="field"><label>Delivery Address (Ship To)</label><input id="ea-address" /></div>
+      <div class="field"><label>Billing Email</label><input id="ea-billing-email" type="email" placeholder="Falls back to the ordering contact" /></div>
       <div class="field"><label>Billing Address (if different)</label><input id="ea-billing-address" /></div>
       <div class="field"><label>Delivery Instructions</label><textarea id="ea-delivery-instructions" rows="2"></textarea></div>
       <div class="field">
@@ -468,6 +621,7 @@
     </button>
 
     <div class="section-title">All Orders</div>
+    <div class="field-hint" style="margin-bottom:10px;">Every order this account has placed, newest first.</div>
     <div class="order-history" id="account-order-list">
       <div class="empty-note">Loading…</div>
     </div>
@@ -505,6 +659,9 @@
     <div id="invoice-doc" class="invoice-doc" style="display:none;"></div>
     </div>
     <button class="btn btn-primary btn-block no-print" id="invoice-print-btn" style="display:none; margin-top:20px;">Print / Save as PDF</button>
+    <a class="btn btn-ghost btn-block no-print btn-slack" id="invoice-slack-btn" style="display:none; margin-top:10px;" target="_blank" rel="noopener">
+      <span class="slack-mark" aria-hidden="true"></span>Open the Slack thread
+    </a>
   </section>
 
   <!-- Batch invoice print target (never shown on screen, only used for window.print()) -->
@@ -513,6 +670,7 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="assets/js/config.js"></script>
   <script src="assets/js/products.js"></script>
+  <script src="assets/js/marketing-materials.js"></script>
   <script src="assets/js/customers.js"></script>
   <script src="assets/js/app.js"></script>
 </body>

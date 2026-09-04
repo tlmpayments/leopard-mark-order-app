@@ -1,12 +1,21 @@
-// Phase 2 (Sheet <-> Postgres sync) is not this phase's job to build the
-// full confirmation gate (no channel creates real orders automatically yet
-// -- that's Phase 4/5's job per the plan). What IS this phase's job: make
-// sure nothing accidentally wired `syncOrderToSheet` (the DB -> Sheet call)
-// into anything automatic/user-facing before that gate exists. This test
-// greps the actual source tree (not a mock of it) for every call site of
-// `syncOrderToSheet(` and asserts each one is either the function's own
-// definition or explicit test/script code.
+// The compliance gate: an order that has not reached `confirmed` must never
+// reach the Sales tab (§1.1 -- the customer's confirmation is the moment of
+// contract formation, and "nothing downstream (invoicing, Sheet write,
+// fulfillment) may trigger before confirmed").
+//
+// This test originally guaranteed that by asserting `syncOrderToSheet` had NO
+// automatic caller at all, which was true while orders still landed in the
+// Sheet via Apps Script. The Ops Platform's job runner now does mirror orders
+// (lib/jobs/handlers.ts), so a call-site allowlist alone would only prove that
+// somebody remembered to update this file. The invariant therefore moved into
+// syncOrderToSheet itself, which refuses any order outside
+// SHEET_MIRRORABLE_STATUSES -- and that refusal is what the second block below
+// asserts. The call-site grep is kept as a narrower guard: the Sheet write must
+// stay out of request-path code under app/, so a page render can never block on
+// Google.
 import { describe, it, expect } from "vitest";
+import { OrderStatus } from "@/app/generated/prisma/enums";
+import { SHEET_MIRRORABLE_STATUSES, mayMirrorToSheet } from "@/lib/sheetColumns";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -37,10 +46,18 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-// Paths allowed to actually CALL syncOrderToSheet(...) at this phase: its
-// own definition file, this test suite, and one-off scripts (which run only
-// when a human invokes them directly, e.g. `npx tsx scripts/...`).
-const ALLOWED_CALL_SITE_PREFIXES = ["lib/sheetSync.ts", "__tests__/", "scripts/"];
+// Paths allowed to CALL syncOrderToSheet(...): its own definition, this test
+// suite, one-off scripts a human invokes directly, and the job handlers. The
+// job runner is the one legitimate automatic caller -- it runs off the queue,
+// out of the request path, with a retry ladder and a dead-letter state, which
+// is exactly the property that makes "never let a Sheet outage fail a user
+// action" (§2 rule 3) true rather than aspirational.
+const ALLOWED_CALL_SITE_PREFIXES = [
+  "lib/sheetSync.ts",
+  "lib/jobs/handlers.ts",
+  "__tests__/",
+  "scripts/",
+];
 
 describe("confirmation-gate adjacency: syncOrderToSheet has no automatic caller yet", () => {
   it("every reference to syncOrderToSheet( in the source tree is a definition, a comment, or explicit test/script code", () => {
@@ -90,5 +107,34 @@ describe("confirmation-gate adjacency: syncOrderToSheet has no automatic caller 
     }
 
     expect(callSites).toEqual([]);
+  });
+});
+
+describe("confirmation gate: the Sheet mirror refuses an unconfirmed order", () => {
+  it("permits exactly the post-gate statuses", () => {
+    expect([...SHEET_MIRRORABLE_STATUSES]).toEqual(["confirmed", "scheduled", "fulfilled"]);
+  });
+
+  it.each([["confirmed"], ["scheduled"], ["fulfilled"]])("%s may mirror", (status) => {
+    expect(mayMirrorToSheet(status)).toBe(true);
+  });
+
+  it.each([["draft"], ["pending_confirmation"], ["cancelled"], ["rejected"], ["expired"]])(
+    "%s may NOT mirror",
+    (status) => {
+      // draft and pending_confirmation have not formed a contract; the other
+      // three have been withdrawn. None of them belongs on the sheet the
+      // business invoices from.
+      expect(mayMirrorToSheet(status)).toBe(false);
+    },
+  );
+
+  it("covers every OrderStatus value, so a new status cannot default to mirrorable", () => {
+    const all = Object.keys(OrderStatus);
+    expect(all).toHaveLength(8);
+    for (const status of all) {
+      expect(typeof mayMirrorToSheet(status)).toBe("boolean");
+    }
+    expect(all.filter(mayMirrorToSheet).sort()).toEqual(["confirmed", "fulfilled", "scheduled"]);
   });
 });

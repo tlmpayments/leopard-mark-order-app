@@ -6,16 +6,33 @@
     selection: {}, // productId -> { formatCode: qty }
     invoiceEdit: null, // working copy of the invoice currently on screen-invoice, see openInvoice()
     customer: null,
+    customerPickerReturn: 'screen-order', // which screen screen-customers returns to
+    accountReturn: 'screen-map', // which screen screen-account returns to, see openAccountDetail
+    marketing: null, // working state for the marketing materials request, see openMarketingForm()
     customers: loadCachedCustomers() || (window.LM_CUSTOMERS || []).slice()
   };
 
   var screens = {};
   document.querySelectorAll('.screen').forEach(function (el) { screens[el.id] = el; });
 
+  // Screens that submit something own a sticky footer. Only the active
+  // screen's may show, and every other one has to be hidden explicitly --
+  // they're position:fixed, so a footer left visible would float over
+  // whatever screen comes next.
+  var SCREEN_FOOTERS = {
+    'screen-order': 'order-footer',
+    'screen-marketing': 'marketing-footer'
+  };
+
   function showScreen(id) {
     Object.keys(screens).forEach(function (k) { screens[k].classList.toggle('active', k === id); });
-    document.getElementById('order-footer').style.display = id === 'screen-order' ? 'flex' : 'none';
+    Object.keys(SCREEN_FOOTERS).forEach(function (screenId) {
+      document.getElementById(SCREEN_FOOTERS[screenId]).style.display = screenId === id ? 'flex' : 'none';
+    });
     window.scrollTo(0, 0);
+    if (id === 'screen-home') {
+      window.setTimeout(renderHomeTerritoryMap, 0);
+    }
   }
 
   function toast(msg, isError) {
@@ -23,6 +40,34 @@
     t.textContent = msg;
     t.className = 'toast show' + (isError ? ' error' : '');
     setTimeout(function () { t.className = 'toast'; }, 2600);
+  }
+
+  // A small confirmation moment is more useful than decorative motion: it
+  // makes a completed order feel unambiguous before the app moves on. It only
+  // appears after a successful write and respects the user's motion setting.
+  function celebrate(title, detail) {
+    var layer = document.getElementById('celebration-layer');
+    if (!layer) return;
+    layer.innerHTML = '';
+    var card = document.createElement('div');
+    card.className = 'success-burst';
+    card.innerHTML = '<strong>' + escapeHtml(title) + '</strong><span>' + escapeHtml(detail) + '</span>';
+    layer.appendChild(card);
+
+    if (!window.matchMedia || !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      var colors = ['#ffbd28', '#ed633f', '#8bd7bd', '#fffdf8'];
+      for (var i = 0; i < 15; i++) {
+        var piece = document.createElement('i');
+        piece.className = 'confetti-dot';
+        piece.style.left = (8 + Math.random() * 84) + '%';
+        piece.style.background = colors[i % colors.length];
+        piece.style.setProperty('--x', (Math.random() * 36 - 18) + 'px');
+        piece.style.setProperty('--drift', (Math.random() * 110 - 55) + 'px');
+        piece.style.animationDelay = (Math.random() * .18) + 's';
+        layer.appendChild(piece);
+      }
+    }
+    setTimeout(function () { layer.innerHTML = ''; }, 3000);
   }
 
   function apiConfigured() {
@@ -90,7 +135,15 @@
           if (screens['screen-customers'].classList.contains('active')) {
             renderCustomerList(document.getElementById('customer-search').value);
           }
+          // Same reason as the picker above: this refresh lands a beat after
+          // the screen paints from cache, and a rep who just added an account
+          // should see it appear rather than have to navigate away and back.
+          if (screens['screen-my-accounts'].classList.contains('active')) {
+            renderMyAccounts(document.getElementById('my-accounts-search').value);
+          }
           updateMyMapButton();
+          renderHomeTerritoryMap();
+          renderAccountMetric();
         }
       })
       .catch(function () {
@@ -115,115 +168,19 @@
     enterHome();
   }
 
-  document.getElementById('login-form').addEventListener('submit', function (e) {
-    e.preventDefault();
-    var name = document.getElementById('login-name').value.trim();
-    var pin = document.getElementById('login-pin').value.trim();
-    var errEl = document.getElementById('login-error');
-    var btn = document.getElementById('login-submit');
-    errEl.textContent = '';
-
-    if (!apiConfigured()) {
-      // Dev fallback so the app is testable before Apps Script is deployed.
-      completeLogin(name, 'Rep');
-      return;
-    }
-
-    btn.disabled = true;
-    btn.textContent = 'Checking...';
-    apiGet({ action: 'login', name: name, pin: pin })
-      .then(function (res) {
-        if (res.ok) {
-          completeLogin(res.rep, res.role);
-        } else {
-          errEl.textContent = res.error || 'Invalid name or PIN';
-        }
-      })
-      .catch(function (err) { errEl.textContent = friendlyApiError(err); })
-      .finally(function () {
-        btn.disabled = false;
-        btn.textContent = 'Log In';
-      });
-  });
-
-  document.getElementById('login-use-form-link').addEventListener('click', function (e) {
-    e.preventDefault();
-    showLoginFallback();
-  });
-
-  function showLoginFallback() {
-    document.getElementById('login-step-pick').style.display = 'none';
-    document.getElementById('login-step-pin').style.display = 'none';
-    document.getElementById('login-form').style.display = 'flex';
-  }
-
-  // ---------- Tap-to-pick-name + PIN pad ----------
-  // Big-target tap flow so reps never have to type on the small login
-  // screen: pick your name from a list, then punch a 4-digit PIN. Falls
-  // back to the plain typed form (below) if the reps list can't load.
-  var pinState = { rep: null, digits: '' };
-
-  function loadRepPicker() {
-    var host = document.getElementById('rep-picker');
-    if (!apiConfigured()) {
-      var demoNames = Object.keys(window.LM_REP_REGIONS || {});
-      renderRepPicker(demoNames.length ? demoNames.map(function (n) { return { name: n, role: 'Rep' }; }) : [{ name: 'Demo Rep', role: 'Rep' }]);
-      return;
-    }
-    apiGet({ action: 'reps' })
-      .then(function (res) {
-        if (res.ok && Array.isArray(res.reps) && res.reps.length) {
-          renderRepPicker(res.reps);
-        } else {
-          host.innerHTML = '<div class="empty-note">Could not load reps.</div>';
-        }
-      })
-      .catch(function () {
-        host.innerHTML = '<div class="empty-note">Could not reach the server. Use "Log in a different way" below.</div>';
-      });
-  }
-
-  function renderRepPicker(reps) {
-    var host = document.getElementById('rep-picker');
-    host.innerHTML = reps.map(function (r) {
-      return '<button type="button" class="rep-tile" data-name="' + escapeHtml(r.name) + '" data-role="' + escapeHtml(r.role || 'Rep') + '" data-needs-pin="' + (r.needsPin ? '1' : '') + '">' + escapeHtml(r.name) + '</button>';
-    }).join('');
-    host.querySelectorAll('.rep-tile').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        openPinPad(btn.getAttribute('data-name'), btn.getAttribute('data-role'), btn.getAttribute('data-needs-pin') === '1');
-      });
-    });
-  }
-
-  // mode is 'login' (rep already has a PIN), 'create' (first digits of a new
-  // PIN), or 'confirm' (re-entering it to catch typos) -- 'create'/'confirm'
-  // only happen the very first time a rep taps their name with no PIN set.
-  function openPinPad(name, role, needsPin) {
-    pinState.rep = name;
-    pinState.role = role || 'Rep';
-    pinState.mode = needsPin ? 'create' : 'login';
-    pinState.firstPin = null;
-    pinState.digits = '';
-    document.getElementById('pin-rep-name').textContent = name;
-    document.getElementById('pin-error').textContent = '';
-    updatePinInstructions();
-    updatePinDots(false);
-    document.getElementById('login-step-pick').style.display = 'none';
-    document.getElementById('login-step-pin').style.display = 'flex';
-  }
-
-  function updatePinInstructions() {
-    var el = document.getElementById('pin-instructions');
-    if (pinState.mode === 'create') el.textContent = 'Choose a 4-digit PIN';
-    else if (pinState.mode === 'confirm') el.textContent = 'Re-enter your PIN to confirm';
-    else el.textContent = 'Enter your PIN';
-  }
-
-  document.getElementById('pin-back-link').addEventListener('click', function (e) {
-    e.preventDefault();
-    document.getElementById('login-step-pin').style.display = 'none';
-    document.getElementById('login-step-pick').style.display = 'flex';
-  });
+  // ---------- PIN login ----------
+  // One 4-digit PIN and nothing else. orders.tlmbg.co is rep-only, so the
+  // login is as short as it can be: punch four digits and you're in. The PIN
+  // identifies the rep by itself -- the Apps Script side (handlePinLogin)
+  // looks up whose it is and refuses outright if two active reps share one,
+  // rather than guessing and logging someone in as the wrong person.
+  //
+  // Removed with the name picker: the first-login "choose your own PIN"
+  // flow. With no name on screen there is nothing to attach a new PIN to,
+  // so PINs are assigned in the Reps tab by whoever manages it. Every
+  // active rep already has one; a rep who needs a reset asks for it.
+  var PIN_PROMPT = 'Enter your 4-digit PIN';
+  var pinState = { digits: '', busy: false };
 
   function updatePinDots(isError) {
     var dots = document.querySelectorAll('#pin-dots .pin-dot');
@@ -233,110 +190,77 @@
     });
   }
 
-  document.getElementById('pin-pad').addEventListener('click', function (e) {
-    var btn = e.target.closest('button[data-key]');
-    if (!btn) return;
-    var key = btn.getAttribute('data-key');
+  function resetPinPad() {
+    pinState.digits = '';
+    pinState.busy = false;
+    document.getElementById('pin-instructions').textContent = PIN_PROMPT;
+    updatePinDots(false);
+  }
+
+  function pinDigit(key) {
+    // `busy` guards the window between the fourth digit and the server's
+    // answer -- without it a double-tap starts a second login attempt, which
+    // on a wrong PIN costs the rep two throttle delays instead of one.
+    if (pinState.busy) return;
     if (key === 'back') {
       pinState.digits = pinState.digits.slice(0, -1);
+      document.getElementById('pin-error').textContent = '';
       updatePinDots(false);
       return;
     }
     if (pinState.digits.length >= 4) return;
     pinState.digits += key;
     updatePinDots(false);
-    if (pinState.digits.length === 4) handlePinComplete();
-  });
-
-  function handlePinComplete() {
-    if (pinState.mode === 'create') {
-      pinState.firstPin = pinState.digits;
-      pinState.digits = '';
-      pinState.mode = 'confirm';
-      updatePinInstructions();
-      updatePinDots(false);
-      return;
-    }
-    if (pinState.mode === 'confirm') {
-      if (pinState.digits !== pinState.firstPin) {
-        document.getElementById('pin-error').textContent = "PINs didn't match -- try again";
-        updatePinDots(true);
-        setTimeout(function () {
-          pinState.mode = 'create';
-          pinState.firstPin = null;
-          pinState.digits = '';
-          updatePinInstructions();
-          updatePinDots(false);
-        }, 500);
-        return;
-      }
-      submitSetPin();
-      return;
-    }
-    submitLogin();
+    if (pinState.digits.length === 4) submitPinLogin();
   }
 
-  function submitLogin() {
+  document.getElementById('pin-pad').addEventListener('click', function (e) {
+    var btn = e.target.closest('button[data-key]');
+    if (!btn) return;
+    pinDigit(btn.getAttribute('data-key'));
+  });
+
+  // Physical keyboard too -- reps on a laptop shouldn't have to mouse over
+  // twelve buttons. Only listens while the login screen is the active one.
+  document.addEventListener('keydown', function (e) {
+    if (!document.getElementById('screen-login').classList.contains('active')) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (/^[0-9]$/.test(e.key)) { e.preventDefault(); pinDigit(e.key); return; }
+    if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); pinDigit('back'); }
+  });
+
+  function submitPinLogin() {
     var errEl = document.getElementById('pin-error');
+    var instr = document.getElementById('pin-instructions');
     errEl.textContent = '';
-    var name = pinState.rep;
     var pin = pinState.digits;
 
     if (!apiConfigured()) {
-      completeLogin(name, pinState.role);
+      // Dev fallback so the app is testable before Apps Script is deployed.
+      completeLogin('Demo Rep', 'Rep');
+      resetPinPad();
       return;
     }
 
-    apiGet({ action: 'login', name: name, pin: pin })
+    pinState.busy = true;
+    instr.textContent = 'Checking\u2026';
+
+    apiGet({ action: 'pinLogin', pin: pin })
       .then(function (res) {
-        if (res.ok) {
+        if (res && res.ok) {
           completeLogin(res.rep, res.role);
-        } else {
-          errEl.textContent = res.error || 'Incorrect PIN';
-          updatePinDots(true);
-          setTimeout(function () { pinState.digits = ''; updatePinDots(false); }, 400);
+          resetPinPad();
+          return;
         }
+        errEl.textContent = (res && res.error) || 'Incorrect PIN';
+        pinState.busy = false;
+        instr.textContent = PIN_PROMPT;
+        updatePinDots(true);
+        setTimeout(resetPinPad, 500);
       })
       .catch(function (err) {
         errEl.textContent = friendlyApiError(err);
-        pinState.digits = '';
-        updatePinDots(false);
-      });
-  }
-
-  function submitSetPin() {
-    var errEl = document.getElementById('pin-error');
-    errEl.textContent = '';
-    var name = pinState.rep;
-    var pin = pinState.firstPin;
-
-    if (!apiConfigured()) {
-      completeLogin(name, pinState.role);
-      return;
-    }
-
-    apiPost({ action: 'setPin', name: name, pin: pin })
-      .then(function (res) {
-        if (res.ok) {
-          completeLogin(res.rep, res.role);
-        } else {
-          errEl.textContent = res.error || 'Could not save your PIN';
-          setTimeout(function () {
-            pinState.mode = 'create';
-            pinState.firstPin = null;
-            pinState.digits = '';
-            updatePinInstructions();
-            updatePinDots(false);
-          }, 600);
-        }
-      })
-      .catch(function (err) {
-        errEl.textContent = friendlyApiError(err);
-        pinState.mode = 'create';
-        pinState.firstPin = null;
-        pinState.digits = '';
-        updatePinInstructions();
-        updatePinDots(false);
+        resetPinPad();
       });
   }
 
@@ -351,11 +275,9 @@
     clearSession();
     state.rep = null;
     state.repRole = null;
-    document.getElementById('login-step-pin').style.display = 'none';
-    document.getElementById('login-form').style.display = 'none';
-    document.getElementById('login-step-pick').style.display = 'flex';
+    document.getElementById('pin-error').textContent = '';
+    resetPinPad();
     showScreen('screen-login');
-    loadRepPicker();
   });
 
   // ---------- Home / stats ----------
@@ -384,7 +306,7 @@
     if (!res || !res.ok) return;
     state.stats = res;
     document.getElementById('stat-orders').textContent = res.totalLineItems || 0;
-    document.getElementById('stat-units').textContent = res.totalQty || 0;
+    renderAccountMetric();
 
     var host = document.getElementById('order-history');
     var orders = res.recentOrders || [];
@@ -407,6 +329,27 @@
     }).join('');
   }
 
+  // The accounts linked to the logged-in rep. Matched by LAST NAME because
+  // Customer Accounts writes "J. Williams" while the Reps tab writes "James
+  // Williams" -- the same mismatch repLastName() exists for everywhere else
+  // in this file. `addedBy` wins over `salesRep` when present, so an account
+  // handed to a different rep still counts for whoever put it in.
+  //
+  // Deliberately NOT filtered on lat/lng the way myMappedAccounts() is: a
+  // rep's list is every account of theirs, not just the ones that happen to
+  // be geocoded onto the LA map.
+  function myAccounts() {
+    var mine = repLastName(state.rep);
+    if (!mine) return [];
+    return state.customers.filter(function (customer) {
+      return repLastName(customer.addedBy || customer.salesRep) === mine;
+    });
+  }
+
+  function renderAccountMetric() {
+    document.getElementById('stat-accounts').textContent = myAccounts().length;
+  }
+
   document.getElementById('order-history').addEventListener('click', function (e) {
     var row = e.target.closest('.order-row[data-invoice]');
     if (!row) return;
@@ -426,6 +369,7 @@
     document.getElementById('invoice-loading').textContent = 'Loading invoice…';
     document.getElementById('invoice-doc').style.display = 'none';
     document.getElementById('invoice-print-btn').style.display = 'none';
+    document.getElementById('invoice-slack-btn').style.display = 'none';
 
     apiGet({ action: 'invoiceDetail', invoiceNumber: invoiceNumber })
       .then(function (res) {
@@ -435,6 +379,16 @@
         document.getElementById('invoice-loading').style.display = 'none';
         document.getElementById('invoice-doc').style.display = 'block';
         document.getElementById('invoice-print-btn').style.display = 'block';
+        // Hidden rather than disabled when there's no thread: an order from
+        // before the Slack reference was stored has nothing to link to, and
+        // a dead button is worse than no button. Both the account history
+        // and this screen offer the jump, so a rep who came here via
+        // "View invoice" doesn't have to go back for it.
+        var slackBtn = document.getElementById('invoice-slack-btn');
+        if (res.slackThreadUrl) {
+          slackBtn.href = res.slackThreadUrl;
+          slackBtn.style.display = 'flex';
+        }
       })
       .catch(function (err) {
         document.getElementById('invoice-loading').textContent = friendlyApiError(err);
@@ -1016,9 +970,250 @@
     });
   }
 
+  // Pin colour is keyed to the rep who added the account, matched by LAST
+  // NAME -- Customer Accounts writes "J. Williams" while the Reps tab writes
+  // "James Williams", so territoryRep has to resolve both to one person.
+  // That's the same mismatch repLastName() already exists for above.
+  //
+  // Deliberately NOT limited to the two reps who work LA most. An account
+  // added by anyone -- someone covering the area for a week, a new hire not
+  // listed here yet -- still belongs on the map, so an unrecognised rep
+  // falls through to UNKNOWN_TERRITORY_REP instead of being dropped. The
+  // previous ricardo/james lookup matched on first name and so silently
+  // matched nothing at all: "R. Villanueva" contains no "ricardo".
+  var LA_TERRITORY_REPS = {
+    villanueva: { name: 'Ricardo', color: '#efb11d' },
+    williams:   { name: 'James', color: '#e85d86' },
+    krause:     { name: 'D. Krause', color: '#4bb3a5' },
+    sprague:    { name: 'S. Sprague', color: '#8a6fd4' },
+    gilbert:    { name: 'T. Gilbert', color: '#3f7fd4' }
+  };
+  var UNKNOWN_TERRITORY_REP = { name: 'Unassigned', color: '#9aa3b2' };
+
+  // `region` is the rep-confirmed field (see inferRegion), so it -- not a
+  // raw city string -- decides what counts as "in Los Angeles". Long Beach
+  // and Arcadia are separate DELIVERY regions but the same LA County map;
+  // Orange County and San Diego are their own runs and stay off it.
+  var LA_MAP_REGIONS = ['los angeles', 'long beach', 'arcadia'];
+  var LA_CITY_COORDINATES = {
+    'los angeles': [34.0522, -118.2437],
+    'hollywood': [34.0928, -118.3287],
+    'west hollywood': [34.0900, -118.3617],
+    'santa monica': [34.0195, -118.4912],
+    'culver city': [34.0211, -118.3965],
+    'pasadena': [34.1478, -118.1445],
+    'burbank': [34.1808, -118.3090],
+    'glendale': [34.1425, -118.2551],
+    'long beach': [33.7701, -118.1937],
+    'inglewood': [33.9617, -118.3531],
+    'torrance': [33.8358, -118.3406],
+    'el segundo': [33.9192, -118.4165],
+    'downey': [33.9401, -118.1332],
+    'northridge': [34.2283, -118.5368],
+    'redondo beach': [33.8492, -118.3884],
+    'malibu': [34.0259, -118.7798],
+    'arcadia': [34.1397, -118.0353],
+    'whittier': [33.9792, -118.0328],
+    'la mirada': [33.9172, -118.0120]
+  };
+
+  // Addresses are hand-typed and inconsistent: "8 Mission St., San Francisco,
+  // CA, 94105" puts the city in its own comma field, "201 E Broadway Long
+  // Beach, CA 90802" does not. So take everything before the state token and
+  // match the LONGEST known city name that ends it. Longest-first is what
+  // makes "long beach" win over a trailing "beach", and it's why five Long
+  // Beach accounts aren't stranded by a plain split(',').
+  var CITY_ALIASES = { 'rendondo beach': 'redondo beach' };
+
+  function cityFromAddress(address) {
+    var head = String(address || '').split(/,?\s*\b(?:CA|California)\b/i)[0];
+    var words = head.toLowerCase().replace(/[.,]/g, ' ').split(/\s+/).filter(Boolean);
+    for (var take = Math.min(3, words.length); take >= 1; take--) {
+      var candidate = words.slice(words.length - take).join(' ');
+      candidate = CITY_ALIASES[candidate] || candidate;
+      if (LA_CITY_COORDINATES[candidate]) return candidate;
+    }
+    return '';
+  }
+
+  function territoryRep(customer) {
+    var last = repLastName(customer && customer.salesRep);
+    if (!last || last === 'n/a') return UNKNOWN_TERRITORY_REP;
+    return LA_TERRITORY_REPS[last] || UNKNOWN_TERRITORY_REP;
+  }
+
+  // A newly added account gets a stable, city-level point immediately. That
+  // keeps the route useful while the full address is awaiting geocoding.
+  //
+  // The scatter around the city centre is a positional hash, not jitter: the
+  // same account must land on the same spot every render. A plain sum of
+  // char codes collided (BiergartenLA and Birds Bar & Cafe drew identical
+  // offsets, so one pin sat invisibly under the other), so this uses djb2
+  // and takes the two axes from separate halves of the hash.
+  // `attempt` is the collision probe (see spreadApproximatePins): 0 is the
+  // account's natural cell, and each retry re-hashes to a different one.
+  function accountCoordinates(city, accountName, attempt) {
+    var normalizedCity = String(city || '').trim().toLowerCase();
+    var base = LA_CITY_COORDINATES[normalizedCity] || LA_CITY_COORDINATES['los angeles'];
+    var text = String(accountName || normalizedCity) + (attempt ? '#' + attempt : '');
+    var hash = 5381;
+    for (var i = 0; i < text.length; i++) {
+      hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
+    }
+    hash = Math.abs(hash);
+    var STEPS = 13;      // odd, so the grid has a true centre
+    var SPACING = 0.0022; // ~0.24 km -- inside the city, clear of its neighbours
+    var latOffset = ((hash % STEPS) - (STEPS - 1) / 2) * SPACING;
+    var lngOffset = ((Math.floor(hash / STEPS) % STEPS) - (STEPS - 1) / 2) * SPACING;
+    return { lat: +(base[0] + latOffset).toFixed(6), lng: +(base[1] + lngOffset).toFixed(6) };
+  }
+
+  // Membership is by region, not by rep -- every LA County account is on the
+  // map regardless of who owns it, and the rep only decides the colour.
+  //
+  // The lat/lng fallback is load-bearing rather than defensive: not one of
+  // the LA accounts in the sheet has been geocoded yet, so requiring real
+  // coordinates (as this did before) rendered an empty map. A city-level
+  // point is flagged `approximate` so the UI can say so instead of implying
+  // a precision it doesn't have.
+  function territoryEntries() {
+    var entries = state.customers.map(function (customer) {
+      var region = String((customer && customer.region) || '').trim().toLowerCase();
+      if (LA_MAP_REGIONS.indexOf(region) === -1) return null;
+      var lat = Number(customer.lat);
+      var lng = Number(customer.lng);
+      var approximate = false;
+      if (!isFinite(lat) || !isFinite(lng) || (lat === 0 && lng === 0)) {
+        var point = accountCoordinates(cityFromAddress(customer.address), customer.establishmentName);
+        lat = point.lat;
+        lng = point.lng;
+        approximate = true;
+      }
+      return {
+        customer: customer,
+        rep: territoryRep(customer),
+        lat: lat,
+        lng: lng,
+        approximate: approximate,
+        city: approximate ? cityFromAddress(customer.address) : ''
+      };
+    }).filter(Boolean);
+    return spreadApproximatePins(entries);
+  }
+
+  // Two city-level pins landing in the same grid cell hides one account
+  // under the other. The hash alone can't prevent that -- four accounts
+  // share El Segundo, and a finite grid will collide eventually -- so
+  // duplicates re-hash to the next free cell instead.
+  //
+  // Real geocoded coordinates are never moved: they're the truth, and two
+  // businesses genuinely can share an address. Only approximate pins probe.
+  // Sorting by name first keeps the outcome stable no matter what order the
+  // sheet returns rows in.
+  function spreadApproximatePins(entries) {
+    var taken = {};
+    entries.forEach(function (entry) {
+      if (!entry.approximate) taken[entry.lat + ',' + entry.lng] = true;
+    });
+    entries.slice().sort(function (a, b) {
+      return String(a.customer.establishmentName).localeCompare(String(b.customer.establishmentName));
+    }).forEach(function (entry) {
+      if (!entry.approximate) return;
+      var attempt = 0;
+      while (taken[entry.lat + ',' + entry.lng] && attempt < 50) {
+        attempt++;
+        var point = accountCoordinates(entry.city, entry.customer.establishmentName, attempt);
+        entry.lat = point.lat;
+        entry.lng = point.lng;
+      }
+      taken[entry.lat + ',' + entry.lng] = true;
+    });
+    return entries;
+  }
+
+  // Built from the accounts actually on the map, so a rep who isn't in
+  // LA_TERRITORY_REPS still gets a swatch the moment they add a stop.
+  // Currently unused -- the home map's rep-name legend is hidden for now
+  // (see the parked call in renderHomeTerritoryMap). Kept intact, along with
+  // its markup and CSS, because turning it back on is meant to be a
+  // one-line change rather than a rewrite.
+  function renderTerritoryLegend(entries) {
+    var legend = document.getElementById('territory-legend');
+    if (!legend) return;
+    var order = [];
+    var counts = {};
+    entries.forEach(function (entry) {
+      var name = entry.rep.name;
+      if (!counts[name]) { counts[name] = { rep: entry.rep, count: 0 }; order.push(name); }
+      counts[name].count++;
+    });
+    legend.innerHTML = order.map(function (name) { return counts[name]; })
+      .sort(function (a, b) { return b.count - a.count; })
+      .map(function (row) {
+        return '<span><i class="territory-dot" style="background:' + row.rep.color +
+          ';" aria-hidden="true"></i>' + escapeHtml(row.rep.name) + ' <b>' + row.count + '</b></span>';
+      }).join('');
+  }
+
+  function territoryPin(rep) {
+    return L.divIcon({
+      className: '',
+      html: '<div class="lm-pin" style="background:' + rep.color + ';"></div>',
+      iconSize: [26, 26],
+      iconAnchor: [13, 26],
+      popupAnchor: [0, -26]
+    });
+  }
+
+  var homeTerritoryMapInstance = null;
+
+  function renderHomeTerritoryMap() {
+    var mapEl = document.getElementById('home-territory-map');
+    if (!mapEl || !window.L) return;
+    var entries = territoryEntries();
+    var status = document.getElementById('territory-status');
+    var approximate = entries.filter(function (e) { return e.approximate; }).length;
+    status.textContent = entries.length
+      ? entries.length + ' LA ' + (entries.length === 1 ? 'account' : 'accounts') + ' on the map' +
+        (approximate ? ' \u00b7 ' + approximate + ' placed by city, awaiting geocoding' : '') + '.'
+      : 'Accounts in Los Angeles will appear here.';
+    // Rep names are off the home map for now, so the legend stays empty --
+    // .territory-legend:empty collapses the row, which is why nothing here
+    // has to hide the container itself. Restore by uncommenting.
+    // renderTerritoryLegend(entries);
+    document.getElementById('territory-legend').innerHTML = '';
+
+    if (!homeTerritoryMapInstance) {
+      homeTerritoryMapInstance = L.map('home-territory-map', { zoomControl: false, attributionControl: false, scrollWheelZoom: false });
+      L.control.zoom({ position: 'bottomright' }).addTo(homeTerritoryMapInstance);
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        maxZoom: 19,
+        subdomains: 'abcd'
+      }).addTo(homeTerritoryMapInstance);
+    } else {
+      homeTerritoryMapInstance.eachLayer(function (layer) {
+        if (layer instanceof L.Marker) homeTerritoryMapInstance.removeLayer(layer);
+      });
+    }
+
+    var markers = entries.map(function (entry) {
+      var marker = L.marker([entry.lat, entry.lng], { icon: territoryPin(entry.rep) }).addTo(homeTerritoryMapInstance);
+      marker.bindPopup(
+        '<strong>' + escapeHtml(entry.customer.establishmentName) + '</strong><br/>' +
+        escapeHtml(entry.customer.address || '') + '<br/>' + escapeHtml(entry.rep.name) +
+        (entry.approximate ? '<br/><em>Approximate \u2014 city-level pin</em>' : '')
+      );
+      return marker;
+    });
+
+    if (markers.length) homeTerritoryMapInstance.fitBounds(L.featureGroup(markers).getBounds(), { padding: [30, 30], maxZoom: 10 });
+    else homeTerritoryMapInstance.setView([34.0522, -118.2437], 9);
+    homeTerritoryMapInstance.invalidateSize();
+  }
+
   function updateMyMapButton() {
     var btn = document.getElementById('btn-my-map');
-    btn.style.display = myMappedAccounts().length ? 'flex' : 'none';
+    btn.style.display = 'inline-flex';
   }
 
   document.getElementById('btn-my-map').addEventListener('click', openAccountsMap);
@@ -1028,20 +1223,23 @@
 
   function openAccountsMap() {
     showScreen('screen-map');
-    var accounts = myMappedAccounts();
+    var entries = territoryEntries();
+    var accounts = entries.map(function (entry) { return entry.customer; });
 
-    document.getElementById('map-account-list').innerHTML = accounts.map(function (c, i) {
+    document.getElementById('map-account-list').innerHTML = entries.map(function (entry, i) {
+      var c = entry.customer;
       return '<div class="order-row clickable" data-map-idx="' + i + '">' +
         '<div><div class="oname">' + escapeHtml(c.establishmentName) + '</div>' +
-        '<div class="osub">' + escapeHtml(c.address || '') + '</div></div>' +
+        '<div class="osub">' + escapeHtml(c.address || '') + ' \u00b7 ' + escapeHtml(entry.rep.name) +
+        (entry.approximate ? ' \u00b7 approx.' : '') + '</div></div>' +
         '<span>→</span>' +
         '</div>';
-    }).join('') || '<div class="empty-note">No mapped accounts yet.</div>';
+    }).join('') || '<div class="empty-note">Los Angeles accounts will appear here.</div>';
 
     setTimeout(function () {
       if (!accountsMapInstance) {
         accountsMapInstance = L.map('accounts-map');
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
           maxZoom: 19,
           subdomains: 'abcd',
           attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; OpenStreetMap contributors'
@@ -1052,24 +1250,15 @@
         });
       }
 
-      var pinIcon = function (color) {
-        return L.divIcon({
-          className: '',
-          html: '<div class="lm-pin" style="background:' + color + ';"></div>',
-          iconSize: [26, 26],
-          iconAnchor: [13, 26],
-          popupAnchor: [0, -26]
-        });
-      };
-      var orangeIcon = pinIcon('#ff7a30');
-      var pinkIcon = pinIcon('#ff2d78');
-
       var markers = [];
-      accounts.forEach(function (c, i) {
-        var marker = L.marker([c.lat, c.lng], { icon: i % 2 === 0 ? orangeIcon : pinkIcon }).addTo(accountsMapInstance);
+      entries.forEach(function (entry, i) {
+        var c = entry.customer;
+        var marker = L.marker([entry.lat, entry.lng], { icon: territoryPin(entry.rep) }).addTo(accountsMapInstance);
         marker.bindPopup(
           '<strong>' + escapeHtml(c.establishmentName) + '</strong><br/>' + escapeHtml(c.address || '') +
-          '<br/><a href="#" class="popup-view-orders" data-map-idx="' + i + '">View Orders →</a>'
+          '<br/>' + escapeHtml(entry.rep.name) +
+          (entry.approximate ? ' \u00b7 <em>approximate</em>' : '') +
+          '<br/><a href="#" class="popup-view-orders" data-map-idx="' + i + '">View Orders \u2192</a>'
         );
         markers.push(marker);
       });
@@ -1077,7 +1266,7 @@
       if (markers.length) {
         accountsMapInstance.fitBounds(L.featureGroup(markers).getBounds(), { padding: [24, 24] });
       } else {
-        accountsMapInstance.setView([37.77, -122.42], 11);
+        accountsMapInstance.setView([34.0522, -118.2437], 9);
       }
 
       accountsMapInstance.off('popupopen').on('popupopen', function (e) {
@@ -1085,14 +1274,14 @@
         if (!link) return;
         link.addEventListener('click', function (evt) {
           evt.preventDefault();
-          openAccountDetail(accounts[parseInt(link.getAttribute('data-map-idx'), 10)]);
+          openAccountDetail(accounts[parseInt(link.getAttribute('data-map-idx'), 10)], 'screen-map');
         });
       });
 
       document.getElementById('map-account-list').querySelectorAll('[data-map-idx]').forEach(function (row) {
         row.addEventListener('click', function () {
           var idx = parseInt(row.getAttribute('data-map-idx'), 10);
-          openAccountDetail(accounts[idx]);
+          openAccountDetail(accounts[idx], 'screen-map');
         });
       });
 
@@ -1164,11 +1353,130 @@
     openInvoice(row.getAttribute('data-invoice'));
   });
 
-  // ---------- Account detail ----------
-  document.getElementById('back-account-to-map').addEventListener('click', function () { showScreen('screen-map'); });
+  // ---------- My accounts ----------
+  // "Manage My Accounts" on the home screen. screen-map already existed and
+  // already handed off to screen-account, but it only ever showed accounts
+  // that geocode into LA County -- a rep in the Bay Area or Orange County
+  // had no way to reach their own account list at all. This is that list:
+  // every account linked to the rep, searchable, each one a door into its
+  // full order history.
 
-  function openAccountDetail(customer) {
+  document.getElementById('btn-my-accounts').addEventListener('click', openMyAccounts);
+  document.getElementById('back-myaccounts-to-home').addEventListener('click', function () { showScreen('screen-home'); });
+
+  // Rendered from state.customers, which is served out of localStorage on a
+  // cold start and refreshed in the background by refreshCustomers(). So the
+  // list paints instantly (offline included) and re-renders when the fetch
+  // lands -- see the renderMyAccounts() call inside refreshCustomers().
+  function openMyAccounts() {
+    showScreen('screen-my-accounts');
+    document.getElementById('my-accounts-search').value = '';
+    renderMyAccounts('');
+  }
+
+  // Alphabetical, and derived the same way in both the render and the click
+  // handler -- the row's data-account-idx indexes into THIS array, so the two
+  // have to agree on the order or a tap opens the wrong account.
+  function sortedMyAccounts() {
+    return myAccounts().slice().sort(function (a, b) {
+      return String(a.establishmentName || '').localeCompare(String(b.establishmentName || ''));
+    });
+  }
+
+  function myAccountsMatches(customer, q) {
+    if (!q) return true;
+    var haystack = [
+      customer.establishmentName,
+      customer.region,
+      customer.address,
+      customer.orderingContact,
+      customer.legalEntity
+    ].join(' ').toLowerCase();
+    return haystack.indexOf(q) !== -1;
+  }
+
+  // Region plus city, except when they name the same place -- "Los Angeles ·
+  // los angeles" is what a naive join produces for most of this book, since
+  // the delivery REGION and the establishment's city are frequently the same
+  // word. cityFromAddress works in lowercase (it matches against a lowercase
+  // city table), so anything it returns has to be re-cased before display.
+  function titleCaseCity(city) {
+    return String(city || '').replace(/\b[a-z]/g, function (ch) { return ch.toUpperCase(); });
+  }
+
+  function accountSubtitle(customer) {
+    var region = String(customer.region || '').trim();
+    var city = titleCaseCity(cityFromAddress(customer.address));
+    var meta = [region];
+    if (city && city.toLowerCase() !== region.toLowerCase()) meta.push(city);
+    meta = meta.filter(Boolean);
+    return meta.length ? meta.join(' · ') : (customer.address || 'No address on file');
+  }
+
+  function renderMyAccounts(query) {
+    var host = document.getElementById('my-accounts-list');
+    var mine = sortedMyAccounts();
+
+    // The two counters describe the rep's whole book, not the current
+    // search -- a filtered "1 linked account" would read as data loss.
+    document.getElementById('my-accounts-count').textContent = mine.length;
+    var regions = {};
+    mine.forEach(function (c) {
+      var r = String(c.region || '').trim();
+      if (r) regions[r] = true;
+    });
+    document.getElementById('my-accounts-regions').textContent = Object.keys(regions).length;
+
+    if (!mine.length) {
+      host.innerHTML = '<div class="empty-note">No accounts are linked to you yet. Anything you add with <strong>Add New Account</strong> shows up here.</div>';
+      return;
+    }
+
+    // Each surviving row keeps the index it had in the UNFILTERED list, so
+    // data-account-idx still resolves once the rep types in the search box
+    // (the click handler re-derives the same unfiltered array).
+    var q = String(query || '').trim().toLowerCase();
+    var list = mine
+      .map(function (c, i) { return { customer: c, index: i }; })
+      .filter(function (entry) { return myAccountsMatches(entry.customer, q); });
+
+    if (!list.length) {
+      host.innerHTML = '<div class="empty-note">No accounts match “' + escapeHtml(query) + '”.</div>';
+      return;
+    }
+
+    host.innerHTML = list.map(function (entry) {
+      var c = entry.customer;
+      return '<div class="order-row clickable" data-account-idx="' + entry.index + '">' +
+        '<div><div class="oname">' + escapeHtml(c.establishmentName || 'Unnamed account') + '</div>' +
+        '<div class="osub">' + escapeHtml(accountSubtitle(c)) + '</div></div>' +
+        '<span>→</span>' +
+        '</div>';
+    }).join('');
+  }
+
+  document.getElementById('my-accounts-search').addEventListener('input', function (e) {
+    renderMyAccounts(e.target.value);
+  });
+
+  document.getElementById('my-accounts-list').addEventListener('click', function (e) {
+    var row = e.target.closest('.order-row[data-account-idx]');
+    if (!row) return;
+    var account = sortedMyAccounts()[parseInt(row.getAttribute('data-account-idx'), 10)];
+    if (account) openAccountDetail(account, 'screen-my-accounts');
+  });
+
+  // ---------- Account detail ----------
+  // Reached from two places now (the LA map and My Accounts), so the back
+  // link goes wherever the rep actually came from instead of the
+  // hardwired screen-map it used to always return to.
+  document.getElementById('back-account').addEventListener('click', function () {
+    showScreen(state.accountReturn || 'screen-map');
+  });
+
+  function openAccountDetail(customer, returnScreen) {
     showScreen('screen-account');
+    state.accountReturn = returnScreen || 'screen-map';
     state.currentAccount = customer;
     state.currentAccountOrders = [];
     document.getElementById('account-edit-form').style.display = 'none';
@@ -1194,17 +1502,7 @@
           return;
         }
         host.innerHTML = res.orders.map(function (o) {
-          var statusClass = String(o.status || 'pending').toLowerCase().replace(/\s+/g, '-');
-          var lines = o.lines || [];
-          var sub = lines.length === 1
-            ? escapeHtml(lines[0].product || '') + ' · ' + escapeHtml(lines[0].packaging || '') + ' · Qty ' + lines[0].qty
-            : lines.length + ' items · Qty ' + o.qty;
-          var clickable = !!o.invoiceNumber;
-          return '<div class="order-row' + (clickable ? ' clickable' : '') + '"' + (clickable ? ' data-invoice="' + escapeHtml(o.invoiceNumber) + '"' : '') + '>' +
-            '<div><div class="oname">' + fmtDate(o.poDate) + '</div>' +
-            '<div class="osub">' + sub + '</div></div>' +
-            '<span class="pill ' + statusClass + '">' + escapeHtml(o.status || 'Pending') + '</span>' +
-            '</div>';
+          return accountOrderRowHtml(o, customer, res.slackTeamDomain || '');
         }).join('');
       })
       .catch(function (err) {
@@ -1212,10 +1510,57 @@
       });
   }
 
+  // One past order, as a card with its own explicit actions rather than a
+  // whole-row tap. The row now carries two destinations (the invoice and the
+  // Slack thread), and a single tap target can't offer both -- guessing
+  // which one a rep meant is exactly the ambiguity these buttons remove.
+  function accountOrderRowHtml(o, customer, teamDomain) {
+    var statusClass = String(o.status || 'pending').toLowerCase().replace(/\s+/g, '-');
+    var lines = o.lines || [];
+    var sub = lines.length === 1
+      ? escapeHtml(lines[0].product || '') + ' · ' + escapeHtml(lines[0].packaging || '') + ' · Qty ' + lines[0].qty
+      : lines.length + ' items · Qty ' + o.qty;
+    if (o.lineTotal) sub += ' · ' + fmtMoney(o.lineTotal);
+
+    var actions = [];
+    if (o.invoiceNumber) {
+      actions.push('<button type="button" class="order-action" data-invoice="' + escapeHtml(o.invoiceNumber) + '">' +
+        'View invoice <span class="order-action-note">' + escapeHtml(o.invoiceNumber) + '</span></button>');
+    }
+
+    // Direct thread permalink when the order was placed after the Slack
+    // reference started being stored on the row (see SLACK_CHANNEL_HEADER in
+    // Code.gs). Everything older gets a Slack SEARCH link instead, labelled
+    // differently on purpose -- it's a genuinely useful way to find the
+    // conversation, but it is not the same promise as "this exact thread",
+    // and pretending otherwise would be the more annoying failure.
+    if (o.slackThreadUrl) {
+      actions.push('<a class="order-action order-action--slack" target="_blank" rel="noopener" href="' + escapeHtml(o.slackThreadUrl) + '">' +
+        '<span class="slack-mark" aria-hidden="true"></span>Slack thread</a>');
+    } else if (teamDomain) {
+      var query = [customer.establishmentName, o.invoiceNumber].filter(Boolean).join(' ');
+      actions.push('<a class="order-action order-action--slack-search" target="_blank" rel="noopener" ' +
+        'title="This order predates thread tracking — this searches Slack for it instead." ' +
+        'href="https://' + escapeHtml(teamDomain) + '.slack.com/search/' + encodeURIComponent(query) + '">' +
+        '<span class="slack-mark" aria-hidden="true"></span>Find in Slack</a>');
+    }
+
+    return '<div class="order-row order-row--stacked">' +
+      '<div class="order-row-head">' +
+        '<div><div class="oname">' + fmtDate(o.poDate) + '</div>' +
+        '<div class="osub">' + sub + '</div></div>' +
+        '<span class="pill ' + statusClass + '">' + escapeHtml(o.status || 'Pending') + '</span>' +
+      '</div>' +
+      (actions.length ? '<div class="order-actions">' + actions.join('') + '</div>' : '') +
+      '</div>';
+  }
+
   document.getElementById('account-order-list').addEventListener('click', function (e) {
-    var row = e.target.closest('.order-row[data-invoice]');
-    if (!row) return;
-    openInvoice(row.getAttribute('data-invoice'));
+    // Only the invoice button is handled here -- the Slack action is a real
+    // <a href>, so letting the browser open it beats intercepting it.
+    var btn = e.target.closest('.order-action[data-invoice]');
+    if (!btn) return;
+    openInvoice(btn.getAttribute('data-invoice'));
   });
 
   // ---------- Account edit ----------
@@ -1226,6 +1571,7 @@
     document.getElementById('ea-phone').value = c.phone || '';
     document.getElementById('ea-email').value = c.email || '';
     document.getElementById('ea-address').value = c.address || '';
+    document.getElementById('ea-billing-email').value = c.billingEmail || '';
     document.getElementById('ea-billing-address').value = c.deliveryAddress || '';
     document.getElementById('ea-delivery-instructions').value = c.deliveryInstructions || '';
     document.getElementById('ea-region').value = c.region || '';
@@ -1261,6 +1607,17 @@
       terms: document.getElementById('ea-terms').value.trim(),
       tapHandleRequested: getYnToggle('ea-tap-handle')
     };
+
+    // Send billingEmail only when we can tell "the rep cleared it" apart from
+    // "this client never had it". state.customers is cached in localStorage,
+    // so a rep still holding a list fetched before billingEmail was returned
+    // would render a blank field and, on any unrelated edit, write that blank
+    // over a real Billing Contact Email. Omitting the key entirely makes
+    // setCell in Code.gs skip the cell (its `value === undefined` guard).
+    var billingEmailInput = document.getElementById('ea-billing-email').value.trim();
+    if (billingEmailInput || Object.prototype.hasOwnProperty.call(c, 'billingEmail')) {
+      updates.billingEmail = billingEmailInput;
+    }
 
     btn.disabled = true;
     btn.textContent = 'Saving...';
@@ -1374,12 +1731,24 @@
       (state.customer.region ? '<div class="oline"><span>Region</span><span>' + escapeHtml(state.customer.region) + '</span></div>' : '');
   }
 
-  document.getElementById('btn-pick-customer').addEventListener('click', function () {
+  // screen-customers is shared by the beer order screen and the marketing
+  // materials request, so it has to remember which one sent the rep here.
+  // Without that, picking an account from the marketing form would drop them
+  // onto the beer order screen with a customer set that they never chose
+  // there -- and their marketing request half-filled behind it.
+  function openCustomerPicker(returnScreen) {
+    state.customerPickerReturn = returnScreen;
     renderCustomerList('');
     document.getElementById('customer-search').value = '';
     showScreen('screen-customers');
+  }
+
+  document.getElementById('btn-pick-customer').addEventListener('click', function () {
+    openCustomerPicker('screen-order');
   });
-  document.getElementById('back-customers-to-order').addEventListener('click', function () { showScreen('screen-order'); });
+  document.getElementById('back-customers-to-order').addEventListener('click', function () {
+    showScreen(state.customerPickerReturn || 'screen-order');
+  });
 
   document.getElementById('customer-search').addEventListener('input', function (e) {
     renderCustomerList(e.target.value);
@@ -1425,8 +1794,10 @@
     var row = e.target.closest('.order-row');
     if (!row) return;
     var idx = parseInt(row.getAttribute('data-idx'), 10);
-    setCustomer(state.customers[idx]);
-    showScreen('screen-order');
+    var returnScreen = state.customerPickerReturn || 'screen-order';
+    if (returnScreen === 'screen-marketing') setMarketingAccount(state.customers[idx]);
+    else setCustomer(state.customers[idx]);
+    showScreen(returnScreen);
   });
 
   document.getElementById('btn-add-customer').addEventListener('click', function () {
@@ -1533,6 +1904,13 @@
       orderingContact: [val('nc-contact-first'), val('nc-contact-last')].filter(Boolean).join(' '),
       phone: val('nc-phone'),
       email: val('nc-email'),
+      // Separate from the ordering contact's email on purpose: invoices go
+      // to accounts payable, orders go to whoever runs the bar. Optional,
+      // because the billing-email resolution is billingEmail -> ordering
+      // contact email -> none, and a missing one blocks the INVOICE, never
+      // the order (prisma Account.billingContactEmail, lib/ops/checklist).
+      // Requiring it here would reject accounts the pipeline handles fine.
+      billingEmail: val('nc-billing-email'),
       // Confusingly named on the Sheet side (see handleAddCustomer in
       // Code.gs): this actually lands in "Billing Address (If not the same
       // as shipping)", left blank when it matches the business address.
@@ -1550,6 +1928,9 @@
       // No more Fintech/ACH choice -- every account goes on Stripe now.
       paymentMethod: 'ACH / Stripe ACH'
     };
+    var mapPoint = accountCoordinates(val('nc-address-city'), newCustomer.establishmentName);
+    newCustomer.lat = mapPoint.lat;
+    newCustomer.lng = mapPoint.lng;
 
     var required = ['establishmentName', 'phone', 'email'];
     if (!val('nc-address-street') || !val('nc-address-city') || !val('nc-address-state') || !val('nc-address-zip')) {
@@ -1579,6 +1960,9 @@
 
     var finish = function () {
       state.customers.unshift(newCustomer);
+      cacheCustomers(state.customers);
+      updateMyMapButton();
+      renderAccountMetric();
       btn.disabled = false;
       btn.textContent = 'Save Customer';
       toast('Account added');
@@ -1744,6 +2128,7 @@
       label.textContent = 'Submit Order';
       toast(msg, !ok);
       if (ok) {
+        celebrate('Order sent', 'Nice work — the team has it.');
         loadStats();
         if (invoiceNumber) openInvoice(invoiceNumber);
         else showScreen('screen-home');
@@ -1763,6 +2148,540 @@
       .catch(function (err) { finish(false, friendlyApiError(err)); });
   });
 
+  // ---------- Marketing materials request ----------
+  // The catalog lives in assets/js/marketing-materials.js (transcribed from
+  // the Marketing Materials & Merch Master Tracker). This section is the
+  // form over it: 78 items in 12 categories, an optional ship-to account,
+  // and the free-text request fields carried over from Firestone Walker's
+  // form for anything the catalog doesn't cover.
+  var MK_MAX_FILES = 5;
+  var MK_MAX_FILE_BYTES = 5 * 1024 * 1024;
+  var MK_MAX_TOTAL_BYTES = 15 * 1024 * 1024;
+  var MK_NO_SIZE = ''; // the size key used for items that aren't ordered by size
+
+  // itemId -> { item, category }. Built once; the catalog is a static bundle,
+  // and submit has to resolve a bare id back to its category and brand.
+  var mkIndex = (function () {
+    var map = {};
+    (window.LM_MARKETING_CATEGORIES || []).forEach(function (cat) {
+      cat.items.forEach(function (item) { map[item.id] = { item: item, category: cat }; });
+    });
+    return map;
+  })();
+
+  function mkState() {
+    if (!state.marketing) resetMarketingForm();
+    return state.marketing;
+  }
+
+  function resetMarketingForm() {
+    state.marketing = {
+      account: null,
+      selection: {}, // itemId -> { sizeKey: qty }
+      openCats: {},  // categoryId -> true when expanded
+      brand: 'All',
+      query: '',
+      files: []      // { file, name, size } -- read to base64 only at submit
+    };
+    document.getElementById('mk-email').value = '';
+    document.getElementById('mk-purpose').value = '';
+    document.getElementById('mk-needed-by').value = '';
+    document.getElementById('mk-event-name').value = '';
+    document.getElementById('mk-ship-address').value = '';
+    document.getElementById('mk-custom').value = '';
+    document.getElementById('mk-size').value = '';
+    document.getElementById('mk-other').value = '';
+    document.getElementById('mk-search').value = '';
+    document.getElementById('mk-files').value = '';
+    document.getElementById('mk-error').textContent = '';
+  }
+
+  function openMarketingForm() {
+    resetMarketingForm();
+    document.getElementById('mk-requestor').value = state.rep || '';
+
+    var sel = document.getElementById('mk-purpose');
+    if (sel.options.length <= 1) {
+      (window.LM_MARKETING_PURPOSES || []).forEach(function (p) {
+        var opt = document.createElement('option');
+        opt.value = p;
+        opt.textContent = p;
+        sel.appendChild(opt);
+      });
+    }
+
+    // Nothing can be needed in the past, and today is a legitimate answer
+    // (a rep standing in an account asking for stickers on the next run).
+    document.getElementById('mk-needed-by').min = new Date().toISOString().slice(0, 10);
+
+    var total = Object.keys(mkIndex).length;
+    var stocked = (window.LM_MARKETING_CATEGORIES || []).filter(function (c) { return c.items.length; });
+    document.getElementById('mk-catalog-hint').textContent =
+      'Tap a category, then set quantities. ' + total + ' items across ' +
+      stocked.length + ' categories.';
+
+    renderMarketingBrandFilter();
+    renderMarketingCatalog();
+    renderMarketingAccount();
+    renderMarketingFileList();
+    renderMarketingSummary();
+    showScreen('screen-marketing');
+  }
+
+  document.getElementById('btn-marketing-order').addEventListener('click', openMarketingForm);
+  document.getElementById('back-marketing-to-home').addEventListener('click', function () { showScreen('screen-home'); });
+  document.getElementById('mk-cancel').addEventListener('click', function () {
+    resetMarketingForm();
+    showScreen('screen-home');
+  });
+
+  // ---- Ship-to account (optional throughout) ----
+  function setMarketingAccount(c) {
+    var mk = mkState();
+    mk.account = c || null;
+    // Prefilled, not locked: the account is the usual answer for both fields,
+    // but a rep sending materials to an offsite event for that account needs
+    // to be able to type over them.
+    if (c) {
+      var nameField = document.getElementById('mk-event-name');
+      if (!nameField.value.trim()) nameField.value = c.establishmentName || '';
+      var addrField = document.getElementById('mk-ship-address');
+      if (!addrField.value.trim() && c.address) addrField.value = c.address;
+    }
+    renderMarketingAccount();
+  }
+
+  function renderMarketingAccount() {
+    var mk = mkState();
+    var label = document.getElementById('mk-account-label');
+    var detail = document.getElementById('mk-account-detail');
+    var clear = document.getElementById('mk-clear-account');
+    if (!mk.account) {
+      label.textContent = 'Select account →';
+      detail.style.display = 'none';
+      clear.style.display = 'none';
+      return;
+    }
+    label.textContent = mk.account.establishmentName + ' — change';
+    detail.style.display = 'block';
+    detail.innerHTML =
+      '<div class="oline"><span>Address</span><span>' + escapeHtml(mk.account.address || '—') + '</span></div>' +
+      (mk.account.region ? '<div class="oline"><span>Region</span><span>' + escapeHtml(mk.account.region) + '</span></div>' : '');
+    clear.style.display = 'block';
+  }
+
+  document.getElementById('mk-btn-pick-account').addEventListener('click', function () {
+    openCustomerPicker('screen-marketing');
+  });
+
+  document.getElementById('mk-clear-account').addEventListener('click', function (e) {
+    e.preventDefault();
+    mkState().account = null;
+    renderMarketingAccount();
+  });
+
+  // ---- Catalog ----
+  function renderMarketingBrandFilter() {
+    var brands = ['All'].concat(window.LM_MARKETING_BRANDS || []);
+    var mk = mkState();
+    document.getElementById('mk-brand-filter').innerHTML = brands.map(function (b) {
+      return '<button type="button" class="chip' + (mk.brand === b ? ' selected' : '') +
+        '" data-brand="' + escapeHtml(b) + '">' + escapeHtml(b) + '</button>';
+    }).join('');
+  }
+
+  function mkItemMatches(item, cat, mk) {
+    // Multi-Brand items stay visible under a specific brand filter -- they
+    // carry all three marks, so a rep filtered to Cantinesca still wants the
+    // shared bar mats and stadium cups in front of them.
+    if (mk.brand !== 'All' && item.brand !== mk.brand && item.brand !== 'Multi-Brand') return false;
+    if (!mk.query) return true;
+    var haystack = (item.name + ' ' + item.brand + ' ' + item.id + ' ' +
+      cat.section + ' ' + cat.name + ' ' + (item.note || '')).toLowerCase();
+    return haystack.indexOf(mk.query) !== -1;
+  }
+
+  // The full classification path, for the summary and the order row. Sections
+  // whose only node is themselves (Packaging, Trade Support) would otherwise
+  // read "Trade Support > Trade Support".
+  function mkCategoryPath(cat) {
+    return cat.section === cat.name ? cat.name : cat.section + ' › ' + cat.name;
+  }
+
+  function mkItemQty(itemId) {
+    var sizes = mkState().selection[itemId];
+    if (!sizes) return 0;
+    return Object.keys(sizes).reduce(function (sum, k) { return sum + sizes[k]; }, 0);
+  }
+
+  function mkCategoryQty(cat) {
+    return cat.items.reduce(function (sum, item) { return sum + mkItemQty(item.id); }, 0);
+  }
+
+  function mkStepperHtml(itemId, sizeKey, qty) {
+    return '<div class="qty-stepper" data-item="' + itemId + '" data-size="' + escapeHtml(sizeKey) + '">' +
+      '<button type="button" data-step="-1">−</button>' +
+      '<span class="qty-val">' + qty + '</span>' +
+      '<button type="button" data-step="1">+</button>' +
+      '</div>';
+  }
+
+  function mkItemHtml(item, cat) {
+    var subParts = [item.brand];
+    if (item.note) subParts.push(item.note);
+    if (item.unit) subParts.push('per ' + item.unit);
+    var text =
+      '<div class="mk-item-text">' +
+        '<div class="mk-item-name">' + escapeHtml(item.name) + '</div>' +
+        '<div class="mk-item-sub">' + escapeHtml(subParts.join(' · ')) + '</div>' +
+        '<div class="mk-item-id">' + escapeHtml(item.id) + '</div>' +
+      '</div>';
+    var qty = mkItemQty(item.id);
+
+    if (!item.sizes) {
+      return '<div class="mk-item' + (qty ? ' has-qty' : '') + '" data-item="' + item.id + '">' +
+        text + mkStepperHtml(item.id, MK_NO_SIZE, qty) + '</div>';
+    }
+
+    // Sized items get a header row plus one stepper per size -- a single
+    // quantity on a garment isn't actionable for whoever places the order.
+    var sizeRows = item.sizes.map(function (sz) {
+      var szQty = (mkState().selection[item.id] || {})[sz] || 0;
+      return '<div class="mk-size-row">' +
+        '<span class="mk-size-label">' + escapeHtml(sz) + '</span>' +
+        mkStepperHtml(item.id, sz, szQty) +
+        '</div>';
+    }).join('');
+
+    return '<div class="mk-sized">' +
+      '<div class="mk-item' + (qty ? ' has-qty' : '') + '" data-item="' + item.id + '">' +
+        text +
+        '<span class="mk-item-sub">' + (qty ? qty + ' total' : 'by size') + '</span>' +
+      '</div>' +
+      '<div class="mk-size-grid">' + sizeRows + '</div>' +
+      '</div>';
+  }
+
+  function renderMarketingCatalog() {
+    var mk = mkState();
+    var host = document.getElementById('mk-catalog');
+    // A search or a brand filter force-opens every category that still has a
+    // match. Leaving them collapsed would show a rep who typed "sticker" a
+    // list of category headers and no stickers.
+    var forceOpen = !!mk.query || mk.brand !== 'All';
+    var anyShown = false;
+    var lastSection = null;
+
+    // Emitted once per top-level bucket, the first time one of its groups
+    // survives the filter -- so "Point-of-Sales" can't head an empty run.
+    function sectionHeadHtml(cat) {
+      if (cat.section === lastSection) return '';
+      lastSection = cat.section;
+      return '<div class="mk-section">' + escapeHtml(cat.section) + '</div>';
+    }
+
+    var html = (window.LM_MARKETING_CATEGORIES || []).map(function (cat) {
+      // Leaf-less branches used to render here as "Coming soon". They are no
+      // longer in the catalog at all, so a category with no items is now just
+      // a category whose every item was filtered out -- fall through and let
+      // the `!items.length` check below drop it.
+      var items = cat.items.filter(function (item) { return mkItemMatches(item, cat, mk); });
+      if (!items.length) return '';
+      anyShown = true;
+      var head = sectionHeadHtml(cat);
+      var qty = mkCategoryQty(cat);
+      // A category holding a quantity stays open, so a rep scrolling an
+      // 18-group tree can always see what they've already put in it without
+      // re-tapping. (A search that excludes the category still hides it --
+      // the filter runs above. Nothing is lost by that: the summary panel
+      // below lists every picked line, and submit reads from state, not
+      // from what happens to be on screen.)
+      var open = forceOpen || !!mk.openCats[cat.id] || qty > 0;
+      return head +
+        '<div class="mk-cat' + (qty ? ' has-qty' : '') + '" data-cat="' + cat.id + '">' +
+        '<button type="button" class="mk-cat-head" data-toggle-cat="' + cat.id + '">' +
+          '<span>' + escapeHtml(cat.name) +
+            '<span class="mk-cat-blurb">' + escapeHtml(cat.blurb) + '</span>' +
+          '</span>' +
+          '<span class="mk-cat-meta">' +
+            (qty ? '<span class="mk-cat-badge">' + qty + '</span>' : '') +
+            '<span class="mk-cat-count">' + items.length + '</span>' +
+            '<span class="mk-cat-caret">' + (open ? '▾' : '▸') + '</span>' +
+          '</span>' +
+        '</button>' +
+        (open ? '<div class="mk-cat-body">' + items.map(function (item) { return mkItemHtml(item, cat); }).join('') + '</div>' : '') +
+        '</div>';
+    }).join('');
+
+    host.innerHTML = anyShown ? html : '<div class="empty-note">No materials match that search. Try fewer words, or describe what you need under Custom Request below.</div>';
+  }
+
+  document.getElementById('mk-search').addEventListener('input', function (e) {
+    mkState().query = e.target.value.trim().toLowerCase();
+    renderMarketingCatalog();
+  });
+
+  document.getElementById('mk-brand-filter').addEventListener('click', function (e) {
+    var chip = e.target.closest('[data-brand]');
+    if (!chip) return;
+    mkState().brand = chip.getAttribute('data-brand');
+    renderMarketingBrandFilter();
+    renderMarketingCatalog();
+  });
+
+  document.getElementById('mk-catalog').addEventListener('click', function (e) {
+    var catBtn = e.target.closest('[data-toggle-cat]');
+    if (catBtn) {
+      var catId = catBtn.getAttribute('data-toggle-cat');
+      var mk = mkState();
+      mk.openCats[catId] = !mk.openCats[catId];
+      renderMarketingCatalog();
+      return;
+    }
+
+    var stepBtn = e.target.closest('button[data-step]');
+    if (!stepBtn) return;
+    var stepper = stepBtn.closest('.qty-stepper');
+    var itemId = stepper.getAttribute('data-item');
+    var sizeKey = stepper.getAttribute('data-size');
+    var mkS = mkState();
+    if (!mkS.selection[itemId]) mkS.selection[itemId] = {};
+    var current = mkS.selection[itemId][sizeKey] || 0;
+    var next = Math.max(0, current + parseInt(stepBtn.getAttribute('data-step'), 10));
+    if (next === 0) delete mkS.selection[itemId][sizeKey];
+    else mkS.selection[itemId][sizeKey] = next;
+    if (!Object.keys(mkS.selection[itemId]).length) delete mkS.selection[itemId];
+
+    // Patched in place rather than re-rendered: a full re-render on every tap
+    // would collapse the rep's scroll position back to the top of a 78-item
+    // list mid-way through setting quantities.
+    stepper.querySelector('.qty-val').textContent = next;
+    var itemTotal = mkItemQty(itemId);
+    var itemRow = document.querySelector('.mk-item[data-item="' + itemId + '"]');
+    if (itemRow) {
+      itemRow.classList.toggle('has-qty', itemTotal > 0);
+      var sizedTotal = itemRow.querySelector('.mk-item-sub:last-child');
+      if (sizedTotal && itemRow.parentElement.classList.contains('mk-sized')) {
+        sizedTotal.textContent = itemTotal ? itemTotal + ' total' : 'by size';
+      }
+    }
+    var cat = mkIndex[itemId] && mkIndex[itemId].category;
+    if (cat) {
+      var catEl = document.querySelector('.mk-cat[data-cat="' + cat.id + '"]');
+      var catQty = mkCategoryQty(cat);
+      if (catEl) {
+        catEl.classList.toggle('has-qty', catQty > 0);
+        var meta = catEl.querySelector('.mk-cat-meta');
+        var badge = meta.querySelector('.mk-cat-badge');
+        if (catQty > 0) {
+          if (badge) badge.textContent = catQty;
+          else meta.insertAdjacentHTML('afterbegin', '<span class="mk-cat-badge">' + catQty + '</span>');
+        } else if (badge) {
+          badge.remove();
+        }
+      }
+    }
+    renderMarketingSummary();
+  });
+
+  function collectMarketingLines() {
+    var mk = mkState();
+    var lines = [];
+    (window.LM_MARKETING_CATEGORIES || []).forEach(function (cat) {
+      cat.items.forEach(function (item) {
+        var sizes = mk.selection[item.id];
+        if (!sizes) return;
+        var keys = item.sizes ? item.sizes : [MK_NO_SIZE];
+        keys.forEach(function (sizeKey) {
+          var qty = sizes[sizeKey];
+          if (!qty) return;
+          lines.push({
+            itemId: item.id,
+            category: mkCategoryPath(cat),
+            brand: item.brand,
+            item: item.name,
+            size: sizeKey,
+            qty: qty,
+            unit: item.unit || 'ea'
+          });
+        });
+      });
+    });
+    return lines;
+  }
+
+  function renderMarketingSummary() {
+    var lines = collectMarketingLines();
+    var box = document.getElementById('mk-summary');
+    if (!lines.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    var units = lines.reduce(function (sum, l) { return sum + l.qty; }, 0);
+    box.innerHTML =
+      lines.map(function (l) {
+        return '<div class="oline"><span>' + escapeHtml(l.item) +
+          (l.size ? ' — ' + escapeHtml(l.size) : '') + ' <small style="color:var(--silver-dim);">' + escapeHtml(l.brand) + '</small></span>' +
+          '<span>' + l.qty + ' ' + escapeHtml(l.unit) + '</span></div>';
+      }).join('') +
+      '<div class="oline"><strong>' + lines.length + ' line' + (lines.length === 1 ? '' : 's') + '</strong><strong>' + units + ' units</strong></div>';
+    box.style.display = 'block';
+  }
+
+  // ---- Attachments ----
+  function fmtBytes(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
+    return (n / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  function addMarketingFiles(fileList) {
+    var mk = mkState();
+    var rejected = [];
+    Array.prototype.forEach.call(fileList, function (f) {
+      if (mk.files.length >= MK_MAX_FILES) { rejected.push(f.name + ' (max ' + MK_MAX_FILES + ' files)'); return; }
+      if (f.size > MK_MAX_FILE_BYTES) { rejected.push(f.name + ' (over ' + fmtBytes(MK_MAX_FILE_BYTES) + ')'); return; }
+      var total = mk.files.reduce(function (sum, x) { return sum + x.size; }, 0);
+      if (total + f.size > MK_MAX_TOTAL_BYTES) { rejected.push(f.name + ' (over the ' + fmtBytes(MK_MAX_TOTAL_BYTES) + ' total)'); return; }
+      mk.files.push({ file: f, name: f.name, size: f.size, type: f.type || 'application/octet-stream' });
+    });
+    renderMarketingFileList();
+    if (rejected.length) toast('Skipped: ' + rejected.join(', '), true);
+  }
+
+  function renderMarketingFileList() {
+    var mk = mkState();
+    document.getElementById('mk-file-list').innerHTML = mk.files.map(function (f, i) {
+      return '<div class="file-row">' +
+        '<span class="fname">' + escapeHtml(f.name) + '</span>' +
+        '<span class="fsize">' + fmtBytes(f.size) + '</span>' +
+        '<button type="button" data-remove-file="' + i + '" aria-label="Remove ' + escapeHtml(f.name) + '">×</button>' +
+        '</div>';
+    }).join('');
+  }
+
+  document.getElementById('mk-file-btn').addEventListener('click', function () {
+    document.getElementById('mk-files').click();
+  });
+
+  document.getElementById('mk-files').addEventListener('change', function (e) {
+    addMarketingFiles(e.target.files);
+    e.target.value = ''; // so re-picking the same file still fires change
+  });
+
+  document.getElementById('mk-file-list').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-remove-file]');
+    if (!btn) return;
+    mkState().files.splice(parseInt(btn.getAttribute('data-remove-file'), 10), 1);
+    renderMarketingFileList();
+  });
+
+  ['dragenter', 'dragover'].forEach(function (evt) {
+    document.getElementById('mk-file-drop').addEventListener(evt, function (e) {
+      e.preventDefault();
+      this.classList.add('dragover');
+    });
+  });
+  ['dragleave', 'drop'].forEach(function (evt) {
+    document.getElementById('mk-file-drop').addEventListener(evt, function (e) {
+      e.preventDefault();
+      this.classList.remove('dragover');
+      if (evt === 'drop' && e.dataTransfer && e.dataTransfer.files) addMarketingFiles(e.dataTransfer.files);
+    });
+  });
+
+  // Reads the queued files to base64 for the JSON POST. Done at submit rather
+  // than at pick time so a rep who attaches a file and then removes it never
+  // pays for the read, and so nothing large sits in memory while they're
+  // still filling the form in.
+  function readMarketingAttachments() {
+    var files = mkState().files;
+    if (!files.length) return Promise.resolve([]);
+    return Promise.all(files.map(function (f) {
+      return new Promise(function (resolve, reject) {
+        var reader = new FileReader();
+        reader.onload = function () {
+          var result = String(reader.result || '');
+          resolve({ name: f.name, mimeType: f.type, dataBase64: result.slice(result.indexOf(',') + 1) });
+        };
+        reader.onerror = function () { reject(new Error('Could not read ' + f.name)); };
+        reader.readAsDataURL(f.file);
+      });
+    }));
+  }
+
+  // ---- Submit ----
+  document.getElementById('mk-submit').addEventListener('click', function () {
+    var mk = mkState();
+    var errEl = document.getElementById('mk-error');
+    errEl.textContent = '';
+
+    var email = document.getElementById('mk-email').value.trim();
+    var purpose = document.getElementById('mk-purpose').value;
+    var neededBy = document.getElementById('mk-needed-by').value;
+    var customRequest = document.getElementById('mk-custom').value.trim();
+    var lines = collectMarketingLines();
+
+    if (!purpose) { errEl.textContent = 'Choose what this request is for.'; return; }
+    if (!neededBy) { errEl.textContent = 'Enter the date you need this by.'; return; }
+    // The account is deliberately optional, so the thing that has to be
+    // present is the ask itself -- either picked items or a described one.
+    if (!lines.length && !customRequest) {
+      errEl.textContent = 'Add at least one material, or describe what you need under Custom Request.';
+      return;
+    }
+    if (email && email.indexOf('@') === -1) { errEl.textContent = 'That email address looks incomplete.'; return; }
+
+    var btn = document.getElementById('mk-submit');
+    var label = document.getElementById('mk-submit-label');
+    btn.disabled = true;
+    label.innerHTML = '<span class="spinner"></span> Submitting...';
+
+    var finish = function (ok, msg) {
+      btn.disabled = false;
+      label.textContent = 'Submit Request';
+      toast(msg, !ok);
+      if (ok) {
+        celebrate('Request sent', 'Marketing has your request.');
+        resetMarketingForm();
+        showScreen('screen-home');
+      } else {
+        errEl.textContent = msg;
+      }
+    };
+
+    if (!apiConfigured()) {
+      setTimeout(function () { finish(true, 'Request captured (demo mode — connect the sheet in config.js)'); }, 500);
+      return;
+    }
+
+    readMarketingAttachments()
+      .then(function (attachments) {
+        return apiPost({
+          action: 'marketingOrder',
+          rep: state.rep,
+          email: email,
+          purpose: purpose,
+          neededBy: neededBy,
+          requestDate: new Date().toISOString().slice(0, 10),
+          account: mk.account ? mk.account.establishmentName : '',
+          accountRegion: mk.account ? (mk.account.region || '') : '',
+          eventName: document.getElementById('mk-event-name').value.trim(),
+          shipAddress: document.getElementById('mk-ship-address').value.trim(),
+          customRequest: customRequest,
+          size: document.getElementById('mk-size').value.trim(),
+          otherDetails: document.getElementById('mk-other').value.trim(),
+          lines: lines,
+          attachments: attachments
+        });
+      })
+      .then(function (res) {
+        if (!res.ok) { finish(false, res.error || 'Request failed to submit'); return; }
+        var what = lines.length ? lines.length + ' line item(s)' : 'Custom request';
+        finish(true, what + ' sent to marketing' + (res.requestNumber ? ' — ' + res.requestNumber : ''));
+      })
+      .catch(function (err) {
+        finish(false, err && err.message === 'NOT_SIGNED_IN' ? friendlyApiError(err) : (err.message || 'Request failed to submit'));
+      });
+  });
+
   // ---------- Boot ----------
   var existing = loadSession();
   if (existing) {
@@ -1770,7 +2689,10 @@
     state.repRole = loadRole();
     enterHome();
   } else {
-    loadRepPicker();
+    // #screen-login already carries .active in the markup, so there is
+    // nothing to show -- just make sure the pad starts empty (a reload
+    // mid-entry would otherwise leave stale dots filled in).
+    resetPinPad();
   }
 
   if ('serviceWorker' in navigator) {

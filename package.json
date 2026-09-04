@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@auth/prisma-adapter": "^2.11.3",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "bcryptjs": "^3.0.3",
@@ -20,6 +21,7 @@
     "prisma": "^7.10.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "stripe": "^22.6.0",
     "ulid": "^3.0.2"
   },
   "devDependencies": {
@@ -32,7 +34,8 @@
     "eslint-config-next": "16.3.3",
     "tsx": "^4.23.12",
     "typescript": "^5",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "xlsx": "^0.18.5"
   },
   "overrides": {
     "deepmerge-ts": "^8.0.2"
