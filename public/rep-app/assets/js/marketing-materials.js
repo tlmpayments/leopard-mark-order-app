@@ -6,10 +6,15 @@
 // the deeper branches flattened into one accordion group per leaf-bearing
 // node. `section` is the top-level bucket and `name` is the remaining path
 // ("Apparel > Clothing > Men"), so the full classification is still visible on
-// a phone without four levels of nested collapse. Branches that were given no
-// leaves (Women, Footwear, Carried, Cold and Carry, Packaging, Off-Premise)
-// are kept in place and rendered as "Coming soon" rather than dropped, so the
-// tree a rep sees matches the tree ops maintains.
+// a phone without four levels of nested collapse.
+//
+// Empty branches are NOT listed. Six leaf-less nodes (Women, Footwear,
+// Carried, Cold and Carry, Packaging, Off-Premise) previously rendered as
+// "Coming soon" so the rep's tree matched the tree ops maintains; per Jack
+// 2026-09-03 they are removed entirely -- a rep ordering materials should
+// see only what can actually be ordered. Removing Packaging drops the
+// Packaging section with it, since that was its only category. Re-adding
+// any of them is just a category object with a non-empty `items`.
 //
 // SCOPE: this is a literal catalog -- only the leaves in that tree are
 // orderable. 31 items previously listed here have no leaf in the new tree and
@@ -112,13 +117,6 @@
       ]
     },
     {
-      id: 'apparel-clothing-women',
-      section: 'Merchandise',
-      name: 'Apparel › Clothing › Women',
-      blurb: "Women's cut.",
-      items: []
-    },
-    {
       id: 'apparel-clothing-unisex',
       section: 'Merchandise',
       name: 'Apparel › Clothing › Unisex',
@@ -133,13 +131,6 @@
       ]
     },
     {
-      id: 'apparel-footwear',
-      section: 'Merchandise',
-      name: 'Apparel › Footwear',
-      blurb: 'Shoes and socks.',
-      items: []
-    },
-    {
       id: 'apparel-accessories-worn',
       section: 'Merchandise',
       name: 'Apparel › Accessories › Worn',
@@ -147,13 +138,6 @@
       items: [
         { id: 'LM-088', name: 'Lanyards', brand: MB }
       ]
-    },
-    {
-      id: 'apparel-accessories-carried',
-      section: 'Merchandise',
-      name: 'Apparel › Accessories › Carried',
-      blurb: 'Bags and carried goods.',
-      items: []
     },
     {
       id: 'barware',
@@ -172,13 +156,6 @@
         { id: 'LM-044', name: 'Coasters', brand: CN },
         { id: 'LM-045', name: 'Coasters', brand: SG }
       ]
-    },
-    {
-      id: 'cold-and-carry',
-      section: 'Merchandise',
-      name: 'Cold and Carry',
-      blurb: 'Coolers and cold-chain carry.',
-      items: []
     },
     {
       id: 'drinkware',
@@ -205,15 +182,6 @@
         { id: 'LM-022', name: 'Adhesive Label, Sticker, Logo', brand: SG },
         { id: 'LM-018', name: 'Adhesive Label, Roll Label', brand: CN }
       ]
-    },
-
-    // ---- Packaging --------------------------------------------------------
-    {
-      id: 'packaging',
-      section: 'Packaging',
-      name: 'Packaging',
-      blurb: 'Shipping and unboxing materials.',
-      items: []
     },
 
     // ---- Point-of-Sales ---------------------------------------------------
@@ -258,13 +226,6 @@
       items: [
         { id: 'LM-085', name: 'Patio Umbrellas', brand: CN }
       ]
-    },
-    {
-      id: 'pos-offpremise',
-      section: 'Point-of-Sales',
-      name: 'Off-Premise',
-      blurb: 'Retail shelf and cold box.',
-      items: []
     },
 
     // ---- Trade Support ----------------------------------------------------

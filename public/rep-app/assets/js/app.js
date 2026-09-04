@@ -2155,7 +2155,6 @@
     // match. Leaving them collapsed would show a rep who typed "sticker" a
     // list of category headers and no stickers.
     var forceOpen = !!mk.query || mk.brand !== 'All';
-    var filtering = forceOpen;
     var anyShown = false;
     var lastSection = null;
 
@@ -2168,23 +2167,10 @@
     }
 
     var html = (window.LM_MARKETING_CATEGORIES || []).map(function (cat) {
-      // A branch ops hasn't put anything in yet still shows, so the tree a rep
-      // browses is the tree ops maintains -- but it drops out the moment a
-      // search or brand filter is on, where it could only ever be noise.
-      if (!cat.items.length) {
-        if (filtering) return '';
-        var emptyHead = sectionHeadHtml(cat);
-        return emptyHead +
-          '<div class="mk-cat is-empty" data-cat="' + cat.id + '">' +
-            '<div class="mk-cat-head" aria-disabled="true">' +
-              '<span>' + escapeHtml(cat.name) +
-                '<span class="mk-cat-blurb">' + escapeHtml(cat.blurb) + '</span>' +
-              '</span>' +
-              '<span class="mk-cat-meta"><span class="mk-cat-soon">Coming soon</span></span>' +
-            '</div>' +
-          '</div>';
-      }
-
+      // Leaf-less branches used to render here as "Coming soon". They are no
+      // longer in the catalog at all, so a category with no items is now just
+      // a category whose every item was filtered out -- fall through and let
+      // the `!items.length` check below drop it.
       var items = cat.items.filter(function (item) { return mkItemMatches(item, cat, mk); });
       if (!items.length) return '';
       anyShown = true;
