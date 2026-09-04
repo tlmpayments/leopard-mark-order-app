@@ -97,6 +97,10 @@
         <span>Order Marketing Materials<small>Stickers, signage, glassware, merch</small></span>
         <span class="cta-btn-icon" aria-hidden="true">→</span>
       </button>
+      <button class="cta-btn cta-btn--accounts" id="btn-my-accounts">
+        <span>Manage My Accounts<small>Your accounts, their orders and invoices</small></span>
+        <span class="cta-btn-icon" aria-hidden="true">→</span>
+      </button>
     </div>
 
     <section class="territory-module" aria-labelledby="territory-title">
@@ -513,6 +517,33 @@
     </div>
   </section>
 
+  <!-- MY ACCOUNTS -->
+  <!-- Every account linked to the logged-in rep, not just the geocoded LA
+       ones screen-map can plot. Both screens hand off to screen-account,
+       which is why openAccountDetail takes a return screen -- its back link
+       used to be hardwired to screen-map. -->
+  <section id="screen-my-accounts" class="screen">
+    <a class="back-link" id="back-myaccounts-to-home">← Back</a>
+    <div class="section-title">My Accounts</div>
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="value" id="my-accounts-count">0</div>
+        <div class="label">Linked Accounts</div>
+      </div>
+      <div class="stat-card">
+        <div class="value" id="my-accounts-regions">0</div>
+        <div class="label">Regions Covered</div>
+      </div>
+    </div>
+    <div class="field" style="margin-bottom:14px;">
+      <input id="my-accounts-search" placeholder="Search by name, region, or city" />
+    </div>
+    <div class="field-hint" style="margin-bottom:10px;">Tap an account to see every order it has placed, its invoices, and the Slack thread for each one.</div>
+    <div id="my-accounts-list" class="order-history">
+      <div class="empty-note">Loading…</div>
+    </div>
+  </section>
+
   <!-- ACCOUNTS MAP -->
   <section id="screen-map" class="screen">
     <a class="back-link" id="back-map-to-home">← Back</a>
@@ -523,7 +554,7 @@
 
   <!-- ACCOUNT DETAIL -->
   <section id="screen-account" class="screen">
-    <a class="back-link" id="back-account-to-map">← Back</a>
+    <a class="back-link" id="back-account">← Back</a>
     <div class="rep-block" style="margin-bottom:14px; display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
       <div>
         <div class="name" id="account-name" style="font-size:22px;">—</div>
@@ -590,6 +621,7 @@
     </button>
 
     <div class="section-title">All Orders</div>
+    <div class="field-hint" style="margin-bottom:10px;">Every order this account has placed, newest first.</div>
     <div class="order-history" id="account-order-list">
       <div class="empty-note">Loading…</div>
     </div>
@@ -627,6 +659,9 @@
     <div id="invoice-doc" class="invoice-doc" style="display:none;"></div>
     </div>
     <button class="btn btn-primary btn-block no-print" id="invoice-print-btn" style="display:none; margin-top:20px;">Print / Save as PDF</button>
+    <a class="btn btn-ghost btn-block no-print btn-slack" id="invoice-slack-btn" style="display:none; margin-top:10px;" target="_blank" rel="noopener">
+      <span class="slack-mark" aria-hidden="true"></span>Open the Slack thread
+    </a>
   </section>
 
   <!-- Batch invoice print target (never shown on screen, only used for window.print()) -->

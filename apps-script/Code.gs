@@ -2,6 +2,21 @@ var SALES_SHEET_NAME = 'Sales';
 var REPS_SHEET_NAME = 'Reps';
 var CUSTOMERS_SHEET_NAME = 'Customer Accounts';
 
+// Where an order's Slack message reference gets parked on the Sales row.
+// Until these existed, {channel, ts} came back from chat.postMessage, got
+// handed to the rep app's confirmation screen once, and was then gone
+// forever -- so "take me to the thread about this order" only ever worked
+// in the ~30 seconds after submitting it. Persisting the pair is what lets
+// the account history screen deep-link a thread months later.
+//
+// Deliberately left OUT of both DB_OWNED_COLUMNS and SHEET_OWNED_COLUMNS
+// below: they're app metadata, not business data. classifySyncColumn calls
+// them 'unknown', which is exactly right -- onEditInstallable then never
+// dirty-marks an edit to them, and the Sheet <-> Postgres sync never sees
+// them at all. Nothing outside this file writes them, and no human should.
+var SLACK_CHANNEL_HEADER = 'Slack Channel';
+var SLACK_THREAD_TS_HEADER = 'Slack Thread TS';
+
 // ---- Phase 2 (Sheet <-> Postgres sync) column ownership ----
 // See /Users/jackbegley/.claude/plans/jazzy-pondering-rivest.md, "Sheet sync
 // architecture" -> "Ownership split". Postgres decides DB-owned columns --
@@ -52,6 +67,10 @@ function doGet(e) {
     if (action === 'debugSlackTest') return respond(handleDebugSlackTest(e.parameter.inventorySource));
     if (action === 'backfillFirstOrderFlag') return respond(handleBackfillFirstOrderFlag());
     if (action === 'debugSlackTeamInfo') return respond(handleDebugSlackTeamInfo());
+    // One-time setup, idempotent -- same GET-that-mutates shape as
+    // backfillFirstOrderFlag above, for the same reason: it saves opening
+    // the Apps Script editor to run it by hand.
+    if (action === 'ensureSlackThreadColumns') return respond(ensureSlackThreadColumns());
     if (action === 'debugSales') return respond(handleDebugSales(e.parameter.rows));
     if (action === 'invoiceDetail') return respond(handleInvoiceDetail(e.parameter.invoiceNumber));
     if (action === 'customerOrders') return respond(handleCustomerOrders(e.parameter.customer));
@@ -390,6 +409,17 @@ function handleCustomerOrders(customerName) {
   var statusIdx = salesCol(col, header, 'Invoice Status', ['invoice', 'status']);
   var invoiceIdx = salesCol(col, header, 'Invoice #', ['invoice', '#']);
   var repIdx = salesCol(col, header, 'Sales Rep', ['sales', 'rep']);
+  // Exact-name lookups, not salesCol's fuzzy fallback: 'Slack Channel'
+  // shares the word "channel" with nothing today, but a fuzzy match on
+  // ['slack'] would happily bind both of these to whichever Slack column
+  // came first. undefined -> the column isn't on this sheet yet, which is
+  // the normal state until ensureSlackThreadColumns() has been run.
+  var slackChannelIdx = col[SLACK_CHANNEL_HEADER] !== undefined ? col[SLACK_CHANNEL_HEADER] : -1;
+  var slackTsIdx = col[SLACK_THREAD_TS_HEADER] !== undefined ? col[SLACK_THREAD_TS_HEADER] : -1;
+  // Resolved once for the whole response rather than per order -- it's a
+  // single cached Script Property in the common case, but the first call
+  // after a deploy hits Slack, and that shouldn't happen N times.
+  var teamDomain = (slackChannelIdx !== -1 && slackTsIdx !== -1) ? slackTeamDomain() : '';
 
   var target = String(customerName).trim().toLowerCase();
   var totalQty = 0, totalLine = 0, orderCount = 0;
@@ -418,6 +448,8 @@ function handleCustomerOrders(customerName) {
         salesRep: repIdx === -1 ? '' : row[repIdx],
         qty: 0,
         lineTotal: 0,
+        slackChannel: '',
+        slackTs: '',
         lines: []
       };
       invoiceOrder.push(groupKey);
@@ -425,6 +457,19 @@ function handleCustomerOrders(customerName) {
     var group = invoiceMap[groupKey];
     group.qty += qty;
     group.lineTotal += lineTotal;
+    // Every line of one order carries the same thread reference (see
+    // stampSlackThreadRef), so take the first non-blank pair the group sees
+    // and ignore the rest. Both halves have to come from the SAME row --
+    // an order whose channel is set but whose ts is blank has no usable
+    // permalink, and mixing halves across rows would invent one.
+    if (!group.slackTs && slackChannelIdx !== -1 && slackTsIdx !== -1) {
+      var rowChannel = String(row[slackChannelIdx] || '').trim();
+      var rowTs = String(row[slackTsIdx] || '').trim();
+      if (rowChannel && rowTs) {
+        group.slackChannel = rowChannel;
+        group.slackTs = rowTs;
+      }
+    }
     group.lines.push({
       product: productIdx === -1 ? '' : row[productIdx],
       packaging: packagingIdx === -1 ? '' : row[packagingIdx],
@@ -434,6 +479,13 @@ function handleCustomerOrders(customerName) {
 
   var orders = invoiceOrder.map(function (k) { return invoiceMap[k]; });
   orders.sort(function (a, b) { return new Date(b.poDate) - new Date(a.poDate); });
+  // Built server-side so the client never has to know the permalink format
+  // (or carry a copy of the workspace subdomain). Empty string means "no
+  // thread link for this order" -- an order placed before the columns
+  // existed, or one whose Slack post failed at the time.
+  orders.forEach(function (o) {
+    o.slackThreadUrl = slackThreadPermalink(teamDomain, o.slackChannel, o.slackTs);
+  });
 
   return {
     ok: true,
@@ -441,6 +493,7 @@ function handleCustomerOrders(customerName) {
     totalOrders: orders.length,
     totalQty: totalQty,
     totalLineValue: totalLine,
+    slackTeamDomain: teamDomain,
     orders: orders
   };
 }
@@ -792,6 +845,10 @@ function handleOrder(body) {
 
   var orderTotal = 0;
   var lineSummaries = [];
+  // First row this order will occupy. Read BEFORE the appendRow loop so the
+  // block [orderStartRow, orderStartRow + lines.length) can be stamped with
+  // the Slack thread reference once we have one (stampSlackThreadRef).
+  var orderStartRow = sheet.getLastRow() + 1;
   // One invoice number per order, not per line -- compute it once up front so
   // every line in this submission shares it (nextInvoiceNumber re-scans the
   // sheet each call, so computing it per-line would hand out a fresh number
@@ -849,6 +906,10 @@ function handleOrder(body) {
     // Best-effort -- a failure here never affects the order or the main
     // notification, which have already both succeeded by this point.
     postSlackThreadReply(slackResult.channel, slackResult.ts, ':clipboard: Reply here with fulfillment notes, lot numbers, or delivery updates for this order.');
+    // Park the message reference on the rows we just wrote. Without this the
+    // pair below is the only copy that ever exists, and it dies with the
+    // rep's confirmation screen -- see SLACK_CHANNEL_HEADER.
+    stampSlackThreadRef(sheet, hc, orderStartRow, lines.length, slackResult.channel, slackResult.ts);
   }
 
   return {
@@ -856,7 +917,10 @@ function handleOrder(body) {
     linesAdded: lines.length,
     invoiceNumber: invoiceNumber,
     slackChannel: slackResult.ok ? slackResult.channel : undefined,
-    slackTs: slackResult.ok ? slackResult.ts : undefined
+    slackTs: slackResult.ok ? slackResult.ts : undefined,
+    slackThreadUrl: slackResult.ok
+      ? slackThreadPermalink(slackTeamDomain(), slackResult.channel, slackResult.ts)
+      : ''
   };
 }
 
@@ -908,7 +972,10 @@ function handleInvoiceDetail(invoiceNumber) {
     lineTotal: salesCol(col, header, 'Line Total', ['line', 'total']),
     salesRep: salesCol(col, header, 'Sales Rep', ['sales', 'rep']),
     paymentMethod: salesCol(col, header, 'Payment Method', ['payment', 'method']),
-    expectedEmptyKegs: salesCol(col, header, 'Expected Empty Kegs', ['expected', 'empty'])
+    expectedEmptyKegs: salesCol(col, header, 'Expected Empty Kegs', ['expected', 'empty']),
+    // Exact-name only, for the reason handleCustomerOrders spells out.
+    slackChannel: col[SLACK_CHANNEL_HEADER] !== undefined ? col[SLACK_CHANNEL_HEADER] : -1,
+    slackTs: col[SLACK_THREAD_TS_HEADER] !== undefined ? col[SLACK_THREAD_TS_HEADER] : -1
   };
 
   var lines = [];
@@ -929,7 +996,9 @@ function handleInvoiceDetail(invoiceNumber) {
         deliveryDate: idx.deliveryDate === -1 ? '' : row[idx.deliveryDate],
         salesRep: idx.salesRep === -1 ? '' : row[idx.salesRep],
         paymentMethod: idx.paymentMethod === -1 ? '' : row[idx.paymentMethod],
-        expectedEmptyKegs: idx.expectedEmptyKegs === -1 ? '' : row[idx.expectedEmptyKegs]
+        expectedEmptyKegs: idx.expectedEmptyKegs === -1 ? '' : row[idx.expectedEmptyKegs],
+        slackChannel: idx.slackChannel === -1 ? '' : String(row[idx.slackChannel] || '').trim(),
+        slackTs: idx.slackTs === -1 ? '' : String(row[idx.slackTs] || '').trim()
       };
     }
 
@@ -988,7 +1057,13 @@ function handleInvoiceDetail(invoiceNumber) {
     subtotal: Math.round(subtotal * 100) / 100,
     kegDepositQty: kegQty,
     kegDepositTotal: kegDepositTotal,
-    invoiceTotal: invoiceTotal
+    invoiceTotal: invoiceTotal,
+    // So the invoice screen can offer the same "open the thread" jump the
+    // account history does. Empty when this order predates the Slack
+    // columns or its Slack post failed at submission time.
+    slackThreadUrl: (shared.slackChannel && shared.slackTs)
+      ? slackThreadPermalink(slackTeamDomain(), shared.slackChannel, shared.slackTs)
+      : ''
   };
 }
 
@@ -1338,6 +1413,115 @@ function postSlackThreadReply(channelId, threadTs, text) {
   }
 }
 
+// ---- Persisting an order's Slack thread so it stays reachable ----------
+// The rep app's "Manage My Accounts" flow lets a rep open any past order
+// and jump straight to the Slack thread ops has been discussing it in. That
+// needs three things to survive past the moment of submission: the channel
+// id, the parent message ts, and the workspace subdomain the permalink is
+// built from. The first two go on the Sales row (SLACK_CHANNEL_HEADER /
+// SLACK_THREAD_TS_HEADER); this is the third.
+//
+// Resolved once from auth.test and then cached in Script Properties, so the
+// common case costs no network call at all. auth.test rather than team.info
+// for the same reason handleDebugSlackTeamInfo uses it: it's scope-exempt,
+// so this needs no reinstall of the bot. Returns '' when Slack isn't
+// configured -- every caller treats an empty domain as "no thread links
+// this time", never as an error.
+function slackTeamDomain() {
+  var props = PropertiesService.getScriptProperties();
+  var cached = props.getProperty('SLACK_TEAM_DOMAIN');
+  if (cached) return cached;
+  var token = props.getProperty('SLACK_BOT_TOKEN');
+  if (!token) return '';
+  try {
+    var resp = UrlFetchApp.fetch('https://slack.com/api/auth.test', {
+      method: 'post',
+      headers: { Authorization: 'Bearer ' + token },
+      muteHttpExceptions: true
+    });
+    var json = JSON.parse(resp.getContentText());
+    if (!json.ok || !json.url) return '';
+    // json.url is the workspace's own base url, e.g.
+    // "https://theleopardmark.slack.com/" -- take its first label.
+    var m = /^https?:\/\/([^./]+)\./.exec(String(json.url));
+    if (!m) return '';
+    props.setProperty('SLACK_TEAM_DOMAIN', m[1]);
+    return m[1];
+  } catch (err) {
+    return '';
+  }
+}
+
+// Web permalink to a specific message, opened as a THREAD rather than as a
+// lone message in the channel. The /archives/<channel>/p<ts> path alone
+// scrolls the channel to the message; thread_ts + cid are what make Slack
+// open the side panel with the replies (which is where ops actually puts
+// lot numbers and delivery updates -- see postSlackThreadReply). The `p`
+// form wants the ts with its dot removed: 1725465600.123456 -> p1725465600123456.
+function slackThreadPermalink(domain, channel, ts) {
+  if (!domain || !channel || !ts) return '';
+  var compact = String(ts).replace('.', '');
+  return 'https://' + domain + '.slack.com/archives/' + channel +
+    '/p' + compact + '?thread_ts=' + encodeURIComponent(String(ts)) +
+    '&cid=' + encodeURIComponent(String(channel));
+}
+
+// Stamps {channel, ts} onto an already-written contiguous block of Sales
+// rows (every line of one order shares the same thread, so every row gets
+// the same pair -- handleCustomerOrders groups by invoice and reads the
+// first non-blank it finds).
+//
+// Best-effort by design, like every other Slack call in this file: the
+// order rows have already landed by the time this runs, so a missing column
+// or a Sheets hiccup must never turn into a failed order. It just means that
+// one order has no thread link in the account history.
+function stampSlackThreadRef(sheet, hc, startRow, rowCount, channel, ts) {
+  if (!channel || !ts || !rowCount) return;
+  try {
+    var channelIdx = hc.col[SLACK_CHANNEL_HEADER];
+    var tsIdx = hc.col[SLACK_THREAD_TS_HEADER];
+    if (channelIdx === undefined || tsIdx === undefined) return; // columns not added yet
+    var channelValues = [];
+    var tsValues = [];
+    for (var i = 0; i < rowCount; i++) {
+      channelValues.push([channel]);
+      tsValues.push([String(ts)]);
+    }
+    sheet.getRange(startRow, channelIdx + 1, rowCount, 1).setValues(channelValues);
+    // Plain-text format BEFORE the write, not after. A Slack ts is
+    // "1725465600.123456" -- Sheets reads that as a NUMBER by default and
+    // rounds it to 1725465600.12346 on the way in, which silently breaks
+    // every permalink built from it afterwards (the thread_ts wouldn't match
+    // any message). '@' keeps all six digits of the microsecond suffix, and
+    // means getValues() hands the exact string back out again.
+    var tsRange = sheet.getRange(startRow, tsIdx + 1, rowCount, 1);
+    tsRange.setNumberFormat('@');
+    tsRange.setValues(tsValues);
+  } catch (err) {
+    console.error('stampSlackThreadRef failed (non-fatal): ' + err.message);
+  }
+}
+
+// One-time setup: appends the two Slack-thread columns to the Sales sheet if
+// they aren't there yet. Safe to run repeatedly -- it only ever adds a
+// header that's missing, and never moves or renames an existing column
+// (every read in this file goes through salesCol/hc.col by NAME, so a new
+// column at the end shifts nothing).
+function ensureSlackThreadColumns() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SALES_SHEET_NAME);
+  if (!sheet) return { ok: false, error: 'Sales tab not found' };
+  var hc = getSalesHeaderAndCol(sheet);
+  var added = [];
+  [SLACK_CHANNEL_HEADER, SLACK_THREAD_TS_HEADER].forEach(function (name) {
+    if (hc.col[name] !== undefined) return;
+    var target = sheet.getLastColumn() + 1;
+    sheet.getRange(hc.headerRowNumber, target).setValue(name);
+    added.push({ header: name, column: target });
+    hc = getSalesHeaderAndCol(sheet); // re-read so the second add sees the first
+  });
+  return { ok: true, added: added, headerRow: hc.headerRowNumber };
+}
+
 // Same shape as customerHasPriorOrder -- scans the Order ID column directly
 // (not sync_log) so a retry self-heals even if Postgres crashed between
 // "Sheet write succeeded" and "sync_log write succeeded".
@@ -1393,6 +1577,25 @@ function handleSyncOrder(body) {
     if (slackResult.ok) {
       outcome.slackChannel = slackResult.channel;
       outcome.slackTs = slackResult.ts;
+      outcome.slackThreadUrl = slackThreadPermalink(slackTeamDomain(), slackResult.channel, slackResult.ts);
+      // Same reason as handleOrder's stamp: without a copy on the row, this
+      // reference is gone the moment the response is read, and the account
+      // history screen has no thread to link an order to. lineRows is the
+      // contiguous block handleSyncOrderLocked just wrote, in line order.
+      var syncedRows = outcome.lineRows || [];
+      if (syncedRows.length) {
+        var syncSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SALES_SHEET_NAME);
+        if (syncSheet) {
+          stampSlackThreadRef(
+            syncSheet,
+            getSalesHeaderAndCol(syncSheet),
+            syncedRows[0],
+            syncedRows.length,
+            slackResult.channel,
+            slackResult.ts
+          );
+        }
+      }
     }
   }
   return outcome;

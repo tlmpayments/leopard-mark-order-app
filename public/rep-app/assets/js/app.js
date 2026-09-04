@@ -7,6 +7,7 @@
     invoiceEdit: null, // working copy of the invoice currently on screen-invoice, see openInvoice()
     customer: null,
     customerPickerReturn: 'screen-order', // which screen screen-customers returns to
+    accountReturn: 'screen-map', // which screen screen-account returns to, see openAccountDetail
     marketing: null, // working state for the marketing materials request, see openMarketingForm()
     customers: loadCachedCustomers() || (window.LM_CUSTOMERS || []).slice()
   };
@@ -133,6 +134,12 @@
           cacheCustomers(res.customers);
           if (screens['screen-customers'].classList.contains('active')) {
             renderCustomerList(document.getElementById('customer-search').value);
+          }
+          // Same reason as the picker above: this refresh lands a beat after
+          // the screen paints from cache, and a rep who just added an account
+          // should see it appear rather than have to navigate away and back.
+          if (screens['screen-my-accounts'].classList.contains('active')) {
+            renderMyAccounts(document.getElementById('my-accounts-search').value);
           }
           updateMyMapButton();
           renderHomeTerritoryMap();
@@ -322,12 +329,25 @@
     }).join('');
   }
 
-  function renderAccountMetric() {
+  // The accounts linked to the logged-in rep. Matched by LAST NAME because
+  // Customer Accounts writes "J. Williams" while the Reps tab writes "James
+  // Williams" -- the same mismatch repLastName() exists for everywhere else
+  // in this file. `addedBy` wins over `salesRep` when present, so an account
+  // handed to a different rep still counts for whoever put it in.
+  //
+  // Deliberately NOT filtered on lat/lng the way myMappedAccounts() is: a
+  // rep's list is every account of theirs, not just the ones that happen to
+  // be geocoded onto the LA map.
+  function myAccounts() {
     var mine = repLastName(state.rep);
-    var count = mine ? state.customers.filter(function (customer) {
+    if (!mine) return [];
+    return state.customers.filter(function (customer) {
       return repLastName(customer.addedBy || customer.salesRep) === mine;
-    }).length : 0;
-    document.getElementById('stat-accounts').textContent = count;
+    });
+  }
+
+  function renderAccountMetric() {
+    document.getElementById('stat-accounts').textContent = myAccounts().length;
   }
 
   document.getElementById('order-history').addEventListener('click', function (e) {
@@ -349,6 +369,7 @@
     document.getElementById('invoice-loading').textContent = 'Loading invoice…';
     document.getElementById('invoice-doc').style.display = 'none';
     document.getElementById('invoice-print-btn').style.display = 'none';
+    document.getElementById('invoice-slack-btn').style.display = 'none';
 
     apiGet({ action: 'invoiceDetail', invoiceNumber: invoiceNumber })
       .then(function (res) {
@@ -358,6 +379,16 @@
         document.getElementById('invoice-loading').style.display = 'none';
         document.getElementById('invoice-doc').style.display = 'block';
         document.getElementById('invoice-print-btn').style.display = 'block';
+        // Hidden rather than disabled when there's no thread: an order from
+        // before the Slack reference was stored has nothing to link to, and
+        // a dead button is worse than no button. Both the account history
+        // and this screen offer the jump, so a rep who came here via
+        // "View invoice" doesn't have to go back for it.
+        var slackBtn = document.getElementById('invoice-slack-btn');
+        if (res.slackThreadUrl) {
+          slackBtn.href = res.slackThreadUrl;
+          slackBtn.style.display = 'flex';
+        }
       })
       .catch(function (err) {
         document.getElementById('invoice-loading').textContent = friendlyApiError(err);
@@ -1102,6 +1133,10 @@
 
   // Built from the accounts actually on the map, so a rep who isn't in
   // LA_TERRITORY_REPS still gets a swatch the moment they add a stop.
+  // Currently unused -- the home map's rep-name legend is hidden for now
+  // (see the parked call in renderHomeTerritoryMap). Kept intact, along with
+  // its markup and CSS, because turning it back on is meant to be a
+  // one-line change rather than a rewrite.
   function renderTerritoryLegend(entries) {
     var legend = document.getElementById('territory-legend');
     if (!legend) return;
@@ -1142,7 +1177,11 @@
       ? entries.length + ' LA ' + (entries.length === 1 ? 'account' : 'accounts') + ' on the map' +
         (approximate ? ' \u00b7 ' + approximate + ' placed by city, awaiting geocoding' : '') + '.'
       : 'Accounts in Los Angeles will appear here.';
-    renderTerritoryLegend(entries);
+    // Rep names are off the home map for now, so the legend stays empty --
+    // .territory-legend:empty collapses the row, which is why nothing here
+    // has to hide the container itself. Restore by uncommenting.
+    // renderTerritoryLegend(entries);
+    document.getElementById('territory-legend').innerHTML = '';
 
     if (!homeTerritoryMapInstance) {
       homeTerritoryMapInstance = L.map('home-territory-map', { zoomControl: false, attributionControl: false, scrollWheelZoom: false });
@@ -1235,14 +1274,14 @@
         if (!link) return;
         link.addEventListener('click', function (evt) {
           evt.preventDefault();
-          openAccountDetail(accounts[parseInt(link.getAttribute('data-map-idx'), 10)]);
+          openAccountDetail(accounts[parseInt(link.getAttribute('data-map-idx'), 10)], 'screen-map');
         });
       });
 
       document.getElementById('map-account-list').querySelectorAll('[data-map-idx]').forEach(function (row) {
         row.addEventListener('click', function () {
           var idx = parseInt(row.getAttribute('data-map-idx'), 10);
-          openAccountDetail(accounts[idx]);
+          openAccountDetail(accounts[idx], 'screen-map');
         });
       });
 
@@ -1314,11 +1353,130 @@
     openInvoice(row.getAttribute('data-invoice'));
   });
 
-  // ---------- Account detail ----------
-  document.getElementById('back-account-to-map').addEventListener('click', function () { showScreen('screen-map'); });
+  // ---------- My accounts ----------
+  // "Manage My Accounts" on the home screen. screen-map already existed and
+  // already handed off to screen-account, but it only ever showed accounts
+  // that geocode into LA County -- a rep in the Bay Area or Orange County
+  // had no way to reach their own account list at all. This is that list:
+  // every account linked to the rep, searchable, each one a door into its
+  // full order history.
 
-  function openAccountDetail(customer) {
+  document.getElementById('btn-my-accounts').addEventListener('click', openMyAccounts);
+  document.getElementById('back-myaccounts-to-home').addEventListener('click', function () { showScreen('screen-home'); });
+
+  // Rendered from state.customers, which is served out of localStorage on a
+  // cold start and refreshed in the background by refreshCustomers(). So the
+  // list paints instantly (offline included) and re-renders when the fetch
+  // lands -- see the renderMyAccounts() call inside refreshCustomers().
+  function openMyAccounts() {
+    showScreen('screen-my-accounts');
+    document.getElementById('my-accounts-search').value = '';
+    renderMyAccounts('');
+  }
+
+  // Alphabetical, and derived the same way in both the render and the click
+  // handler -- the row's data-account-idx indexes into THIS array, so the two
+  // have to agree on the order or a tap opens the wrong account.
+  function sortedMyAccounts() {
+    return myAccounts().slice().sort(function (a, b) {
+      return String(a.establishmentName || '').localeCompare(String(b.establishmentName || ''));
+    });
+  }
+
+  function myAccountsMatches(customer, q) {
+    if (!q) return true;
+    var haystack = [
+      customer.establishmentName,
+      customer.region,
+      customer.address,
+      customer.orderingContact,
+      customer.legalEntity
+    ].join(' ').toLowerCase();
+    return haystack.indexOf(q) !== -1;
+  }
+
+  // Region plus city, except when they name the same place -- "Los Angeles ·
+  // los angeles" is what a naive join produces for most of this book, since
+  // the delivery REGION and the establishment's city are frequently the same
+  // word. cityFromAddress works in lowercase (it matches against a lowercase
+  // city table), so anything it returns has to be re-cased before display.
+  function titleCaseCity(city) {
+    return String(city || '').replace(/\b[a-z]/g, function (ch) { return ch.toUpperCase(); });
+  }
+
+  function accountSubtitle(customer) {
+    var region = String(customer.region || '').trim();
+    var city = titleCaseCity(cityFromAddress(customer.address));
+    var meta = [region];
+    if (city && city.toLowerCase() !== region.toLowerCase()) meta.push(city);
+    meta = meta.filter(Boolean);
+    return meta.length ? meta.join(' · ') : (customer.address || 'No address on file');
+  }
+
+  function renderMyAccounts(query) {
+    var host = document.getElementById('my-accounts-list');
+    var mine = sortedMyAccounts();
+
+    // The two counters describe the rep's whole book, not the current
+    // search -- a filtered "1 linked account" would read as data loss.
+    document.getElementById('my-accounts-count').textContent = mine.length;
+    var regions = {};
+    mine.forEach(function (c) {
+      var r = String(c.region || '').trim();
+      if (r) regions[r] = true;
+    });
+    document.getElementById('my-accounts-regions').textContent = Object.keys(regions).length;
+
+    if (!mine.length) {
+      host.innerHTML = '<div class="empty-note">No accounts are linked to you yet. Anything you add with <strong>Add New Account</strong> shows up here.</div>';
+      return;
+    }
+
+    // Each surviving row keeps the index it had in the UNFILTERED list, so
+    // data-account-idx still resolves once the rep types in the search box
+    // (the click handler re-derives the same unfiltered array).
+    var q = String(query || '').trim().toLowerCase();
+    var list = mine
+      .map(function (c, i) { return { customer: c, index: i }; })
+      .filter(function (entry) { return myAccountsMatches(entry.customer, q); });
+
+    if (!list.length) {
+      host.innerHTML = '<div class="empty-note">No accounts match “' + escapeHtml(query) + '”.</div>';
+      return;
+    }
+
+    host.innerHTML = list.map(function (entry) {
+      var c = entry.customer;
+      return '<div class="order-row clickable" data-account-idx="' + entry.index + '">' +
+        '<div><div class="oname">' + escapeHtml(c.establishmentName || 'Unnamed account') + '</div>' +
+        '<div class="osub">' + escapeHtml(accountSubtitle(c)) + '</div></div>' +
+        '<span>→</span>' +
+        '</div>';
+    }).join('');
+  }
+
+  document.getElementById('my-accounts-search').addEventListener('input', function (e) {
+    renderMyAccounts(e.target.value);
+  });
+
+  document.getElementById('my-accounts-list').addEventListener('click', function (e) {
+    var row = e.target.closest('.order-row[data-account-idx]');
+    if (!row) return;
+    var account = sortedMyAccounts()[parseInt(row.getAttribute('data-account-idx'), 10)];
+    if (account) openAccountDetail(account, 'screen-my-accounts');
+  });
+
+  // ---------- Account detail ----------
+  // Reached from two places now (the LA map and My Accounts), so the back
+  // link goes wherever the rep actually came from instead of the
+  // hardwired screen-map it used to always return to.
+  document.getElementById('back-account').addEventListener('click', function () {
+    showScreen(state.accountReturn || 'screen-map');
+  });
+
+  function openAccountDetail(customer, returnScreen) {
     showScreen('screen-account');
+    state.accountReturn = returnScreen || 'screen-map';
     state.currentAccount = customer;
     state.currentAccountOrders = [];
     document.getElementById('account-edit-form').style.display = 'none';
@@ -1344,17 +1502,7 @@
           return;
         }
         host.innerHTML = res.orders.map(function (o) {
-          var statusClass = String(o.status || 'pending').toLowerCase().replace(/\s+/g, '-');
-          var lines = o.lines || [];
-          var sub = lines.length === 1
-            ? escapeHtml(lines[0].product || '') + ' · ' + escapeHtml(lines[0].packaging || '') + ' · Qty ' + lines[0].qty
-            : lines.length + ' items · Qty ' + o.qty;
-          var clickable = !!o.invoiceNumber;
-          return '<div class="order-row' + (clickable ? ' clickable' : '') + '"' + (clickable ? ' data-invoice="' + escapeHtml(o.invoiceNumber) + '"' : '') + '>' +
-            '<div><div class="oname">' + fmtDate(o.poDate) + '</div>' +
-            '<div class="osub">' + sub + '</div></div>' +
-            '<span class="pill ' + statusClass + '">' + escapeHtml(o.status || 'Pending') + '</span>' +
-            '</div>';
+          return accountOrderRowHtml(o, customer, res.slackTeamDomain || '');
         }).join('');
       })
       .catch(function (err) {
@@ -1362,10 +1510,57 @@
       });
   }
 
+  // One past order, as a card with its own explicit actions rather than a
+  // whole-row tap. The row now carries two destinations (the invoice and the
+  // Slack thread), and a single tap target can't offer both -- guessing
+  // which one a rep meant is exactly the ambiguity these buttons remove.
+  function accountOrderRowHtml(o, customer, teamDomain) {
+    var statusClass = String(o.status || 'pending').toLowerCase().replace(/\s+/g, '-');
+    var lines = o.lines || [];
+    var sub = lines.length === 1
+      ? escapeHtml(lines[0].product || '') + ' · ' + escapeHtml(lines[0].packaging || '') + ' · Qty ' + lines[0].qty
+      : lines.length + ' items · Qty ' + o.qty;
+    if (o.lineTotal) sub += ' · ' + fmtMoney(o.lineTotal);
+
+    var actions = [];
+    if (o.invoiceNumber) {
+      actions.push('<button type="button" class="order-action" data-invoice="' + escapeHtml(o.invoiceNumber) + '">' +
+        'View invoice <span class="order-action-note">' + escapeHtml(o.invoiceNumber) + '</span></button>');
+    }
+
+    // Direct thread permalink when the order was placed after the Slack
+    // reference started being stored on the row (see SLACK_CHANNEL_HEADER in
+    // Code.gs). Everything older gets a Slack SEARCH link instead, labelled
+    // differently on purpose -- it's a genuinely useful way to find the
+    // conversation, but it is not the same promise as "this exact thread",
+    // and pretending otherwise would be the more annoying failure.
+    if (o.slackThreadUrl) {
+      actions.push('<a class="order-action order-action--slack" target="_blank" rel="noopener" href="' + escapeHtml(o.slackThreadUrl) + '">' +
+        '<span class="slack-mark" aria-hidden="true"></span>Slack thread</a>');
+    } else if (teamDomain) {
+      var query = [customer.establishmentName, o.invoiceNumber].filter(Boolean).join(' ');
+      actions.push('<a class="order-action order-action--slack-search" target="_blank" rel="noopener" ' +
+        'title="This order predates thread tracking — this searches Slack for it instead." ' +
+        'href="https://' + escapeHtml(teamDomain) + '.slack.com/search/' + encodeURIComponent(query) + '">' +
+        '<span class="slack-mark" aria-hidden="true"></span>Find in Slack</a>');
+    }
+
+    return '<div class="order-row order-row--stacked">' +
+      '<div class="order-row-head">' +
+        '<div><div class="oname">' + fmtDate(o.poDate) + '</div>' +
+        '<div class="osub">' + sub + '</div></div>' +
+        '<span class="pill ' + statusClass + '">' + escapeHtml(o.status || 'Pending') + '</span>' +
+      '</div>' +
+      (actions.length ? '<div class="order-actions">' + actions.join('') + '</div>' : '') +
+      '</div>';
+  }
+
   document.getElementById('account-order-list').addEventListener('click', function (e) {
-    var row = e.target.closest('.order-row[data-invoice]');
-    if (!row) return;
-    openInvoice(row.getAttribute('data-invoice'));
+    // Only the invoice button is handled here -- the Slack action is a real
+    // <a href>, so letting the browser open it beats intercepting it.
+    var btn = e.target.closest('.order-action[data-invoice]');
+    if (!btn) return;
+    openInvoice(btn.getAttribute('data-invoice'));
   });
 
   // ---------- Account edit ----------
