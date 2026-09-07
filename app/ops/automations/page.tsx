@@ -16,9 +16,6 @@ const RULE_JOB_KIND: Record<string, string> = {
   stock_check_on_confirm: "stock_check",
   auto_propose_slot: "propose_delivery_slot",
   auto_invoice_on_delivery: "issue_invoice",
-  delivery_digest: "delivery_digest",
-  invoice_reminder: "invoice_reminder",
-  reorder_alert: "reorder_alert",
   keg_custody_nudge: "keg_custody_nudge",
   sheet_reconcile: "sheet_reconcile",
 };

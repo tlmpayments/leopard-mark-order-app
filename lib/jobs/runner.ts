@@ -11,7 +11,6 @@ import { db } from "@/lib/db";
 import { claimDueJobs, markFailed, markSucceeded } from "./queue";
 import { HANDLERS } from "./handlers";
 import type { JobKind } from "./kinds";
-import { channelForRegion, postMessage } from "@/lib/slack";
 
 export interface DrainResult {
   claimed: number;
@@ -62,32 +61,10 @@ export async function drainJobs(limit = 10): Promise<DrainResult> {
         id: job.id,
         outcome: `${status}: ${err instanceof Error ? err.message : String(err)}`,
       });
-
-      // §6.5: Slack a warning after the third failure. Earlier than that is
-      // noise -- the backoff ladder heals most transient failures by itself --
-      // and later than that is a problem nobody heard about.
-      if (job.attempts === 3 || status === "dead") {
-        await notifyFailure(job.kind, job.id, err, status);
-      }
     }
   }
 
   return result;
-}
-
-/** Slack the on-call channel about a job that is not healing itself. */
-async function notifyFailure(kind: string, ref: string, err: unknown, status: string): Promise<void> {
-  try {
-    const channel = await channelForRegion(null, "billing");
-    if (!channel) return;
-    const message = err instanceof Error ? err.message : String(err);
-    await postMessage(
-      channel,
-      `:warning: *${kind}* ${status === "dead" ? "gave up" : "is failing"} — \`${ref}\`\n> ${message.slice(0, 400)}`,
-    );
-  } catch {
-    // A failure to report a failure must never itself fail the drain.
-  }
 }
 
 /**
@@ -114,10 +91,6 @@ export async function enqueuePeriodicJobs(now: Date = new Date()): Promise<strin
   const schedule: Array<[Parameters<typeof enqueue>[0], number]> = [
     // 02:00 -- the nightly reconcile, when nobody is editing the Sheet.
     ["sheet_reconcile", 2],
-    // 09:00 -- the overdue summary, at the start of the working day.
-    ["invoice_reminder", 9],
-    // 16:00 -- tomorrow's deliveries, in time to act before people leave.
-    ["delivery_digest", 16],
   ];
 
   for (const [kind, hour] of schedule) {

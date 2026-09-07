@@ -13,7 +13,6 @@ import { db } from "@/lib/db";
 import { stripe } from "@/lib/stripeClient";
 import { appendOrderEvent, blockOrder } from "@/lib/orderEvents";
 import { enqueue } from "@/lib/jobs/queue";
-import { channelForRegion, postMessage } from "@/lib/slack";
 import Stripe from "stripe";
 
 export async function POST(request: Request): Promise<Response> {
@@ -158,14 +157,6 @@ export async function POST(request: Request): Promise<Response> {
           if (stillOwing === 0) {
             await db.account.update({ where: { id: row.accountId }, data: { creditHold: false } });
           }
-        }
-
-        const channel = await channelForRegion(row.account.region);
-        if (channel) {
-          await postMessage(
-            channel,
-            `:white_check_mark: *Paid* — ${row.account.businessName} · ${row.order.invoiceNumber ?? invoice.id} · $${((invoice.amount_paid ?? 0) / 100).toFixed(2)}`,
-          );
         }
       }
 

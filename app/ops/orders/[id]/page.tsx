@@ -390,7 +390,7 @@ export default async function OrderDetail({ params }: PageProps<"/ops/orders/[id
             6,
             "Paid",
             staged.invoice?.paidAt ? `Settled ${stamp(staged.invoice.paidAt)}.` : null,
-            "Stripe's invoice.paid webhook flips this and writes Paid back to the Sheet. More than 7 days overdue posts to Slack.",
+            "Stripe's invoice.paid webhook flips this and writes Paid back to the Sheet.",
             staged.invoice?.paidAt ?? null,
             staged.achRef ? <span className="tag mono">{staged.achRef}</span> : null,
           )}

@@ -14,9 +14,6 @@ export const JOB_KINDS = [
   "propose_delivery_slot",
   "issue_invoice",
   "write_delivery_to_sheet",
-  "delivery_digest",
-  "invoice_reminder",
-  "reorder_alert",
   "keg_custody_nudge",
   "sheet_reconcile",
 ] as const;
@@ -36,9 +33,6 @@ export const JOB_KIND_LABELS: Record<JobKind, string> = {
   propose_delivery_slot: "Propose delivery slot",
   issue_invoice: "Issue Stripe invoice",
   write_delivery_to_sheet: "Write delivery facts to Sheet",
-  delivery_digest: "Tomorrow's deliveries digest",
-  invoice_reminder: "Overdue invoice summary",
-  reorder_alert: "Reorder alert",
   keg_custody_nudge: "Keg custody nudge",
   sheet_reconcile: "Nightly Sheet reconcile",
 };

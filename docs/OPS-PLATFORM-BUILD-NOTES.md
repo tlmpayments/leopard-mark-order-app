@@ -98,10 +98,11 @@ run history must be queryable from our own database, a hosted queue would mean
 two copies of the same truth.
 
 ### Delivery (⑤) — `lib/delivery.ts`
-One transaction mints the BOL from a real locked counter, writes one `DELIVERY`
-event per line, `RETURN` events for empties, moves keg custody, stamps
-`deliveredAt` (which is what Net 30 counts from), and enqueues the invoice.
-Idempotent — a double-tap in a warehouse does not mint a second BOL.
+One transaction carries forward the BOL minted at dispatch (or mints one from
+the same locked counter, for a delivery marked without a route), writes one
+`DELIVERY` event per line, `RETURN` events for empties, moves keg custody,
+stamps `deliveredAt` (which is what Net 30 counts from), and enqueues the
+invoice. Idempotent — a double-tap in a warehouse does not mint a second BOL.
 
 `BolSequence` replaces two broken schemes: the Inventory app's unlocked
 scan-and-increment (two people marking delivered in the same second get the same
@@ -165,10 +166,43 @@ so a half-finished setup never reads as "allow everything".
 
 ### Host routing (§2 rule 1)
 `ops.tlmbg.co → /ops`, `inventory.tlmbg.co → /ops/inventory`,
-`bol.tlmbg.co → /docs`, `ach.tlmbg.co → /ops/billing/setup-links`, as a
+`bol.tlmbg.co → /docs`, `ach.tlmbg.co → /ops/billing/setup-links`,
+`delivery.tlmbg.co → /delivery`, as a
 **rewrite** so the operator stays on the branded host and old bookmarks keep the
 hostname they were saved with. `orders.tlmbg.co` is deliberately absent — the
 rep app keeps serving exactly as today until the Phase R cutover.
+
+### Dispatch — `lib/routes.ts`, `app/ops/deliveries/`, `app/delivery/`
+
+Scheduling answers *what day*; dispatch answers *which truck, in what order,
+driven by whom*, which is the question the driver has at 6am.
+
+- **`DeliveryRoute`** is one truck, one day, one driver, one region.
+  **`RouteStop`** is one order on it at a known position. Both are additive and
+  neither touches the ledger — a route is a plan, and plans get rebuilt.
+- **Ops builds it** at `/ops/deliveries` (the dispatch board: one day, its
+  routes, and everything not on one yet) and `/ops/deliveries/routes/[id]` (the
+  stops, re-sequenced with up/down rather than drag-and-drop — server actions
+  all the way down, and a gesture that is worse on a phone anyway). The old week
+  grid moved to `/ops/deliveries/week`.
+- **Dispatch mints the BOL.** This is the one deliberate reversal of the
+  original design, which minted at delivery so the sequence had no gaps. The
+  driver hands a retailer paper; if that paper says "(minted at delivery)" then
+  the customer's copy and the ledger's copy are different documents. Dispatch
+  mints, marks each shipment `in_transit` and mirrors the number to the Sheet.
+  (It posted the manifest to Slack until the 2026-09-06 reduction below.) The
+  cost is a gap in the
+  sequence when a stop fails — accepted, and auditable, because the number was
+  really printed.
+- **The driver's surface** is `delivery.tlmbg.co` → `/delivery`. Name + PIN,
+  same credential as every other internal surface, on the new `driver` role.
+  Today's route, stops in order, tap-to-navigate, tap-to-call, the BOL, and a
+  proof-of-delivery form that calls the same `markDelivered` the hub does —
+  corrected quantities, lot numbers, empties picked up, notes. A driver holding
+  a session has authority over the stops on routes assigned to *them*, checked
+  at the write; `driver` is deliberately not in `LEDGER_ROLES`.
+- **Add a driver:** `npx tsx scripts/add-driver.ts "Full Name" [--phone +1...]`.
+  No PIN is set — the first one they type becomes theirs, same as the reps.
 
 ---
 
@@ -463,3 +497,49 @@ build, so it was left alone rather than edited mid-cutover.
 4. Run the §4 parity check before retiring `inventory.tlmbg.co`.
 5. Parallel-run the Sheet mirror against a **copy** of the master spreadsheet
    until P8, per the original prompt's ground rule.
+
+## Slack reduced to new orders only — 2026-09-06
+
+The owner asked for every Slack message removed except incoming orders. The
+trigger: `region_slack_channels` is empty, so `channelForRegion(region, purpose)`
+missed the table for every purpose and fell through to `SLACK_CHANNEL_BA` /
+`SLACK_CHANNEL_LA` — the rep order channels. Overdue-invoice aging, customer
+payment status and job-failure stack traces were all landing next to
+`:beer: NEW ORDER`.
+
+**What still posts to Slack:** `slack_new_order` and its thread prompt. Nothing
+else. The legacy Apps Script (`Code.gs`) new-order webhook is untouched.
+
+**Removed from the code:**
+
+| Path | Was |
+|---|---|
+| `delivery_digest` handler, kind, rule, 16:00 schedule | per-region "Tomorrow's deliveries" digest |
+| `invoice_reminder` handler, kind, rule, 09:00 schedule | ">7 days overdue" summary |
+| `reorder_alert` handler, kind, rule | below-threshold alert (was never enqueued — dead) |
+| `notifyFailure` in `lib/jobs/runner.ts` | `:warning:` on 3rd job failure / dead |
+| the `:white_check_mark: *Paid*` block in the Stripe webhook | posted on every `invoice.paid` |
+| the dispatch post in `app/ops/deliveries/actions.ts` + `buildRouteDispatchMessage` | full route manifest with BOL numbers |
+
+The credit-hold auto-clear on `invoice.paid` and the whole of `dispatchRoute`
+were left intact — only the notification came out.
+
+**Data cleanup:** the three `automation_rules` rows were deleted, along with two
+already-queued `JobRun` rows for that day (`invoice_reminder`, `delivery_digest`).
+
+**What you lose, and where to look instead:**
+
+- *Job failures are now silent.* They are still recorded as `JobRun` rows and
+  surface at `/ops/automations` (dead-job list, 7-day success rate per rule).
+  Nothing pages anyone — someone has to look. This is the one removal with a
+  real operational cost; if it bites, the fix is a non-Slack channel (email to
+  ops, or a hub badge), not putting the warning back in the rep channel.
+- *Overdue invoices* — `/ops/billing` (aging buckets, days overdue). Stripe
+  still sends the customer dunning email; that never went through Slack.
+- *Tomorrow's deliveries* — `/ops/deliveries` and the print batch at
+  `/api/documents/print?day=…&region=…`.
+- *Route manifests* — the route page, and the driver's own `/delivery` app.
+- *Reorder thresholds* — `/ops/inventory`.
+
+`RegionSlackChannel` and `channelForRegion`'s `purpose` argument are still in
+place and still unseeded; only `"orders"` has a caller now.

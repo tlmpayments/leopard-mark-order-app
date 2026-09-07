@@ -116,13 +116,13 @@ Stage facts and who/what advances them:
 
 | Stage | Entered when | Advanced by | Automation on entry |
 |---|---|---|---|
-| ① Account set up | `Account` created (rep app `addCustomer`, portal signup, ops) | approval + billing email present + `stripeCustomerId` set | `ensureStripeCustomer`; if no default PM → `sendPaymentSetupLink`; Slack "new account" card; **setup checklist** computed (license #, license status, billing email, terms, payment method, Stripe customer, payment method on file, region→warehouse) |
+| ① Account set up | `Account` created (rep app `addCustomer`, portal signup, ops) | approval + billing email present + `stripeCustomerId` set | `ensureStripeCustomer`; if no default PM → `sendPaymentSetupLink`; ~~Slack "new account" card~~ (never built; out of scope per the Slack policy below); **setup checklist** computed (license #, license status, billing email, terms, payment method, Stripe customer, payment method on file, region→warehouse) |
 | ② New order | `Order.status = confirmed` (rep app submit / portal confirm / SMS confirm) | ops triage or auto‑propose | `syncOrderToSheet`; Slack `NEW ORDER` / `FIRST ORDER` (port the exact Code.gs copy incl. `:tada:`); stock check against §4 `available` for `inventorySource` warehouse → `blocked:stock_short` if short; **propose delivery slot** from `RouteSchedule` (region → weekday(s) → next available ≥ account `deliveryWindow`) |
 | ③ Needs scheduling | proposal exists, unconfirmed | ops accepts/edits proposal in hub (one click) or **auto‑schedule policy** on for that region | none (waiting on human) |
-| ④ Delivery scheduled | `Order.scheduledFor` set → `Shipment` row created (`status=planned`, `fromLocationId` = warehouse) | warehouse marks delivered | write `Delivery (Invoice) Date` to Sheet (flip `deliveryDate` to DB‑owned per the schema comment that anticipates this); reserve stock (soft, informational); pre‑render Delivery Receipt PDF; add to that day's **print batch**; Slack per‑region "Tomorrow's deliveries" digest at 16:00 |
+| ④ Delivery scheduled | `Order.scheduledFor` set → `Shipment` row created (`status=planned`, `fromLocationId` = warehouse) | warehouse marks delivered | write `Delivery (Invoice) Date` to Sheet (flip `deliveryDate` to DB‑owned per the schema comment that anticipates this); reserve stock (soft, informational); pre‑render Delivery Receipt PDF; add to that day's **print batch**; ~~Slack per‑region "Tomorrow's deliveries" digest at 16:00~~ (removed 2026‑09‑06) |
 | ⑤ Delivered | warehouse/rep taps **Mark delivered** (hub or rep app) with optional lot #s, actual qty, empties picked up | system | mint **real sequential BOL #** (`BolSequence` row lock, format `BOL-<LocationID>-<yymmdd>-<seq>` — same as Inventory), write `InventoryEvent(DELIVERY)` per line + `RETURN` events for empties, `KegCustodyLedger` entries, write `BOL #`, `Lot #`, `MicroStar empties` to Sheet, **enqueue `issue_invoice`** |
-| ⑥ Invoiced | `issueOrderInvoice` succeeds (§6) | Stripe webhook | write `Invoice #` (=`Order.invoiceNumber`, also set as Stripe `number`? — no: Stripe numbering is immutable per account; store ours in `metadata.invoiceNumber` and `custom_fields`) and `Invoice Status = Sent` to Sheet; Slack thread reply "Invoiced $X, due <date>" |
-| ⑦ Paid | `invoice.paid` webhook | — | Sheet `Invoice Status = Paid`, `ACH Invoice REF #` = Stripe payment intent/charge id; Slack ✅; account `creditHold` auto‑clears if the paid invoice was the cause |
+| ⑥ Invoiced | `issueOrderInvoice` succeeds (§6) | Stripe webhook | write `Invoice #` (=`Order.invoiceNumber`, also set as Stripe `number`? — no: Stripe numbering is immutable per account; store ours in `metadata.invoiceNumber` and `custom_fields`) and `Invoice Status = Sent` to Sheet; ~~Slack thread reply "Invoiced $X, due <date>"~~ (never built; out of scope per the Slack policy below) |
+| ⑦ Paid | `invoice.paid` webhook | — | Sheet `Invoice Status = Paid`, `ACH Invoice REF #` = Stripe payment intent/charge id; ~~Slack ✅~~ (removed 2026‑09‑06); account `creditHold` auto‑clears if the paid invoice was the cause |
 
 Blocked is an overlay, not a step: an order can be `scheduled` *and* `blocked:license_expired`. The hub shows the stage chip plus a red "blocked" stripe with the reason and the one action that clears it. **Never auto‑clear a compliance block** (license, credit) — a human does that, and it's logged.
 
@@ -299,15 +299,17 @@ Extend `app/api/webhooks/stripe/route.ts`: on `invoice.paid` also write Sheet `I
 | `stock_check_on_confirm` | `order.confirmed` | compare lines vs `available_for_delivery` at `inventorySource`; block if short | on |
 | `auto_propose_slot` | `order.confirmed` & not blocked | next `RouteSchedule` day for region respecting cutoff & account window | on |
 | `auto_schedule_region:<R>` | slot proposed | accept proposal without human | **off** per region (user turns on when trusted) |
-| `delivery_digest` | cron 16:00 PT | Slack per region: tomorrow's deliveries + print‑batch link | on |
+| ~~`delivery_digest`~~ | — | **Removed 2026‑09‑06** at the owner's request: no Slack beyond new orders. | — |
 | `auto_invoice_on_delivery` | `shipment.delivered` | §6 | on |
-| `invoice_reminder` | cron daily | Stripe handles dunning for `send_invoice`; we post a Slack summary of >7 days overdue | on |
-| `reorder_alert` | after any `InventoryEvent` | SKU×warehouse below `reorderThreshold` → Slack `#inventory` + hub | on |
+| ~~`invoice_reminder`~~ | — | **Removed 2026‑09‑06.** Stripe still handles customer dunning; there is no internal Slack summary. Aging lives at `/ops/billing`. | — |
+| ~~`reorder_alert`~~ | — | **Removed 2026‑09‑06** (was never enqueued). Thresholds are visible at `/ops/inventory`. | — |
 | `keg_custody_nudge` | cron weekly | accounts holding kegs > 60 days without a return → rep DM | off |
 | `sheet_reconcile` | cron 02:00 | full diff Sheet↔DB per tab; conflicts to hub | on |
 | `sms_*` / `ai_parse` | existing plans | unchanged | per original prompt |
 
 Every run: `JobRun` row, duration, outcome, link to the order/account, retry button in the hub.
+
+> **Slack policy (2026‑09‑06).** The only Slack the system sends is the new‑order post (`slack_new_order`) and its thread prompt. Every other Slack path — the overdue‑invoice summary, the deliveries digest, reorder alerts, the `invoice.paid` ✅, the job‑failure warning and the route‑dispatch manifest — has been removed from the code. Job failures are visible at `/ops/automations`; dispatch manifests print from the route page. Do not re‑add Slack notifications without asking.
 
 ---
 

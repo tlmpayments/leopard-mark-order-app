@@ -11,7 +11,7 @@ import { db } from "@/lib/db";
 import { syncOrderToSheet } from "@/lib/sheetSync";
 import { ensureStripeCustomer, sendPaymentSetupLink } from "@/lib/stripeCustomer";
 import { issueInvoiceForOrder } from "@/lib/billing/issue";
-import { checkAvailability, availableForDelivery, kegCustodyBalances } from "@/lib/inventory";
+import { checkAvailability, kegCustodyBalances } from "@/lib/inventory";
 import { proposeSlot } from "@/lib/scheduling";
 import { blockOrder, appendOrderEvent } from "@/lib/orderEvents";
 import { isAutomationEnabled } from "@/lib/automations";
@@ -213,87 +213,6 @@ export const HANDLERS: Record<JobKind, JobHandler> = {
   },
 
   // ---- Periodic ----
-  delivery_digest: async () => {
-    if (!(await isAutomationEnabled("delivery_digest"))) return "skipped: rule off";
-    const tomorrow = new Date(Date.now() + 86_400_000);
-    const start = new Date(tomorrow);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(start.getTime() + 86_400_000);
-
-    const orders = await db.order.findMany({
-      where: { scheduledFor: { gte: start, lt: end }, deliveredAt: null },
-      include: {
-        account: { select: { businessName: true, region: true } },
-        lines: { include: { product: { select: { productName: true, formatLabel: true } } } },
-      },
-    });
-    if (orders.length === 0) return "nothing scheduled for tomorrow";
-
-    const byRegion = new Map<string, typeof orders>();
-    for (const o of orders) {
-      const r = o.account.region ?? "unassigned";
-      byRegion.set(r, [...(byRegion.get(r) ?? []), o]);
-    }
-
-    let posted = 0;
-    for (const [region, rows] of byRegion) {
-      const channel = await channelForRegion(region);
-      if (!channel) continue;
-      const day = start.toISOString().slice(0, 10);
-      const body = rows
-        .map(
-          (o) =>
-            `• *${o.account.businessName}* — ${o.lines.reduce((s, l) => s + l.qty, 0)} units from ${o.inventorySource ?? "tbd"}`,
-        )
-        .join("\n");
-      const link = `${process.env.APP_BASE_URL ?? "https://ops.tlmbg.co"}/api/documents/print?day=${day}&region=${region}`;
-      const result = await postMessage(
-        channel,
-        `:truck: *Tomorrow's deliveries — ${region}* (${rows.length})\n${body}\n<${link}|Print the batch>`,
-      );
-      if (result.ok) posted += 1;
-    }
-    return `posted ${posted} region digest(s)`;
-  },
-
-  invoice_reminder: async () => {
-    if (!(await isAutomationEnabled("invoice_reminder"))) return "skipped: rule off";
-    const cutoff = new Date(Date.now() - 7 * 86_400_000);
-    const overdue = await db.invoice.findMany({
-      where: { status: "open", dueDate: { lt: cutoff } },
-      include: { account: { select: { businessName: true, region: true } } },
-      orderBy: { dueDate: "asc" },
-    });
-    if (overdue.length === 0) return "nothing more than 7 days overdue";
-
-    // Stripe already handles the dunning email to the customer; this is the
-    // internal summary so nobody has to go looking for it.
-    const channel = await channelForRegion(overdue[0].account.region, "billing");
-    if (!channel) return "skipped: no billing channel mapped";
-    const body = overdue
-      .map(
-        (i) =>
-          `• ${i.account.businessName} — ${i.invoiceNumber ?? i.stripeInvoiceId} · $${Number(i.amountDue).toFixed(2)} · due ${i.dueDate?.toISOString().slice(0, 10)}`,
-      )
-      .join("\n");
-    await postMessage(channel, `:warning: *${overdue.length} invoice(s) more than 7 days overdue*\n${body}`);
-    return `reported ${overdue.length} overdue`;
-  },
-
-  reorder_alert: async () => {
-    if (!(await isAutomationEnabled("reorder_alert"))) return "skipped: rule off";
-    const rows = (await availableForDelivery()).filter((r) => r.belowThreshold || r.available < 0);
-    if (rows.length === 0) return "everything above threshold";
-
-    const channel = process.env.SLACK_CHANNEL_INVENTORY ?? (await channelForRegion(null, "inventory"));
-    if (!channel) return `${rows.length} below threshold, but no inventory channel mapped`;
-    const body = rows
-      .map((r) => `• ${r.skuCode} at ${r.locationId} — ${r.available} available (threshold ${r.reorderThreshold})`)
-      .join("\n");
-    await postMessage(channel, `:package: *Reorder alerts* (${rows.length})\n${body}`);
-    return `alerted on ${rows.length}`;
-  },
-
   keg_custody_nudge: async () => {
     if (!(await isAutomationEnabled("keg_custody_nudge"))) return "skipped: rule off";
     const cutoff = new Date(Date.now() - 60 * 86_400_000);
