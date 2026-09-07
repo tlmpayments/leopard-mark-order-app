@@ -330,6 +330,7 @@ model Order {
   invoice           Invoice?
   shipment          Shipment?
   routeStop         RouteStop?
+  deliveryPhotos    DeliveryPhoto[]
 
   @@index([accountId, status])
   @@map("orders")
@@ -1119,10 +1120,52 @@ model RouteStop {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  route DeliveryRoute @relation(fields: [routeId], references: [id], onDelete: Cascade)
-  order Order         @relation(fields: [orderId], references: [id])
+  route  DeliveryRoute   @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  order  Order           @relation(fields: [orderId], references: [id])
+  photos DeliveryPhoto[]
 
   @@unique([routeId, sequence])
   @@index([routeId, status])
   @@map("route_stops")
+}
+
+/**
+ * Proof of delivery: what the driver photographed at the door.
+ *
+ * Hung off the ORDER, not the stop. A stop is part of a plan and plans get
+ * rebuilt -- a route can be cancelled and rebuilt tomorrow -- but the evidence
+ * that six kegs were left at Zeitgeist belongs to the delivery itself and has
+ * to outlive any of that. `routeStopId` is kept alongside, nullable, so the
+ * driver's screen can show the photos for the stop in front of him.
+ *
+ * The bytes live in a PRIVATE Vercel Blob store. Only `pathname` is
+ * meaningful here; the stored `url` is not fetchable on its own, and every read
+ * goes through /api/delivery/photos/[id], which re-checks who is asking before
+ * handing back a short-lived signed URL. These are photographs of the inside of
+ * a customer's premises and they are not public objects.
+ */
+model DeliveryPhoto {
+  id          String @id @default(cuid())
+  orderId     String @map("order_id")
+  routeStopId String? @map("route_stop_id")
+
+  /** Blob key -- the handle used to presign a read and to delete. */
+  pathname    String @unique
+  url         String
+  contentType String @map("content_type")
+  sizeBytes   Int    @map("size_bytes")
+  /** Longest edge in pixels after the phone-side downscale, when known. */
+  width       Int?
+  height      Int?
+  caption     String?
+
+  uploadedByUserId String   @map("uploaded_by_user_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  order     Order      @relation(fields: [orderId], references: [id])
+  routeStop RouteStop? @relation(fields: [routeStopId], references: [id], onDelete: SetNull)
+
+  @@index([orderId, createdAt])
+  @@index([routeStopId])
+  @@map("delivery_photos")
 }

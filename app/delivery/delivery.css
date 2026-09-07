@@ -187,6 +187,29 @@
 }
 .dv-empty b { display: block; font-family: var(--font-display); font-size: 22px; color: var(--ink); margin-bottom: 6px; }
 
+/* ---------- proof of delivery ----------
+   Thumbnails are square and big enough to tell apart at a glance in daylight;
+   the point is confirming a shot exists and is not of the driver's boot, not
+   examining it. The full photo is an ops-screen concern. */
+.dv-shots {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px; margin-bottom: 12px;
+}
+.dv-shot { position: relative; margin: 0; aspect-ratio: 1; }
+.dv-shot img {
+  width: 100%; height: 100%; object-fit: cover;
+  border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--surface-2);
+}
+/* 32px, offset into the corner: reachable by a thumb but not on the path to
+   the shutter button, so a mis-tap deletes nothing. */
+.dv-shot button {
+  position: absolute; top: -6px; right: -6px;
+  width: 32px; height: 32px; border-radius: 50%;
+  border: 1px solid var(--line-strong); background: var(--surface-3);
+  color: var(--ink); font-size: 15px; line-height: 1; display: grid; place-items: center;
+}
+.dv-shot button:disabled { opacity: 0.45; }
+
 /* ---------- sign in ---------- */
 .dv-login { max-width: 380px; margin: 0 auto; padding: 56px 18px; text-align: center; }
 .dv-login img { width: 128px; margin: 0 auto 10px; display: block; }

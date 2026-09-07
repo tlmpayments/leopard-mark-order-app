@@ -595,6 +595,21 @@
 }
 .pick .row b { font-size: 13px; }
 
+/* ---------- proof-of-delivery thumbnails ----------
+   Bigger than the driver's, because this is the screen where someone actually
+   looks at the photo to settle a dispute rather than just confirming one exists. */
+.shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.shot { display: block; position: relative; }
+.shot img {
+  width: 100%; aspect-ratio: 4 / 3; object-fit: cover;
+  border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--surface-2);
+}
+.shot span {
+  display: block; margin-top: 4px;
+  font-size: 11px; color: var(--ink-3); font-family: var(--font-mono);
+}
+.shot:hover img { border-color: var(--line-strong); }
+
 /* ---------- responsive ----------
    Mobile matters for exactly four surfaces (§8): the attention queue, order
    detail, Mark delivered, and Documents — warehouse staff use those on a

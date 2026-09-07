@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { money0, shortDate } from "@/lib/ops/format";
 import { candidateOrdersForDay, loadRoute, routeTotals, ymdOfRoute } from "@/lib/routes";
+import { photoCountsByOrder } from "@/lib/deliveryPhotos";
 import { pacificDayRange } from "@/lib/scheduling";
 import { toNumber } from "@/lib/ops/format";
 import {
@@ -35,10 +36,11 @@ export default async function RouteDetailPage({ params }: PageProps<"/ops/delive
   const editable = route.status === "draft";
   const live = route.status === "dispatched" || route.status === "in_progress";
 
-  const [candidates, warehouses, drivers] = await Promise.all([
+  const [candidates, warehouses, drivers, photoCounts] = await Promise.all([
     candidateOrdersForDay(ymd, route.region),
     db.location.findMany({ where: { type: "warehouse", active: true }, orderBy: { id: "asc" } }),
     db.rep.findMany({ where: { role: "driver", active: true }, orderBy: { name: "asc" } }),
+    photoCountsByOrder(route.stops.map((s) => s.orderId)),
   ]);
 
   return (
@@ -234,6 +236,16 @@ export default async function RouteDetailPage({ params }: PageProps<"/ops/delive
                         </div>
                         <div className="det">
                           {units} unit{units === 1 ? "" : "s"} · {money0(total)}
+                          {photoCounts.get(order.id) ? (
+                            <>
+                              {" · "}
+                              <Link href={`/ops/orders/${order.id}#photos`}>
+                                📷 {photoCounts.get(order.id)}
+                              </Link>
+                            </>
+                          ) : stop.status === "delivered" ? (
+                            <span style={{ color: "var(--warn-ink)" }}> · no photo</span>
+                          ) : null}
                           {order.account.deliveryWindow ? ` · ${order.account.deliveryWindow}` : ""}
                           {order.shipment?.bolNumber ? (
                             <>

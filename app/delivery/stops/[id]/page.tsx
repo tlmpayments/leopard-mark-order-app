@@ -3,6 +3,8 @@ import { notFound, redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireDeliveryUser } from "@/lib/ops/session";
 import { completeStopAction, failStopAction } from "../../actions";
+import { PhotoCapture } from "../../_components/PhotoCapture";
+import { photosForStop } from "@/lib/deliveryPhotos";
 
 export const dynamic = "force-dynamic";
 
@@ -91,6 +93,7 @@ export default async function StopPage({ params }: PageProps<"/delivery/stops/[i
     : [];
   const heldBy = new Map(custody.map((c) => [c.productId, c._sum.delta ?? 0]));
 
+  const photos = await photosForStop(stop.id);
   const settled = stop.status !== "pending";
 
   return (
@@ -154,8 +157,31 @@ export default async function StopPage({ params }: PageProps<"/delivery/stops/[i
         </a>
       </div>
 
+      {settled ? null : (
+        <div className="dv-card">
+          <h3>Proof of delivery</h3>
+          <p className="sm muted" style={{ margin: "0 0 12px" }}>
+            {photos.length === 0
+              ? "Photograph the kegs where you left them. This is what settles it if the account says the delivery never arrived."
+              : `${photos.length} photo${photos.length === 1 ? "" : "s"} on this stop.`}
+          </p>
+          <PhotoCapture stopId={stop.id} existing={photos.map((p) => ({ id: p.id, caption: p.caption }))} canDelete />
+        </div>
+      )}
+
       {settled ? (
         <div className="dv-card">
+          {photos.length ? (
+            <>
+              <h3>Proof of delivery</h3>
+              <PhotoCapture
+                stopId={stop.id}
+                existing={photos.map((p) => ({ id: p.id, caption: p.caption }))}
+                canDelete={false}
+              />
+              <div style={{ height: 18 }} />
+            </>
+          ) : null}
           <h3>What was left here</h3>
           {order.lines.map((l) => (
             <div className="dv-line" key={l.id}>

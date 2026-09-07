@@ -7,6 +7,7 @@ import { currentProposal, routeDaysForRegion } from "@/lib/scheduling";
 import { resolveBillingEmail } from "@/lib/ops/checklist";
 import { BLOCKED_REASON_LABELS, stageIndex } from "@/lib/pipeline";
 import { money, shortDate, stamp, toNumber } from "@/lib/ops/format";
+import { photosForOrder } from "@/lib/deliveryPhotos";
 import { StageChip } from "../../_components/StageChip";
 import {
   blockOrderAction,
@@ -43,11 +44,12 @@ export default async function OrderDetail({ params }: PageProps<"/ops/orders/[id
   const [staged] = stageOrders(await loadOrders({ id }));
   if (!staged) notFound();
 
-  const [events, proposal, routes, syncLogs] = await Promise.all([
+  const [events, proposal, routes, syncLogs, photos] = await Promise.all([
     db.orderEvent.findMany({ where: { orderId: id }, orderBy: { createdAt: "asc" } }),
     currentProposal(id),
     staged.account.region ? routeDaysForRegion(staged.account.region) : Promise.resolve([]),
     db.syncLog.findMany({ where: { orderId: id }, orderBy: { createdAt: "desc" }, take: 5 }),
+    photosForOrder(id),
   ]);
 
   const contact = staged.contact;
@@ -463,6 +465,35 @@ export default async function OrderDetail({ params }: PageProps<"/ops/orders/[id
             </tbody>
           </table>
         </div>
+      </section>
+
+      {/* ---- Proof of delivery ---- */}
+      <section className="panel" id="photos" style={{ marginBottom: 16 }}>
+        <div className="panel-head">
+          <h3>Proof of delivery</h3>
+          <span className="small muted">
+            {photos.length
+              ? `${photos.length} photo${photos.length === 1 ? "" : "s"} from the door`
+              : "nothing photographed"}
+          </span>
+        </div>
+        {photos.length === 0 ? (
+          <p className="small muted" style={{ margin: 0 }}>
+            {staged.deliveredAt
+              ? "This delivery was marked complete without a photo. If the account disputes it, the BOL and the ledger are all we have."
+              : "The driver photographs the kegs at the door when the stop is completed."}
+          </p>
+        ) : (
+          <div className="shots">
+            {photos.map((p) => (
+              <a className="shot" key={p.id} href={`/api/delivery/photos/${p.id}`} target="_blank" rel="noopener">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={`/api/delivery/photos/${p.id}`} alt={p.caption ?? "Delivery photo"} loading="lazy" />
+                <span>{stamp(p.createdAt)}</span>
+              </a>
+            ))}
+          </div>
+        )}
       </section>
 
       <div className="grid g2" style={{ marginBottom: 16 }}>
