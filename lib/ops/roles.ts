@@ -14,9 +14,20 @@ import type { UserRole } from "@/app/generated/prisma/enums";
 /** Who may open the Ops Hub at all. */
 export const HUB_ROLES: readonly UserRole[] = ["admin", "ops", "warehouse"];
 /** Who may open the paperwork-only document maker. */
-export const DOCS_ROLES: readonly UserRole[] = ["admin", "ops", "warehouse", "rep", "docs_only"];
+export const DOCS_ROLES: readonly UserRole[] = ["admin", "ops", "warehouse", "rep", "docs_only", "driver"];
 /** Who may write to the inventory ledger or mark a delivery. */
 export const LEDGER_ROLES: readonly UserRole[] = ["admin", "ops", "warehouse"];
+/**
+ * Who may open delivery.tlmbg.co.
+ *
+ * A driver is here and in DOCS_ROLES and nowhere else -- deliberately not in
+ * LEDGER_ROLES, even though completing a stop reaches markDelivered. The
+ * driver's authority is not "may write the ledger"; it is "may complete the
+ * stops on a route assigned to me", and that ownership check lives at the
+ * write in app/delivery/actions.ts. Putting `driver` in LEDGER_ROLES would let
+ * a driver mark ANY order delivered from the hub's own screens.
+ */
+export const DELIVERY_ROLES: readonly UserRole[] = ["admin", "ops", "warehouse", "driver"];
 /** Who may change automation toggles and settings. */
 export const ADMIN_ROLES: readonly UserRole[] = ["admin"];
 

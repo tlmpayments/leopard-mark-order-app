@@ -43,9 +43,11 @@ export async function deliveryReceiptFromOrder(orderId: string): Promise<Deliver
 
   return {
     docType: "delivery",
-    // A scheduled-but-undelivered order has no BOL number yet, and saying so
-    // is better than printing a placeholder that looks like a real number.
-    bolNumber: order.shipment?.bolNumber ?? "(minted at delivery)",
+    // A scheduled order that has not been dispatched yet has no BOL number, and
+    // saying so is better than printing a placeholder that looks like a real
+    // number. Once the route is dispatched this is the real one, and it is the
+    // same number the ledger will carry after delivery.
+    bolNumber: order.shipment?.bolNumber ?? "(minted at dispatch)",
     invoiceNumber: order.invoiceNumber,
     date: PT_DATE.format(order.deliveredAt ?? order.scheduledFor ?? order.createdAt),
     toAccount: {
@@ -85,6 +87,28 @@ export async function deliveryReceiptsForDay(day: Date, region?: string): Promis
   const docs: DeliveryReceiptData[] = [];
   for (const o of orders) {
     const doc = await deliveryReceiptFromOrder(o.id);
+    if (doc) docs.push(doc);
+  }
+  return docs;
+}
+
+/**
+ * Every delivery receipt for one route, in the order the driver will drive it.
+ *
+ * Stop order matters more than it looks: the driver works from a stapled stack
+ * front to back, and paperwork sorted by anything else means hunting for the
+ * right sheet at every door.
+ */
+export async function deliveryReceiptsForRoute(routeId: string): Promise<DeliveryReceiptData[]> {
+  const stops = await db.routeStop.findMany({
+    where: { routeId },
+    orderBy: { sequence: "asc" },
+    select: { orderId: true },
+  });
+
+  const docs: DeliveryReceiptData[] = [];
+  for (const stop of stops) {
+    const doc = await deliveryReceiptFromOrder(stop.orderId);
     if (doc) docs.push(doc);
   }
   return docs;

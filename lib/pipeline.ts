@@ -114,6 +114,13 @@ export const ORDER_EVENT_TYPES = [
   "order.slot_proposed",
   "order.scheduled",
   "order.rescheduled",
+  // Dispatch (lib/routes.ts). A stop moving on or off a route is a fact about
+  // the order's day, so it belongs on the order's own timeline -- otherwise
+  // "why did this land a day late" is only answerable from the route table.
+  "route.stop_added",
+  "route.stop_removed",
+  "route.dispatched",
+  "route.stop_failed",
   "shipment.delivered",
   "bol.issued",
   "inventory.events_written",

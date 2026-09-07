@@ -9,11 +9,11 @@ import type { UserRole } from "@/app/generated/prisma/enums";
 // function contract is unchanged from Middleware's.
 //
 // This file does two jobs:
-//   1. Host routing (§2 rule 1) — five hostnames, one Next.js app.
+//   1. Host routing (§2 rule 1) — six hostnames, one Next.js app.
 //   2. Role gating for the internal surfaces.
 
 /**
- * Hostname -> path prefix. One deployment serves all five domains; the old
+ * Hostname -> path prefix. One deployment serves all these domains; the old
  * Vercel projects stay deployed and only their DNS moves, last, after
  * acceptance (§2 rule 1), so a rewrite that goes wrong is a DNS revert rather
  * than a redeploy.
@@ -29,12 +29,18 @@ const HOST_REWRITES: ReadonlyArray<[hostname: string, prefix: string]> = [
   ["inventory.tlmbg.co", "/ops/inventory"],
   ["bol.tlmbg.co", "/docs"],
   ["ach.tlmbg.co", "/ops/billing/setup-links"],
+  // The driver's surface. One hostname he can type from the cab, or keep on
+  // his home screen, that lands on today's route and nothing else.
+  ["delivery.tlmbg.co", "/delivery"],
 ];
 
 /** Paths that must never be host-rewritten, whatever the hostname. */
-const PASSTHROUGH = ["/api", "/_next", "/rep-app", "/admin", "/customer", "/docs", "/ops", "/favicon"];
+const PASSTHROUGH = ["/api", "/_next", "/rep-app", "/admin", "/customer", "/docs", "/ops", "/delivery", "/favicon"];
 
 const HUB_ROLES: readonly UserRole[] = ["admin", "ops", "warehouse"];
+/** Mirrors lib/ops/roles.ts's DELIVERY_ROLES; the proxy cannot import it without
+ *  pulling Prisma into the edge bundle. */
+const DELIVERY_ROLES: readonly UserRole[] = ["admin", "ops", "warehouse", "driver"];
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
@@ -111,6 +117,19 @@ export default auth((req) => {
     }
   }
 
+  // The driver surface. Its own login page rather than /admin/login: a driver
+  // signing in on a phone at 6am should not land on a screen headed "Admin
+  // Sign In" that redirects him into the hub he cannot open. Everything under
+  // /delivery re-checks ownership of the route server-side -- holding a driver
+  // session is not authority over someone else's stops.
+  const isDeliveryLoginPage = pathname === "/delivery/login";
+  if (pathname.startsWith("/delivery") && !isDeliveryLoginPage && !publicHub) {
+    if (!req.auth) return Response.redirect(new URL("/delivery/login", req.nextUrl));
+    if (!role || !DELIVERY_ROLES.includes(role)) {
+      return Response.redirect(new URL(landingFor(role), req.nextUrl));
+    }
+  }
+
   // /docs needs a session but no particular role -- that is the whole point of
   // docs_only. Server-side, lib/ops/session.ts still refuses it any ledger
   // write, which is the check that actually matters.
@@ -136,6 +155,7 @@ export default auth((req) => {
  * everyone who can open the hub gets the hub.
  */
 function landingFor(role: UserRole | undefined): string {
+  if (role === "driver") return "/delivery";
   if (role && HUB_ROLES.includes(role)) return "/ops";
   return "/docs";
 }
@@ -150,5 +170,6 @@ export const config = {
     "/customer/:path*",
     "/ops/:path*",
     "/docs/:path*",
+    "/delivery/:path*",
   ],
 };

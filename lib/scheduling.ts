@@ -89,8 +89,25 @@ export function nextRouteDay(
   return best;
 }
 
+/**
+ * The UTC instants bounding a Pacific calendar day, `ymd` as YYYY-MM-DD.
+ *
+ * Both ends are resolved through `atPacificHour` rather than by adding 24h to
+ * the start, because two days a year are 23 or 25 hours long and a fixed
+ * 86_400_000 would put an hour of the route day outside its own window.
+ */
+export function pacificDayRange(ymd: string): { start: Date; end: Date } {
+  // Noon UTC is 04:00/05:00 PT, so it always lands on `ymd` in Pacific terms --
+  // which is what makes it a safe anchor for reading the date back out.
+  const noon = new Date(`${ymd}T12:00:00Z`);
+  return {
+    start: atPacificHour(noon, 0),
+    end: atPacificHour(new Date(noon.getTime() + 86_400_000), 0),
+  };
+}
+
 /** Same calendar day as `d` in Pacific time, at the given local hour. */
-function atPacificHour(d: Date, hour: number): Date {
+export function atPacificHour(d: Date, hour: number): Date {
   const { ymd } = pacificParts(d);
   // Pacific is UTC-7 (PDT) or UTC-8 (PST). Resolve by probing the offset for
   // this instant rather than assuming, so proposals do not shift by an hour

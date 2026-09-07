@@ -3,7 +3,8 @@
  *
  * This is the most consequential write in the system, and the reason stage ⑤
  * exists at all. In one atomic step it:
- *   - mints the real sequential BOL number,
+ *   - carries forward the BOL number minted at dispatch (or mints one, for a
+ *     delivery marked without a route),
  *   - writes one DELIVERY inventory event per line (stock leaves the warehouse),
  *   - writes RETURN events and negative custody entries for empties picked up,
  *   - moves keg custody onto the account,
@@ -52,6 +53,62 @@ export interface MarkDeliveredResult {
   invoiceEnqueued: boolean;
 }
 
+/**
+ * Read the per-line corrections out of a Mark-delivered form.
+ *
+ * One parser, shared by the hub's order screen and the driver's stop screen,
+ * because both post the same three field families and both got the same thing
+ * wrong independently: `qty[<lineId>]` and `lot[<lineId>]` describe the SAME
+ * line, so they have to collapse into one entry. Pushing a second entry for the
+ * lot loses the quantity, since `markDelivered` keys its overrides by line id
+ * and the later entry wins — the driver corrects "2" to "1", the invoice bills
+ * 2, and nothing anywhere says so.
+ *
+ * Field order must not matter, which is why this merges by id rather than
+ * relying on qty arriving before lot.
+ */
+export function parseDeliveredLines(formData: FormData): {
+  lines: DeliveredLineInput[];
+  emptiesByProductId: Record<string, number>;
+} {
+  const byLine = new Map<string, DeliveredLineInput>();
+  const emptiesByProductId: Record<string, number> = {};
+
+  const entryFor = (orderLineId: string): DeliveredLineInput => {
+    const existing = byLine.get(orderLineId);
+    if (existing) return existing;
+    const created: DeliveredLineInput = { orderLineId };
+    byLine.set(orderLineId, created);
+    return created;
+  };
+
+  for (const [key, value] of formData.entries()) {
+    const raw = String(value).trim();
+    if (!raw) continue;
+
+    const lot = /^lot\[(.+)\]$/.exec(key);
+    if (lot) {
+      entryFor(lot[1]).lotNumber = raw;
+      continue;
+    }
+
+    const qty = /^qty\[(.+)\]$/.exec(key);
+    if (qty) {
+      const n = Number.parseInt(raw, 10);
+      if (Number.isFinite(n) && n >= 0) entryFor(qty[1]).actualQty = n;
+      continue;
+    }
+
+    const empty = /^empty\[(.+)\]$/.exec(key);
+    if (empty) {
+      const n = Number.parseInt(raw, 10);
+      if (Number.isFinite(n) && n > 0) emptiesByProductId[empty[1]] = n;
+    }
+  }
+
+  return { lines: [...byLine.values()], emptiesByProductId };
+}
+
 export async function markDelivered(input: MarkDeliveredInput): Promise<MarkDeliveredResult> {
   const deliveredAt = input.deliveredAt ?? new Date();
 
@@ -85,7 +142,13 @@ export async function markDelivered(input: MarkDeliveredInput): Promise<MarkDeli
         );
       }
 
-      const bolNumber = await mintBolNumber(tx, fromLocationId, deliveredAt);
+      // Dispatch (lib/routes.ts) mints the number when the paperwork is printed
+      // and the truck is loaded, so by the time a driver taps "delivered" the
+      // shipment usually already carries one. Reuse it: minting a second here
+      // would mean the retailer's signed copy and the ledger disagree about what
+      // this delivery was called. A delivery marked without a route -- a one-off
+      // from the hub -- still mints on the spot, which is the original behaviour.
+      const bolNumber = order.shipment?.bolNumber ?? (await mintBolNumber(tx, fromLocationId, deliveredAt));
 
       const shipment = order.shipment
         ? await tx.shipment.update({

@@ -545,6 +545,56 @@
 }
 .spec b { color: var(--ink); font-weight: 600; }
 
+/* ---------- dispatch: the day's routes ----------
+   The board and the week view are desktop-first, but this one is not: an
+   operator builds tomorrow's route at a desk and then checks it from a phone
+   in the warehouse while the truck is loading, so the two columns stack. */
+.fld {
+  background: var(--surface-2); border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm); color: var(--ink); font: inherit; padding: 5px 8px;
+}
+.daybar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+.daybar .d { font-family: var(--font-display); font-size: 20px; font-weight: 600; }
+
+.dispatch { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.routes { display: flex; flex-direction: column; gap: 12px; }
+
+.rt { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.rt.dispatched { border-color: var(--accent); }
+.rt-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--surface-2);
+}
+.rt-head h3 { margin: 0; font-size: 17px; }
+.rt-head .sub { color: var(--ink-3); font-size: 12px; margin-top: 2px; }
+.rt-body { padding: 8px 10px 12px; }
+
+.stops { display: flex; flex-direction: column; gap: 6px; }
+.stop {
+  display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 12px; align-items: center;
+  background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: var(--r-sm); padding: 9px 11px;
+}
+.stop.done { border-left: 3px solid var(--good); }
+.stop.failed { border-left: 3px solid var(--serious); }
+.stop .seq {
+  width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--surface-3); color: var(--ink-2);
+  font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums;
+}
+.stop .who { font-weight: 600; font-size: 13px; }
+.stop .det { color: var(--ink-3); font-size: 12px; margin-top: 2px; }
+.stop .ctl { display: flex; gap: 4px; align-items: center; }
+.stop .ctl button { padding: 3px 7px; font-size: 12px; }
+
+.pick { display: flex; flex-direction: column; gap: 6px; max-height: 620px; overflow-y: auto; }
+.pick .row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: var(--r-sm); padding: 8px 10px; font-size: 12px;
+}
+.pick .row b { font-size: 13px; }
+
 /* ---------- responsive ----------
    Mobile matters for exactly four surfaces (§8): the attention queue, order
    detail, Mark delivered, and Documents — warehouse staff use those on a
@@ -552,6 +602,7 @@
 @media (max-width: 1100px) {
   .g5 { grid-template-columns: repeat(2, 1fr); }
   .g-attn { grid-template-columns: 1fr; }
+  .dispatch { grid-template-columns: 1fr; }
   .g3 { grid-template-columns: 1fr; }
   .week { grid-template-columns: 1fr; }
 }

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { assertLocation, assertRole, ADMIN_ROLES, LEDGER_ROLES } from "@/lib/ops/session";
-import { markDelivered } from "@/lib/delivery";
+import { markDelivered, parseDeliveredLines } from "@/lib/delivery";
 import { scheduleOrder } from "@/lib/scheduling";
 import { blockOrder, unblockOrder, appendOrderEvent } from "@/lib/orderEvents";
 import { enqueue } from "@/lib/jobs/queue";
@@ -56,36 +56,18 @@ export async function markDeliveredAction(formData: FormData): Promise<void> {
   const from = order.shipment?.fromLocationId ?? order.inventorySource;
   if (from) await assertLocation(user, from);
 
-  // Lot numbers and corrected quantities arrive as line[<id>][lot|qty].
-  const lines: Array<{ orderLineId: string; lotNumber?: string | null; actualQty?: number }> = [];
-  const empties: Record<string, number> = {};
-  for (const [key, value] of formData.entries()) {
-    const lot = /^lot\[(.+)\]$/.exec(key);
-    if (lot && String(value).trim()) {
-      lines.push({ orderLineId: lot[1], lotNumber: String(value).trim() });
-    }
-    const qty = /^qty\[(.+)\]$/.exec(key);
-    if (qty && String(value).trim()) {
-      const n = Number.parseInt(String(value), 10);
-      if (Number.isFinite(n) && n >= 0) {
-        const existing = lines.find((l) => l.orderLineId === qty[1]);
-        if (existing) existing.actualQty = n;
-        else lines.push({ orderLineId: qty[1], actualQty: n });
-      }
-    }
-    const empty = /^empty\[(.+)\]$/.exec(key);
-    if (empty && String(value).trim()) {
-      const n = Number.parseInt(String(value), 10);
-      if (Number.isFinite(n) && n > 0) empties[empty[1]] = n;
-    }
-  }
+  // Lot numbers, corrected quantities and empties arrive as qty[<lineId>],
+  // lot[<lineId>] and empty[<productId>]. Parsed by the shared helper so this
+  // screen and the driver's stop screen cannot drift apart on what a corrected
+  // quantity means -- see parseDeliveredLines for the bug that made them share.
+  const { lines, emptiesByProductId } = parseDeliveredLines(formData);
 
   await markDelivered({
     orderId,
     deliveredByUserId: user.id,
     actor: user.role === "warehouse" ? "ops" : "ops",
     lines,
-    emptiesByProductId: empties,
+    emptiesByProductId,
     carrierName: String(formData.get("carrierName") ?? "") || null,
     notes: String(formData.get("notes") ?? "") || null,
   });

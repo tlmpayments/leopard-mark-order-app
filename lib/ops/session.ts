@@ -19,12 +19,12 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import type { UserRole } from "@/app/generated/prisma/enums";
-import { ADMIN_ROLES, DOCS_ROLES, HUB_ROLES, LEDGER_ROLES, canActOnLocation } from "./roles";
+import { ADMIN_ROLES, DELIVERY_ROLES, DOCS_ROLES, HUB_ROLES, LEDGER_ROLES, canActOnLocation } from "./roles";
 import { PUBLIC_ACCESS_USER, isPublicAccess } from "./publicAccess";
 
 // Re-exported so call sites import the policy and the "who is this" helpers
 // from one place, while the policy itself stays loadable without NextAuth.
-export { ADMIN_ROLES, DOCS_ROLES, HUB_ROLES, LEDGER_ROLES, canActOnLocation };
+export { ADMIN_ROLES, DELIVERY_ROLES, DOCS_ROLES, HUB_ROLES, LEDGER_ROLES, canActOnLocation };
 
 export interface OpsUser {
   id: string;
@@ -78,8 +78,22 @@ export async function requireOpsUser(allowed: readonly UserRole[] = HUB_ROLES): 
   // kind of small lie that becomes a real bug the moment anything reads it.
   if (!user) redirect(`/admin/login?next=${allowed === DOCS_ROLES ? "docs" : "ops"}`);
   if (!allowed.includes(user.role)) {
-    redirect(user.role === "docs_only" ? "/docs" : "/ops?denied=1");
+    redirect(landingForRole(user.role));
   }
+  return user;
+}
+
+/**
+ * The driver surface's own gate.
+ *
+ * Same check as `requireOpsUser(DELIVERY_ROLES)` but it sends an unauthenticated
+ * visitor to /delivery/login rather than the hub's admin sign-in, which a driver
+ * cannot get past and should never see.
+ */
+export async function requireDeliveryUser(): Promise<OpsUser> {
+  const user = await currentOpsUser();
+  if (!user) redirect("/delivery/login");
+  if (!DELIVERY_ROLES.includes(user.role)) redirect(landingForRole(user.role));
   return user;
 }
 
@@ -102,4 +116,16 @@ export async function assertLocation(user: OpsUser, locationId: string): Promise
   if (!canActOnLocation(user, locationId)) {
     throw new Error(`Role ${user.role} may not act on ${locationId}`);
   }
+}
+
+/**
+ * The surface a role belongs on. Mirrors proxy.ts's `landingFor` -- kept in
+ * both places because the proxy must answer this without a database round
+ * trip, and this must answer it after one. A driver who lands on /ops is not
+ * an authentication failure; they are a user in the wrong building.
+ */
+export function landingForRole(role: UserRole | undefined): string {
+  if (role === "driver") return "/delivery";
+  if (role && HUB_ROLES.includes(role)) return "/ops?denied=1";
+  return "/docs";
 }

@@ -24,11 +24,17 @@ model Rep {
   pinHash   String?  @map("pin_hash")
   active    Boolean  @default(true)
   role      UserRole  @default(rep)
+  // Dispatch needs a number for the driver the same way a stop needs one for
+  // the account: the person who has to be reached is the one who is not at a
+  // desk. Nullable because every rep who predates this column has no number on
+  // file and a blank is honest.
+  phone     String?
   createdAt DateTime @default(now()) @map("created_at")
 
   accounts Account[]
   orders   Order[]
   locations UserLocation[]
+  routes    DeliveryRoute[] @relation("RouteDriver")
 
   @@map("reps")
 }
@@ -39,6 +45,11 @@ enum UserRole {
   warehouse
   rep
   docs_only
+  // Drives the truck. Sees delivery.tlmbg.co and nothing else: the routes
+  // assigned to them, the paperwork for those stops, and the proof-of-delivery
+  // form. Deliberately NOT in HUB_ROLES or LEDGER_ROLES -- a driver reaches
+  // markDelivered through their own stop, not through the hub's order screen.
+  driver
 }
 
 // ---------- Accounts ----------
@@ -318,6 +329,7 @@ model Order {
   syncLogs          SyncLog[]
   invoice           Invoice?
   shipment          Shipment?
+  routeStop         RouteStop?
 
   @@index([accountId, status])
   @@map("orders")
@@ -709,6 +721,7 @@ model Location {
   eventsTo          InventoryEvent[] @relation("InventoryEventTo")
   shipmentsFrom     Shipment[]       @relation("ShipmentFrom")
   shipmentsTo       Shipment[]       @relation("ShipmentTo")
+  deliveryRoutes    DeliveryRoute[]
 
   @@index([type, active])
   @@map("locations")
@@ -1018,4 +1031,98 @@ model StripeEvent {
   processedAt DateTime @default(now()) @map("processed_at")
 
   @@map("stripe_events")
+}
+
+// ============================================================================
+// Dispatch: routes, stops, and the driver's day
+//
+// Scheduling (RouteSchedule + Order.scheduledFor) answers "what day does this
+// order go out". It does not answer "which truck, in what order, driven by
+// whom" -- and that is the question the driver actually needs answered at 6am.
+// A DeliveryRoute is one truck, one day, one driver; a RouteStop is one order
+// on it, at a known position in the sequence.
+//
+// Deliberately separate from Shipment. A shipment is the movement of stock and
+// the document that accompanies it; a route is the plan for the day, and plans
+// get rebuilt. Dropping a stop off a route must not disturb the ledger, and
+// re-sequencing four stops must not rewrite four shipments.
+// ============================================================================
+
+enum RouteStatus {
+  draft
+  dispatched
+  in_progress
+  completed
+  cancelled
+}
+
+enum StopStatus {
+  pending
+  delivered
+  // Attempted and refused/nobody there. Distinct from `skipped` (never
+  // attempted) because the two mean different things to the account and to
+  // whoever reschedules it tomorrow.
+  failed
+  skipped
+}
+
+model DeliveryRoute {
+  id          String      @id @default(cuid())
+  // The route day in Pacific time, stored as a bare date: a route belongs to a
+  // calendar day, not an instant, and storing it as a timestamp invites the
+  // off-by-one-at-midnight bug that timezone-naive date columns exist to avoid.
+  date        DateTime    @db.Date
+  region      String
+  warehouseId String      @map("warehouse_id")
+  driverId    String?     @map("driver_id")
+  status      RouteStatus @default(draft)
+  // Optional human label ("SF morning", "Truck 2") for days that run more than
+  // one route out of the same warehouse.
+  name        String?
+
+  dispatchedAt       DateTime? @map("dispatched_at")
+  dispatchedByUserId String?   @map("dispatched_by_user_id")
+  startedAt          DateTime? @map("started_at")
+  completedAt        DateTime? @map("completed_at")
+  notes              String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  warehouse Location    @relation(fields: [warehouseId], references: [id])
+  driver    Rep?        @relation("RouteDriver", fields: [driverId], references: [id])
+  stops     RouteStop[]
+
+  @@index([date, region])
+  @@index([driverId, date])
+  @@index([status, date])
+  @@map("delivery_routes")
+}
+
+model RouteStop {
+  id      String @id @default(cuid())
+  routeId String @map("route_id")
+  // One order rides one route. A split delivery would relax this the same way
+  // Shipment.orderId would have to.
+  orderId String @unique @map("order_id")
+  // 1-based position in the driver's day. Unique per route so two stops can
+  // never claim the same position -- reordering rewrites the whole run through
+  // a negative holding range, since a plain swap would trip this constraint.
+  sequence Int
+
+  status        StopStatus @default(pending)
+  arrivedAt     DateTime?  @map("arrived_at")
+  completedAt   DateTime?  @map("completed_at")
+  failureReason String?    @map("failure_reason")
+  notes         String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  route DeliveryRoute @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  order Order         @relation(fields: [orderId], references: [id])
+
+  @@unique([routeId, sequence])
+  @@index([routeId, status])
+  @@map("route_stops")
 }

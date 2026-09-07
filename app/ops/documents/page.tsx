@@ -54,8 +54,8 @@ export default async function DocumentsPage() {
           </div>
           <p className="small muted" style={{ margin: "0 0 10px" }}>
             Pick a planned shipment. The document carries the real{" "}
-            <span className="mono">BOL-&lt;Location&gt;-&lt;yymmdd&gt;-&lt;seq&gt;</span> number, minted at the moment
-            of delivery so the sequence has no gaps for shipments that get cancelled.
+            <span className="mono">BOL-&lt;Location&gt;-&lt;yymmdd&gt;-&lt;seq&gt;</span> number, minted when its route
+            is dispatched — so the copy the driver hands over and the copy in the ledger are the same number.
           </p>
           {attachable.length === 0 ? (
             <div className="empty">
