@@ -145,8 +145,10 @@
 }
 .dv-stop.done .seq { background: var(--good); color: #fff; }
 .dv-stop.failed .seq { background: var(--serious); color: #fff; }
-.dv-stop .name { font-weight: 600; font-size: 17px; line-height: 1.25; }
-.dv-stop .sub { color: var(--ink-3); font-size: 14px; margin-top: 3px; }
+/* Both are spans inside the stop's <a>, so they need to be told to stack --
+   left inline they render as "Zeitgeist6 units". */
+.dv-stop .name { display: block; font-weight: 600; font-size: 17px; line-height: 1.25; }
+.dv-stop .sub { display: block; color: var(--ink-3); font-size: 14px; margin-top: 3px; }
 .dv-stop .chev { color: var(--ink-3); font-size: 22px; }
 
 /* ---------- one stop ---------- */

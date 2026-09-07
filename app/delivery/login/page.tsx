@@ -35,7 +35,9 @@ export default function DeliveryLoginPage() {
 
   return (
     <main className="dv-login">
-      <img src="/rep-app/assets/icons/brand/logo-alt.svg" alt="The Leopard Mark Brewing Co." />
+      {/* The light artwork, not logo-alt + a brightness/invert filter. logo-alt is
+          navy-on-transparent and disappears entirely on this background. */}
+      <img src="/rep-app/assets/icons/brand/logo-lmc-light.svg" alt="The Leopard Mark Brewing Co." />
       <div className="kicker">Delivery</div>
       <form onSubmit={onSubmit}>
         <div>
