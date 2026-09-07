@@ -43,6 +43,19 @@ export async function currentOpsUser(): Promise<OpsUser | null> {
   // restore the real gating.
   if (isPublicAccess()) return { ...PUBLIC_ACCESS_USER, locationIds: [] };
 
+  return sessionUser();
+}
+
+/**
+ * The signed-in user, ignoring the open-hub flag entirely.
+ *
+ * The driver surface uses this rather than `currentOpsUser` so that turning the
+ * hub open does not also open delivery.tlmbg.co. It also means a stop is always
+ * attributable to a real person: `markDelivered` records who delivered it, and
+ * "Public access" is not an answer to that question when the ledger is asked
+ * later who moved the stock.
+ */
+async function sessionUser(): Promise<OpsUser | null> {
   const session = await auth();
   const repId = session?.repId;
   if (!repId) return null;
@@ -84,14 +97,23 @@ export async function requireOpsUser(allowed: readonly UserRole[] = HUB_ROLES): 
 }
 
 /**
+ * The signed-in driver-surface user, or null. The nullable form of
+ * `requireDeliveryUser`, for the shell that has to render the sign-in page too.
+ */
+export async function currentDeliveryUser(): Promise<OpsUser | null> {
+  return sessionUser();
+}
+
+/**
  * The driver surface's own gate.
  *
  * Same check as `requireOpsUser(DELIVERY_ROLES)` but it sends an unauthenticated
  * visitor to /delivery/login rather than the hub's admin sign-in, which a driver
- * cannot get past and should never see.
+ * cannot get past and should never see. Reads the real session, so the open-hub
+ * flag never applies here -- see `sessionUser`.
  */
 export async function requireDeliveryUser(): Promise<OpsUser> {
-  const user = await currentOpsUser();
+  const user = await sessionUser();
   if (!user) redirect("/delivery/login");
   if (!DELIVERY_ROLES.includes(user.role)) redirect(landingForRole(user.role));
   return user;

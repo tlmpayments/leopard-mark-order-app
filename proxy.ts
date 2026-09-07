@@ -122,8 +122,14 @@ export default auth((req) => {
   // Sign In" that redirects him into the hub he cannot open. Everything under
   // /delivery re-checks ownership of the route server-side -- holding a driver
   // session is not authority over someone else's stops.
+  //
+  // Deliberately NOT covered by `publicHub`, unlike /ops and /docs. The open-hub
+  // flag is a considered trade for a hub whose URL a handful of staff know; this
+  // is a phone surface on a guessable hostname that carries every account's
+  // delivery address and phone number and can mark stock delivered. A PIN is
+  // cheap and the driver types it once.
   const isDeliveryLoginPage = pathname === "/delivery/login";
-  if (pathname.startsWith("/delivery") && !isDeliveryLoginPage && !publicHub) {
+  if (pathname.startsWith("/delivery") && !isDeliveryLoginPage) {
     if (!req.auth) return Response.redirect(new URL("/delivery/login", req.nextUrl));
     if (!role || !DELIVERY_ROLES.includes(role)) {
       return Response.redirect(new URL(landingFor(role), req.nextUrl));

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import "./delivery.css";
-import { currentOpsUser } from "@/lib/ops/session";
+import { currentDeliveryUser } from "@/lib/ops/session";
 import { todayYmd } from "@/lib/routes";
 
 export const metadata = {
@@ -35,7 +35,7 @@ const DAY = new Intl.DateTimeFormat("en-US", {
  * page re-checks with requireDeliveryUser -- which is the check that counts.
  */
 export default async function DeliveryLayout({ children }: LayoutProps<"/delivery">) {
-  const user = await currentOpsUser();
+  const user = await currentDeliveryUser();
 
   return (
     <div className="dv">
