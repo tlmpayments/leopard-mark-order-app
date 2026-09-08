@@ -4,6 +4,7 @@ import Resend from "next-auth/providers/resend";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import type { Adapter } from "next-auth/adapters";
 import { verifyRepPin } from "@/lib/repAuth";
+import { verifyDriverLink } from "@/lib/driverLink";
 import { db } from "@/lib/db";
 import type { UserRole } from "@/app/generated/prisma/enums";
 
@@ -58,6 +59,19 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         return { id: result.rep.id, name: result.rep.name, role: result.rep.role };
       },
     }),
+    // The driver's personal link. A separate provider rather than a special
+    // PIN value, so nothing about the name+PIN path changes and a token can
+    // never be typed into a PIN box by accident.
+    Credentials({
+      id: "driver-link",
+      name: "Driver link",
+      credentials: { token: { label: "Token", type: "text" } },
+      async authorize(credentials) {
+        const rep = await verifyDriverLink(String(credentials?.token ?? ""));
+        if (!rep) return null;
+        return { id: rep.id, name: rep.name, role: rep.role };
+      },
+    }),
     Resend({
       apiKey: process.env.RESEND_API_KEY,
       from: process.env.RESEND_FROM_EMAIL,
@@ -77,7 +91,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       // the token at sign-in. Read once here rather than on every request:
       // a role change takes effect on next sign-in, which is the same
       // trade-off the customer-portal fields below already make.
-      if (account?.provider === "credentials" && user) {
+      if ((account?.provider === "credentials" || account?.provider === "driver-link") && user) {
         const u = user as { id?: string; role?: string };
         if (u.id) token.repId = u.id;
         if (u.role) token.role = u.role;

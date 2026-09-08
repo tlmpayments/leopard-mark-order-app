@@ -35,6 +35,7 @@ model Rep {
   orders   Order[]
   locations UserLocation[]
   routes    DeliveryRoute[] @relation("RouteDriver")
+  accessTokens DriverAccessToken[]
 
   @@map("reps")
 }
@@ -1168,4 +1169,41 @@ model DeliveryPhoto {
   @@index([orderId, createdAt])
   @@index([routeStopId])
   @@map("delivery_photos")
+}
+
+/**
+ * A driver's personal sign-in link.
+ *
+ * A driver in a truck should not be fighting a keypad, but the alternative is
+ * not "no authentication": this surface carries every account's address and
+ * phone number and can invoice a retailer. So the credential moves from
+ * something he types to something he holds -- a long random token in a URL he
+ * keeps on his home screen. Tapping it establishes a normal session, so every
+ * downstream check (route ownership, who marked the delivery) is unchanged and
+ * a delivery is still attributable to a named person.
+ *
+ * Only the SHA-256 of the token is stored. A dump of this table hands out
+ * nothing; the plaintext exists once, in the message sent to the driver.
+ * Hashing is plain SHA-256 rather than bcrypt on purpose -- the input is 256
+ * bits of CSPRNG output, so there is no dictionary to slow down, and the lookup
+ * has to be a single indexed query rather than a scan-and-compare.
+ */
+model DriverAccessToken {
+  id        String @id @default(cuid())
+  repId     String @map("rep_id")
+  /** SHA-256 hex of the token. The token itself is never stored. */
+  tokenHash String @unique @map("token_hash")
+  /** Which phone this was issued for, so revoking the right one is possible. */
+  label     String?
+
+  createdAt       DateTime  @default(now()) @map("created_at")
+  createdByUserId String?   @map("created_by_user_id")
+  lastUsedAt      DateTime? @map("last_used_at")
+  /** Set rather than deleted, so a revoked link stays visible in the audit trail. */
+  revokedAt       DateTime? @map("revoked_at")
+
+  rep Rep @relation(fields: [repId], references: [id], onDelete: Cascade)
+
+  @@index([repId, revokedAt])
+  @@map("driver_access_tokens")
 }

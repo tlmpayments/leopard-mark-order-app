@@ -128,8 +128,11 @@ export default auth((req) => {
   // is a phone surface on a guessable hostname that carries every account's
   // delivery address and phone number and can mark stock delivered. A PIN is
   // cheap and the driver types it once.
-  const isDeliveryLoginPage = pathname === "/delivery/login";
-  if (pathname.startsWith("/delivery") && !isDeliveryLoginPage) {
+  // The sign-in page and the personal-link landing are the two public paths
+  // under /delivery. /delivery/k/<token> IS the credential -- it has to be
+  // reachable signed-out, which is the whole point of it.
+  const isDeliveryPublic = pathname === "/delivery/login" || pathname.startsWith("/delivery/k/");
+  if (pathname.startsWith("/delivery") && !isDeliveryPublic) {
     if (!req.auth) return Response.redirect(new URL("/delivery/login", req.nextUrl));
     if (!role || !DELIVERY_ROLES.includes(role)) {
       return Response.redirect(new URL(landingFor(role), req.nextUrl));
