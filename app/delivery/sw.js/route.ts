@@ -20,9 +20,9 @@ const OFFLINE = \`<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>No signal</title><style>
 body{margin:0;min-height:100dvh;display:grid;place-items:center;text-align:center;
-padding:32px;background:#050b18;color:#f2f6fc;
+padding:32px;background:#d7d8d4;color:#102f44;
 font-family:system-ui,-apple-system,sans-serif}
-h1{font-size:22px;margin:0 0 8px}p{color:#8ba2c0;font-size:16px;line-height:1.5;margin:0}
+h1{font-size:22px;margin:0 0 8px}p{color:#697a86;font-size:16px;line-height:1.5;margin:0}
 </style></head><body><div>
 <h1>No signal</h1>
 <p>Your route is still there. Move somewhere with reception and pull down to reload.</p>

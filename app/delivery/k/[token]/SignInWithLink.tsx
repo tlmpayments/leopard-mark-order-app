@@ -30,7 +30,7 @@ export function SignInWithLink({ token }: { token: string }) {
   return (
     <main className="dv-login">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/rep-app/assets/icons/brand/logo-lmc-light.svg" alt="The Leopard Mark Brewing Co." />
+      <img src="/rep-app/assets/icons/brand/logo-alt.svg" alt="The Leopard Mark Brewing Co." />
       <div className="kicker">Delivery</div>
       {failed ? (
         <>

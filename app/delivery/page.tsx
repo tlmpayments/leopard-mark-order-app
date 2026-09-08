@@ -6,6 +6,14 @@ import type { RouteWithStops } from "@/lib/routes";
 
 export const dynamic = "force-dynamic";
 
+/** "Mon, Sep 7" — a driver reads a weekday, not an ISO date. */
+const SHORT_DAY = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/Los_Angeles",
+  weekday: "short",
+  month: "short",
+  day: "numeric",
+});
+
 /**
  * The driver's day.
  *
@@ -59,7 +67,7 @@ function RouteBlock({ route, showDriver }: { route: RouteWithStops; showDriver: 
           {totals.stops} stop{totals.stops === 1 ? "" : "s"} · {totals.units} units
           {totals.kegs ? ` · ${totals.kegs} kegs` : ""} · load at {route.warehouse.name}
           {showDriver ? ` · ${route.driver?.name ?? "unassigned"}` : ""}
-          {isToday ? "" : ` · started ${ymdOfRoute(route.date)}`}
+          {isToday ? "" : ` · started ${SHORT_DAY.format(new Date(`${ymdOfRoute(route.date)}T12:00:00Z`))}`}
         </div>
 
         <div className="dv-prog">

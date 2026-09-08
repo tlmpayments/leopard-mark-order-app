@@ -17,9 +17,8 @@ export const metadata = {
   appleWebApp: {
     capable: true,
     title: "LM Delivery",
-    // The app is dark to the edges; a translucent bar lets the navy run under
-    // the clock instead of stopping at a white strip.
-    statusBarStyle: "black-translucent" as const,
+    // The ground is light now, so the clock and battery need to be dark.
+    statusBarStyle: "default" as const,
   },
   // Both spellings on purpose. `mobile-web-app-capable` is the standard one
   // that Android and iOS 16.4+ read; `apple-mobile-web-app-capable` is the
@@ -36,7 +35,7 @@ export const metadata = {
 export const viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#050b18",
+  themeColor: "#d7d8d4",
   // The one screen where pinch-zoom genuinely helps: a delivery address read
   // at arm's length. Never disable it here.
   maximumScale: 5,
