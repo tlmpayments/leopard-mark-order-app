@@ -128,10 +128,20 @@ export default auth((req) => {
   // is a phone surface on a guessable hostname that carries every account's
   // delivery address and phone number and can mark stock delivered. A PIN is
   // cheap and the driver types it once.
-  // The sign-in page and the personal-link landing are the two public paths
-  // under /delivery. /delivery/k/<token> IS the credential -- it has to be
-  // reachable signed-out, which is the whole point of it.
-  const isDeliveryPublic = pathname === "/delivery/login" || pathname.startsWith("/delivery/k/");
+  // The public paths under /delivery:
+  //   - the sign-in page;
+  //   - /delivery/k/<token>, which IS the credential and so has to be
+  //     reachable signed-out -- that is the whole point of it;
+  //   - the manifest and the service worker, which the browser fetches before
+  //     any session exists. Gating those does not protect anything (they carry
+  //     no customer data, only the app's name and icons) and quietly breaks
+  //     installability: the browser gets a redirect to an HTML login page where
+  //     it expected JSON, and silently declines to offer the install.
+  const isDeliveryPublic =
+    pathname === "/delivery/login" ||
+    pathname === "/delivery/manifest.webmanifest" ||
+    pathname === "/delivery/sw.js" ||
+    pathname.startsWith("/delivery/k/");
   if (pathname.startsWith("/delivery") && !isDeliveryPublic) {
     if (!req.auth) return Response.redirect(new URL("/delivery/login", req.nextUrl));
     if (!role || !DELIVERY_ROLES.includes(role)) {

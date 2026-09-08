@@ -2,12 +2,35 @@ import Link from "next/link";
 import "./delivery.css";
 import { currentDeliveryUser } from "@/lib/ops/session";
 import { todayYmd } from "@/lib/routes";
+import { RegisterSW } from "./_components/RegisterSW";
 
 export const metadata = {
   title: "Leopard Mark — Delivery",
-  // A driver adds this to his home screen and opens it in the cab; the browser
-  // chrome is wasted space there.
-  other: { "mobile-web-app-capable": "yes" },
+  applicationName: "LM Delivery",
+  manifest: "/delivery/manifest.webmanifest",
+  icons: {
+    // 180px, which is what iOS wants; without it the home-screen icon is a
+    // screenshot of the page.
+    apple: "/rep-app/assets/icons/apple-touch-icon.png",
+    icon: "/rep-app/assets/icons/icon-192.png",
+  },
+  appleWebApp: {
+    capable: true,
+    title: "LM Delivery",
+    // The app is dark to the edges; a translucent bar lets the navy run under
+    // the clock instead of stopping at a white strip.
+    statusBarStyle: "black-translucent" as const,
+  },
+  // Both spellings on purpose. `mobile-web-app-capable` is the standard one
+  // that Android and iOS 16.4+ read; `apple-mobile-web-app-capable` is the
+  // older Apple-only name, and it is what decides whether an iPhone launches
+  // this full-screen or with the Safari bars still showing. Next's
+  // appleWebApp.capable does not currently emit the latter, and we do not know
+  // which iOS the driver's phone is on, so state it directly.
+  // Only the Apple-prefixed one here: Next already emits the standard
+  // `mobile-web-app-capable` from appleWebApp.capable above, and listing it
+  // again just renders the tag twice.
+  other: { "apple-mobile-web-app-capable": "yes" },
 };
 
 export const viewport = {
@@ -39,6 +62,7 @@ export default async function DeliveryLayout({ children }: LayoutProps<"/deliver
 
   return (
     <div className="dv">
+      <RegisterSW />
       <div className="dv-shell">
         {user ? (
           <header className="dv-top">
