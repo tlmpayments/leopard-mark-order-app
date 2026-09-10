@@ -715,6 +715,50 @@ function assertRouteOpen(status: RouteStatus): void {
   if (status === "cancelled") throw new Error("That route was cancelled.");
 }
 
+/**
+ * What the driver has to put on the truck, totalled across every stop.
+ *
+ * His day starts at the warehouse, not at the first bar, and until he is
+ * loaded the per-stop breakdown is the wrong shape: nobody picks two kegs for
+ * Zeitgeist and then walks back for two more for Toronado. One line per SKU,
+ * summed, is what a person actually loads against.
+ */
+export interface ManifestLine {
+  productId: string;
+  productName: string;
+  formatLabel: string;
+  skuCode: string;
+  qty: number;
+  isKeg: boolean;
+}
+
+export function routeManifest(route: RouteWithStops): ManifestLine[] {
+  const bySku = new Map<string, ManifestLine>();
+  for (const stop of route.stops) {
+    // A stop already delivered or written off is not still on the truck.
+    if (stop.status === "delivered" || stop.status === "skipped") continue;
+    for (const line of stop.order.lines) {
+      const existing = bySku.get(line.productId);
+      if (existing) {
+        existing.qty += line.qty;
+        continue;
+      }
+      bySku.set(line.productId, {
+        productId: line.productId,
+        productName: line.product.productName,
+        formatLabel: line.product.formatLabel,
+        skuCode: line.product.skuCode,
+        qty: line.qty,
+        isKeg: line.product.isKeg,
+      });
+    }
+  }
+  // Kegs first, then by name: it is the order things get loaded in.
+  return [...bySku.values()].sort(
+    (a, b) => Number(b.isKeg) - Number(a.isKeg) || a.productName.localeCompare(b.productName),
+  );
+}
+
 /** Handling units and keg count for a route, for the dispatch summary. */
 export function routeTotals(route: RouteWithStops): { units: number; kegs: number; stops: number } {
   let units = 0;

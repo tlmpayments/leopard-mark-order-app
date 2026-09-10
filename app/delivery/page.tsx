@@ -1,6 +1,13 @@
 import Link from "next/link";
 import { requireDeliveryUser } from "@/lib/ops/session";
-import { dispatchedRoutesForDay, routesForDriver, routeTotals, todayYmd, ymdOfRoute } from "@/lib/routes";
+import {
+  dispatchedRoutesForDay,
+  routeManifest,
+  routesForDriver,
+  routeTotals,
+  todayYmd,
+  ymdOfRoute,
+} from "@/lib/routes";
 import { startRouteAction } from "./actions";
 import type { RouteWithStops } from "@/lib/routes";
 
@@ -58,6 +65,10 @@ function RouteBlock({ route, showDriver }: { route: RouteWithStops; showDriver: 
   const delivered = route.stops.filter((s) => s.status === "delivered").length;
   const next = route.stops.find((s) => s.status === "pending");
   const isToday = ymdOfRoute(route.date) === todayYmd();
+  // Dispatched but not yet started means the truck is not loaded: ops has
+  // released the route and he has not told us he has the stock.
+  const loading = route.status === "dispatched" && next != null;
+  const manifest = loading ? routeManifest(route) : [];
 
   return (
     <section className="dv-route">
@@ -81,22 +92,15 @@ function RouteBlock({ route, showDriver }: { route: RouteWithStops; showDriver: 
 
         {route.notes ? <div className="note">{route.notes}</div> : null}
 
-        {/* Only while there is something left to start. A route whose stops are
-            all settled but whose status never advanced (ops completed them from
-            the hub, say) must not offer to begin. */}
-        {route.status === "dispatched" && next ? (
-          <form action={startRouteAction} style={{ marginTop: 14 }}>
-            <input type="hidden" name="routeId" value={route.id} />
-            <button className="dv-btn primary" type="submit">
-              Start route
-            </button>
-          </form>
-        ) : null}
-
+        {/* Before he is loaded the next thing to do is the warehouse, not the
+            first bar. Once he is rolling this becomes the next stop. A route
+            whose stops are all settled offers neither. */}
         {next ? (
-          <Link className="dv-btn go" href={`/delivery/stops/${next.id}`} style={{ marginTop: 12 }}>
-            Next stop → {next.order.account.businessName}
-          </Link>
+          loading ? null : (
+            <Link className="dv-btn go" href={`/delivery/stops/${next.id}`} style={{ marginTop: 14 }}>
+              Next stop → {next.order.account.businessName}
+            </Link>
+          )
         ) : (
           <div className="dv-pill good" style={{ marginTop: 14 }}>
             Route complete
@@ -105,6 +109,47 @@ function RouteBlock({ route, showDriver }: { route: RouteWithStops; showDriver: 
       </div>
 
       <div className="dv-stops">
+        {/* Stop zero. He starts at the warehouse every day, so the warehouse is
+            a stop -- with the whole load on it, summed across the route, rather
+            than a per-bar breakdown nobody picks against. */}
+        <div className={`dv-stop pickup${loading ? " now" : " done"}`}>
+          <span className="seq">{loading ? "0" : "✓"}</span>
+          <span>
+            <span className="name">Load at {route.warehouse.name}</span>
+            <span className="sub">
+              {loading
+                ? `${totals.units} unit${totals.units === 1 ? "" : "s"} for ${totals.stops} stop${totals.stops === 1 ? "" : "s"}`
+                : "Picked up"}
+            </span>
+          </span>
+          <span />
+        </div>
+
+        {loading ? (
+          <div className="dv-card" style={{ marginBottom: 0 }}>
+            <h3>On the truck</h3>
+            {manifest.map((m) => (
+              <div className="dv-line" key={m.productId}>
+                <div>
+                  <div className="what">{m.productName}</div>
+                  <div className="fmt">
+                    {m.formatLabel} · <span className="mono">{m.skuCode}</span>
+                  </div>
+                </div>
+                <div className="mono" style={{ textAlign: "center", fontSize: 22, fontWeight: 600 }}>
+                  {m.qty}
+                </div>
+              </div>
+            ))}
+            <form action={startRouteAction} style={{ marginTop: 16 }}>
+              <input type="hidden" name="routeId" value={route.id} />
+              <button className="dv-btn go" type="submit">
+                Picked up
+              </button>
+            </form>
+          </div>
+        ) : null}
+
         {route.stops.map((stop) => {
           const units = stop.order.lines.reduce((n, l) => n + l.qty, 0);
           return (

@@ -193,6 +193,18 @@
 .dv-stop .sub { display: block; color: var(--muted); font-size: 14px; margin-top: 3px; }
 .dv-stop .chev { color: #b4a184; font-size: 24px; }
 
+/* Stop zero: the warehouse. Navy while it is the thing to do, and it keeps a
+   row in the list afterwards so the day still reads as "loaded, then four
+   drops" rather than starting mid-story. */
+.dv-stop.pickup.now {
+  background: var(--navy); border-color: var(--navy-deep); color: var(--foam);
+  box-shadow: 0 8px 0 var(--navy-deep), 0 16px 26px rgba(38, 59, 120, 0.2);
+}
+.dv-stop.pickup.now .seq { background: rgba(255, 253, 248, 0.19); color: var(--foam); }
+.dv-stop.pickup.now .sub { color: rgba(255, 253, 248, 0.78); }
+.dv-stop.pickup.done { opacity: 0.72; }
+.dv-stop.pickup:active { transform: none; }
+
 /* ---------- one stop ---------- */
 .dv-card {
   background: rgba(255, 255, 255, 0.82);
