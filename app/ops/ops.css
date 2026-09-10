@@ -524,19 +524,23 @@
    showing real customer data to anyone with the link, and a banner nobody
    notices is the same as no banner. Uses --critical, which is reserved for
    compliance-grade problems, because this is one. */
-.openbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px;
-  margin: 0;
-  padding: 10px 28px;
-  background: var(--critical-soft);
-  border-bottom: 1px solid var(--critical);
-  color: var(--critical-ink);
-  font-size: 13px;
+/* The document maker's two-item nav (app/docs/layout.tsx). */
+.docnav { display: flex; gap: 4px; }
+.docnav a {
+  color: var(--ink-3); text-decoration: none; font-size: 12px;
+  padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--surface);
 }
-.openbar b { color: var(--ink); font-weight: 600; }
+.docnav a:hover { color: var(--ink); border-color: var(--line-strong); }
+
+/* Sign out of the shared PIN, from the topbar. Quiet on purpose: it sits next
+   to the avatar and is only ever wanted at the end of a shift. */
+.lockbtn {
+  background: var(--surface); border: 1px solid var(--line); color: var(--ink-3);
+  border-radius: var(--r-sm); padding: 6px 10px; font: inherit; font-size: 12px;
+  cursor: pointer;
+}
+.lockbtn:hover { color: var(--ink); border-color: var(--line-strong); }
 
 /* Design-intent callouts. These are spec notes, not product chrome. */
 .spec {

@@ -1,8 +1,9 @@
+import Link from "next/link";
 import "../ops/ops.css";
 import { requireOpsUser, DOCS_ROLES } from "@/lib/ops/session";
 import { initials } from "@/lib/ops/format";
 
-export const metadata = { title: "Leopard Mark — BOL Maker" };
+export const metadata = { title: "Leopard Mark — Document Maker" };
 
 /**
  * bol.tlmbg.co (§8.7).
@@ -25,10 +26,17 @@ export default async function DocsLayout({ children }: LayoutProps<"/docs">) {
               LM
             </div>
             <div className="wm">
-              Bill of Lading Maker
+              Document Maker
               <small>bol.tlmbg.co</small>
             </div>
           </div>
+          {/* Two makers, one surface. Plain links rather than a nav component:
+              there are two of them, and a `docs_only` user should be able to
+              see everything this surface offers without opening a menu. */}
+          <nav className="docnav" aria-label="Documents">
+            <Link href="/docs">Delivery receipt</Link>
+            <Link href="/docs/invoice">Invoice</Link>
+          </nav>
           <div className="health" style={{ alignItems: "center" }}>
             {canSeeHub ? (
               <a className="btn sm ghost" href="/ops/documents">

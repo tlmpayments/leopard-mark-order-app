@@ -31,7 +31,13 @@ export default async function DocsPage({ searchParams }: PageProps<"/docs">) {
       take: 500,
     }),
     db.product.findMany({ where: { active: true }, orderBy: { skuCode: "asc" } }),
-    db.documentLog.findMany({ orderBy: { updatedAt: "desc" }, take: 25 }),
+    // Delivery receipts only: invoices live in the same table but have their
+    // own maker and their own list at /docs/invoice.
+    db.documentLog.findMany({
+      where: { docType: { in: ["delivery_receipt", "straight_bol"] } },
+      orderBy: { updatedAt: "desc" },
+      take: 25,
+    }),
   ]);
 
   return (

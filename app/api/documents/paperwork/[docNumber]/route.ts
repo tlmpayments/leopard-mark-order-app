@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { DOCS_ROLES, requireOpsUser } from "@/lib/ops/session";
 import { renderPrintablePage, type DocumentData } from "@/lib/bol/render";
+import { renderInvoicePage, type InvoiceDocData } from "@/lib/billing/renderInvoice";
 
 /**
  * Print a saved paperwork-only document.
@@ -19,6 +20,15 @@ export async function GET(
 
   const log = await db.documentLog.findUnique({ where: { docNumber } });
   if (!log) return NextResponse.json({ error: "Document not found" }, { status: 404 });
+
+  // Invoices are the same kind of record -- a saved payload, reprinted as it
+  // was issued -- but a different document, so they get their own renderer.
+  if (log.docType === "invoice") {
+    const invoice = log.payloadJson as unknown as InvoiceDocData;
+    return new Response(renderInvoicePage([invoice], log.docNumber), {
+      headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+    });
+  }
 
   const doc = log.payloadJson as unknown as DocumentData;
   return new Response(renderPrintablePage([doc], log.docNumber), {

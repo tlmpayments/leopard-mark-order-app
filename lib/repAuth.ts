@@ -14,10 +14,23 @@ export interface RepAuthResult {
   error?: string;
 }
 
+export interface VerifyRepPinOptions {
+  /**
+   * Whether a null `pinHash` means "this submission sets the PIN".
+   *
+   * True for a person: a rep's first sign-in is how they choose their own four
+   * digits and nobody else ever knows them. False for the shared hub account
+   * (`lib/ops/hubPin.ts`), where the row is not a person and the first visitor
+   * to guess any four digits must not get to define the hub's password.
+   */
+  allowFirstLoginSet?: boolean;
+}
+
 export async function verifyRepPin(
   name: string,
   pin: string,
   requiredRole?: string,
+  { allowFirstLoginSet = true }: VerifyRepPinOptions = {},
 ): Promise<RepAuthResult> {
   const cleanName = String(name ?? "").trim();
   const cleanPin = String(pin ?? "").trim();
@@ -41,6 +54,7 @@ export async function verifyRepPin(
   // Code.gs's handleSetPin exactly (only works while pinHash is null; once
   // set, this path never touches it again).
   if (!rep.pinHash) {
+    if (!allowFirstLoginSet) return { ok: false, error: "Invalid name or PIN" };
     const pinHash = await bcrypt.hash(cleanPin, 10);
     await db.rep.update({ where: { id: rep.id }, data: { pinHash } });
     return { ok: true, rep: { id: rep.id, name: rep.name, role: rep.role } };

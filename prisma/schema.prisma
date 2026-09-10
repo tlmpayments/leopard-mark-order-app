@@ -858,6 +858,10 @@ enum ShipmentStatus {
 enum DocType {
   delivery_receipt
   straight_bol
+  // Paperwork-only invoices from the BOL Maker (app/docs/invoice). A separate
+  // thing from the `Invoice` model, which is a real Stripe invoice tied to a
+  // delivered order -- this is a printed document and nothing else.
+  invoice
 }
 
 model Shipment {

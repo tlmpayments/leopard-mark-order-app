@@ -433,6 +433,94 @@ export async function dispatchRoute(routeId: string, byUserId: string): Promise<
   return result;
 }
 
+/**
+ * Pin a BOL number that was issued outside this system.
+ *
+ * Paperwork sometimes exists before the order does -- a batch printed by hand
+ * or by the old BOL Maker, already signed and already in a driver's stack. When
+ * that happens the choice is between reprinting it and honouring it, and
+ * honouring it is usually right: the number on the customer's copy is the one
+ * they will quote back over the phone.
+ *
+ * `mintForOrder` already returns early when a shipment carries a number, so
+ * setting one here is all that is needed for dispatch to leave it alone. This
+ * exists so that setting it is a deliberate, validated, logged act rather than
+ * a hand-written UPDATE.
+ *
+ * The cost, stated plainly: these numbers sit outside `BolSequence`, so the
+ * per-location sequence has a hole where they should have been. That is the
+ * price of not reprinting, and it is why the event records where the number
+ * came from.
+ */
+export async function setExternalBolNumber(
+  orderId: string,
+  bolNumber: string,
+  opts: { byUserId?: string; warehouseId?: string; note?: string } = {},
+): Promise<void> {
+  const number = bolNumber.trim();
+  if (!number) throw new Error("A BOL number is required.");
+
+  const order = await db.order.findUniqueOrThrow({
+    where: { id: orderId },
+    include: { shipment: true, lines: { include: { product: true } } },
+  });
+  if (order.deliveredAt) {
+    throw new Error("That order is already delivered; its BOL number is part of the record.");
+  }
+  if (order.shipment?.bolNumber && order.shipment.bolNumber !== number) {
+    throw new Error(
+      `That order already carries ${order.shipment.bolNumber}. Clear it deliberately before assigning another.`,
+    );
+  }
+
+  const clash = await db.shipment.findFirst({
+    where: { bolNumber: number, orderId: { not: orderId } },
+    select: { orderId: true },
+  });
+  if (clash) throw new Error(`${number} is already on another shipment.`);
+
+  const fromLocationId = opts.warehouseId ?? order.inventorySource;
+  if (!fromLocationId) throw new Error("No warehouse for this order; schedule it first.");
+
+  if (order.shipment) {
+    await db.shipment.update({
+      where: { id: order.shipment.id },
+      data: { bolNumber: number, fromLocationId },
+    });
+  } else {
+    await db.shipment.create({
+      data: {
+        status: "planned",
+        type: "DELIVERY",
+        fromLocationId,
+        accountId: order.accountId,
+        orderId: order.id,
+        scheduledFor: order.scheduledFor,
+        bolNumber: number,
+        docType: "delivery_receipt",
+        handlingUnits: order.lines.reduce((n, l) => n + l.qty, 0),
+        weightLbs: computeWeight(order.lines),
+      },
+    });
+  }
+  await db.order.update({ where: { id: order.id }, data: { bolNumber: number } });
+
+  await appendOrderEvent({
+    orderId,
+    eventType: "bol.issued",
+    actor: "ops",
+    payload: {
+      bolNumber: number,
+      fromLocationId,
+      // The thing a later reader needs: this number did NOT come from our
+      // counter, so do not go looking for it in BolSequence.
+      at: "external",
+      note: opts.note ?? null,
+      byUserId: opts.byUserId ?? null,
+    },
+  });
+}
+
 /** Mint the paperwork for a single stop added to an already-dispatched route. */
 export async function mintStopPaperwork(stopId: string, byUserId: string | null): Promise<string> {
   const stop = await db.routeStop.findUniqueOrThrow({
@@ -465,7 +553,20 @@ async function mintForOrder(
     include: { shipment: true, lines: { include: { product: true } } },
   });
 
-  if (order.shipment?.bolNumber) return order.shipment.bolNumber;
+  // Already numbered -- either a re-dispatch, or a number pinned by
+  // setExternalBolNumber. Keep the number, but still put the shipment on the
+  // truck: dispatch's other job is saying the stock has left, and returning
+  // early here used to leave such a stop `planned` forever while every other
+  // stop on the same route went `in_transit`.
+  if (order.shipment?.bolNumber) {
+    if (order.shipment.status === "planned") {
+      await tx.shipment.update({
+        where: { id: order.shipment.id },
+        data: { status: "in_transit" },
+      });
+    }
+    return order.shipment.bolNumber;
+  }
 
   const fromLocationId = order.shipment?.fromLocationId ?? order.inventorySource ?? warehouseId;
   const bolNumber = await mintBolNumber(tx, fromLocationId, at);

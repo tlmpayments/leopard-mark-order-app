@@ -24,6 +24,7 @@ import {
   moveStop,
   removeStopFromRoute,
   routeDateValue,
+  setExternalBolNumber,
   todayYmd,
   ymdOfRoute,
 } from "@/lib/routes";
@@ -380,5 +381,97 @@ describe("parseDeliveredLines", () => {
     const { lines, emptiesByProductId } = parseDeliveredLines(fd);
     expect(lines).toEqual([]);
     expect(emptiesByProductId).toEqual({ "prod-1": 3 });
+  });
+});
+
+describe("a BOL number issued outside this system", () => {
+  // Unique per run: shipments.bol_number is UNIQUE and this database persists
+  // between `vitest` runs, so a fixed string passes once and then never again.
+  const extBol = () => `WLA-TEST-${suffix()}`;
+
+  it("survives dispatch instead of being replaced by a minted one", async () => {
+    const f = await fixture(1);
+    const { order } = f.orders[0];
+    await addStopToRoute(f.route.id, order.id);
+    const n = extBol();
+    await setExternalBolNumber(order.id, n);
+
+    const { bolNumbers } = await dispatchRoute(f.route.id, f.driver.id);
+
+    expect(bolNumbers).toEqual([n]);
+    const shipment = await testDb.shipment.findFirstOrThrow({ where: { orderId: order.id } });
+    expect(shipment.bolNumber).toBe(n);
+    expect(shipment.status).toBe("in_transit");
+  });
+
+  it("is the number the delivery is finally recorded under", async () => {
+    const f = await fixture(1);
+    const { order } = f.orders[0];
+    await addStopToRoute(f.route.id, order.id);
+    const n = extBol();
+    await setExternalBolNumber(order.id, n);
+    await dispatchRoute(f.route.id, f.driver.id);
+
+    const result = await markDelivered({
+      orderId: order.id,
+      deliveredByUserId: f.driver.id,
+      actor: "ops",
+    });
+    expect(result.bolNumber).toBe(n);
+  });
+
+  it("records that the number did not come from our counter", async () => {
+    const f = await fixture(1);
+    const { order } = f.orders[0];
+    await addStopToRoute(f.route.id, order.id);
+    const n = extBol();
+    await setExternalBolNumber(order.id, n, { note: "printed by hand" });
+
+    const ev = await testDb.orderEvent.findFirstOrThrow({
+      where: { orderId: order.id, eventType: "bol.issued" },
+      orderBy: { createdAt: "desc" },
+    });
+    const p = ev.payloadJson as { at?: string; bolNumber?: string; note?: string };
+    expect(p.at).toBe("external");
+    expect(p.bolNumber).toBe(n);
+    expect(p.note).toBe("printed by hand");
+  });
+
+  it("refuses a number already on another shipment", async () => {
+    const f = await fixture(2);
+    await addStopToRoute(f.route.id, f.orders[0].order.id);
+    await addStopToRoute(f.route.id, f.orders[1].order.id);
+    const n = extBol();
+    await setExternalBolNumber(f.orders[0].order.id, n);
+
+    await expect(setExternalBolNumber(f.orders[1].order.id, n)).rejects.toThrow(
+      /already on another shipment/i,
+    );
+  });
+
+  it("refuses to quietly replace a number the order already has", async () => {
+    const f = await fixture(1);
+    await addStopToRoute(f.route.id, f.orders[0].order.id);
+    const n = extBol();
+    await setExternalBolNumber(f.orders[0].order.id, n);
+
+    await expect(setExternalBolNumber(f.orders[0].order.id, extBol())).rejects.toThrow(/already carries/i);
+    // Setting the same one again is a no-op, not an error.
+    await expect(setExternalBolNumber(f.orders[0].order.id, n)).resolves.toBeUndefined();
+  });
+
+  it("refuses once the delivery has happened", async () => {
+    const f = await fixture(1);
+    await addStopToRoute(f.route.id, f.orders[0].order.id);
+    await dispatchRoute(f.route.id, f.driver.id);
+    await markDelivered({ orderId: f.orders[0].order.id, deliveredByUserId: f.driver.id, actor: "ops" });
+
+    await expect(setExternalBolNumber(f.orders[0].order.id, extBol())).rejects.toThrow(/already delivered/i);
+  });
+
+  it("rejects an empty number", async () => {
+    const f = await fixture(1);
+    await addStopToRoute(f.route.id, f.orders[0].order.id);
+    await expect(setExternalBolNumber(f.orders[0].order.id, "   ")).rejects.toThrow(/required/i);
   });
 });

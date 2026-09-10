@@ -205,3 +205,13 @@ input:focus {
   line-height: 1.5;
   margin-bottom: 24px;
 }
+
+/* The hub's unlock screen (app/unlock/page.tsx). Four digits, spaced out and
+   centred, so a PIN typed on a phone reads as a PIN and not as a text field. */
+.pin-input {
+  text-align: center;
+  font-size: 28px;
+  letter-spacing: 0.5em;
+  text-indent: 0.5em;
+  padding: 14px 12px;
+}

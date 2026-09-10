@@ -83,7 +83,13 @@ export async function mintBolNumber(
  * counted per day against the `DOC` pseudo-location.
  */
 export async function mintDocumentNumber(
-  prefix: "DR" | "BOL",
+  /**
+   * `INV` is the invoice maker's series (app/docs/invoice). Deliberately its own
+   * counter and its own shape -- `INV-260909-0001` cannot be mistaken for a real
+   * order's `INV26277`, which is minted by the Sales sheet and belongs to an
+   * invoice the billing system actually issued.
+   */
+  prefix: "DR" | "BOL" | "INV",
   at: Date = new Date(),
   /**
    * Accepts a client for the same reason `mintBolNumber` requires one: a caller

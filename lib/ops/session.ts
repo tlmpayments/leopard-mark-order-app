@@ -20,7 +20,6 @@ import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import type { UserRole } from "@/app/generated/prisma/enums";
 import { ADMIN_ROLES, DELIVERY_ROLES, DOCS_ROLES, HUB_ROLES, LEDGER_ROLES, canActOnLocation } from "./roles";
-import { PUBLIC_ACCESS_USER, isPublicAccess } from "./publicAccess";
 
 // Re-exported so call sites import the policy and the "who is this" helpers
 // from one place, while the policy itself stays loadable without NextAuth.
@@ -36,24 +35,16 @@ export interface OpsUser {
 
 
 export async function currentOpsUser(): Promise<OpsUser | null> {
-  // TEMPORARY: see lib/ops/publicAccess.ts. Short-circuits before auth() is
-  // consulted, so the hub works with no session at all. Every downstream check
-  // (requireOpsUser, assertRole, canActOnLocation) is left exactly as it is and
-  // simply sees an admin -- which is what makes removing the flag sufficient to
-  // restore the real gating.
-  if (isPublicAccess()) return { ...PUBLIC_ACCESS_USER, locationIds: [] };
-
   return sessionUser();
 }
 
 /**
- * The signed-in user, ignoring the open-hub flag entirely.
+ * The signed-in user: whoever the session's Rep row says they are.
  *
- * The driver surface uses this rather than `currentOpsUser` so that turning the
- * hub open does not also open delivery.tlmbg.co. It also means a stop is always
- * attributable to a real person: `markDelivered` records who delivered it, and
- * "Public access" is not an answer to that question when the ledger is asked
- * later who moved the stock.
+ * Re-read from the database on every request rather than trusted from the JWT,
+ * which is what makes deactivating a Rep row -- including the shared "Ops Hub"
+ * row that the hub PIN signs in as -- take effect immediately instead of when
+ * the token expires.
  */
 async function sessionUser(): Promise<OpsUser | null> {
   const session = await auth();
@@ -86,10 +77,13 @@ async function sessionUser(): Promise<OpsUser | null> {
  */
 export async function requireOpsUser(allowed: readonly UserRole[] = HUB_ROLES): Promise<OpsUser> {
   const user = await currentOpsUser();
-  // `next` names the surface being protected, not always "ops" -- /docs uses
-  // this same helper, and telling the login page the wrong destination is the
-  // kind of small lie that becomes a real bug the moment anything reads it.
-  if (!user) redirect(`/admin/login?next=${allowed === DOCS_ROLES ? "docs" : "ops"}`);
+  // The shared-PIN unlock screen, not /admin/login: the hub and the document
+  // maker are what the four digits open (lib/ops/hubPin.ts), and /admin's
+  // name + PIN is a different, narrower credential. `next` names the surface
+  // being protected, not always "ops" -- /docs uses this same helper, and
+  // telling the unlock page the wrong destination is the kind of small lie
+  // that becomes a real bug the moment anything reads it.
+  if (!user) redirect(`/unlock?next=${allowed === DOCS_ROLES ? "/docs" : "/ops"}`);
   if (!allowed.includes(user.role)) {
     redirect(landingForRole(user.role));
   }

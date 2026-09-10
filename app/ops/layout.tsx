@@ -1,8 +1,8 @@
 import Link from "next/link";
 import "./ops.css";
 import { db } from "@/lib/db";
+import { signOut } from "@/auth";
 import { requireOpsUser } from "@/lib/ops/session";
-import { isPublicAccess } from "@/lib/ops/publicAccess";
 import { healthChips } from "@/lib/ops/queries";
 import { initials } from "@/lib/ops/format";
 import { NavIcon } from "./_components/icons";
@@ -20,7 +20,6 @@ export const metadata = { title: "Leopard Mark — Ops" };
  */
 export default async function OpsLayout({ children }: LayoutProps<"/ops">) {
   const user = await requireOpsUser();
-  const publicAccess = isPublicAccess();
 
   const [openOrders, needsSetup, deadJobs, failedInvoices, chips] = await Promise.all([
     db.order.count({
@@ -92,17 +91,21 @@ export default async function OpsLayout({ children }: LayoutProps<"/ops">) {
             <div className="avatar" title={`${user.name} · ${user.role}`}>
               {initials(user.name)}
             </div>
+            {/* Locking has to be possible from the hub itself: the shared PIN
+                is what is being put away, and a session that can only be ended
+                by clearing cookies is one nobody ends. In the topbar rather
+                than the rail foot because the foot is hidden on a phone. */}
+            <form
+              action={async () => {
+                "use server";
+                await signOut({ redirectTo: "/unlock" });
+              }}
+            >
+              <button className="lockbtn" type="submit" title="Sign out of the hub">
+                Lock
+              </button>
+            </form>
           </div>
-          {publicAccess ? (
-            <div className="openbar" role="status">
-              <b>No login required.</b>
-              <span>
-                This hub is currently reachable by anyone with the link, and every visitor acts as an admin —
-                including Mark delivered, Issue invoice and the automation toggles. Unset{" "}
-                <span className="mono">OPS_PUBLIC_ACCESS</span> to restore sign-in.
-              </span>
-            </div>
-          ) : null}
           <main className="page">{children}</main>
         </div>
       </div>
