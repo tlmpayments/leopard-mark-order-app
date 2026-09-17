@@ -101,6 +101,16 @@
         <span>Manage My Accounts<small>Your accounts, their orders and invoices</small></span>
         <span class="cta-btn-icon" aria-hidden="true">→</span>
       </button>
+
+      <!-- The prospecting tab. Sits last because it is the only CTA that
+           opens something a rep has not been handed: 414 visitable ABC
+           licenses in LA with the Cantinesca visit plan already applied
+           (assets/js/prospects.js). Everything above it is about accounts
+           that already exist. -->
+      <button class="cta-btn cta-btn--prospects" id="btn-prospects">
+        <span>Find Prospective Accounts<small>Doors worth knocking, in the order to knock them</small></span>
+        <span class="cta-btn-icon" aria-hidden="true">→</span>
+      </button>
     </div>
 
     <section class="territory-module" aria-labelledby="territory-title">
@@ -552,6 +562,91 @@
     <div id="map-account-list" class="order-history" style="margin-top:14px;"></div>
   </section>
 
+  <!-- PROSPECTING: the map of doors nobody has walked into yet ------------
+       One screen, three things stacked: the map, the filters that drive it,
+       and the list of the same prospects the map is showing. The list and
+       the map are never out of step because both render from one filtered
+       array (renderProspects in app.js).
+
+       Statuses live on the rep's own device (localStorage, keyed by rep
+       name). Nothing here is written back to the sheet or to Apps Script,
+       which is why the screen says so out loud in .prospect-scope-note --
+       a rep needs to know that what he marks is his own record. -->
+  <section id="screen-prospects" class="screen">
+    <a class="back-link" id="back-prospects-to-home">← Back</a>
+    <div class="section-title">Find Prospective Accounts</div>
+
+    <div class="prospect-progress" id="prospect-progress" aria-live="polite"></div>
+
+    <div id="prospects-map" class="accounts-map prospects-map"></div>
+
+    <div class="prospect-legend" id="prospect-legend" aria-label="What the pin colours mean"></div>
+
+    <div class="field" style="margin:14px 0 10px;">
+      <input id="prospect-search" placeholder="Search name, owner, street, city or ZIP" autocomplete="off" />
+    </div>
+
+    <div class="prospect-controls">
+      <div class="chip-row" id="prospect-wave-filter" role="group" aria-label="Which doors to show"></div>
+      <div class="chip-row" id="prospect-status-filter" role="group" aria-label="Filter by visit status"></div>
+      <div class="field field-row" style="margin-top:4px;">
+        <div class="field" style="flex:1;">
+          <label for="prospect-route">Route</label>
+          <select id="prospect-route"></select>
+        </div>
+        <div class="field" style="flex:1;">
+          <label for="prospect-sort">Order</label>
+          <select id="prospect-sort">
+            <option value="plan">Plan order (route, then stop)</option>
+            <option value="near">Nearest to me</option>
+            <option value="name">Name (A–Z)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="prospect-sweep" id="prospect-sweep"></div>
+
+    <div class="section-title" id="prospect-count-title" style="margin-top:18px;">Doors</div>
+    <div id="prospect-list" class="order-history"></div>
+    <button class="cta-btn secondary" id="prospect-show-more" type="button" style="display:none; width:100%; margin-top:12px;">
+      <span>Show more doors<small></small></span>
+      <span class="cta-btn-icon" aria-hidden="true">↓</span>
+    </button>
+    <p class="prospect-scope-note">
+      Visit statuses are saved on this phone, for this rep. They are not sent to the
+      office and another rep will not see them.
+    </p>
+  </section>
+
+  <!-- PROSPECT DETAIL: one door, its plan context, and the six buttons that
+       are the whole point of the feature. -->
+  <section id="screen-prospect" class="screen">
+    <a class="back-link" id="back-prospect">← Back</a>
+    <div class="rep-block" style="margin-bottom:14px;">
+      <div class="name" id="prospect-name" style="font-size:22px;">—</div>
+      <div class="rep-label" id="prospect-address" style="text-transform:none; letter-spacing:normal; font-weight:400;">—</div>
+    </div>
+
+    <div class="prospect-status-banner" id="prospect-status-banner"></div>
+
+    <div class="section-title">Mark this door</div>
+    <div class="prospect-status-grid" id="prospect-status-buttons" role="group" aria-label="Set visit status"></div>
+
+    <div class="field" style="margin-top:16px;">
+      <label for="prospect-note">Note <small style="font-weight:400; color:var(--silver-dim);">(saved on this phone)</small></label>
+      <textarea id="prospect-note" rows="3" placeholder="Who you spoke to, when to come back, what they pour now…"></textarea>
+    </div>
+
+    <div class="prospect-actions">
+      <a id="prospect-directions" class="btn btn-ghost" target="_blank" rel="noopener">Directions</a>
+      <button id="prospect-add-account" class="btn btn-primary" type="button">Add as Account</button>
+    </div>
+
+    <div class="section-title" style="margin-top:22px;">The plan for this door</div>
+    <div class="order-summary" id="prospect-facts"></div>
+  </section>
+
   <!-- ACCOUNT DETAIL -->
   <section id="screen-account" class="screen">
     <a class="back-link" id="back-account">← Back</a>
@@ -672,6 +767,7 @@
   <script src="assets/js/products.js"></script>
   <script src="assets/js/marketing-materials.js"></script>
   <script src="assets/js/customers.js"></script>
+  <script src="assets/js/prospects.js"></script>
   <script src="assets/js/app.js"></script>
 </body>
 </html>

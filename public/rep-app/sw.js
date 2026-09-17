@@ -1,4 +1,4 @@
-var CACHE = 'lmb-orders-v9';
+var CACHE = 'lmb-orders-v10';
 var ASSETS = [
   './',
   'index.html',
@@ -8,6 +8,7 @@ var ASSETS = [
   'assets/js/products.js',
   'assets/js/marketing-materials.js',
   'assets/js/customers.js',
+  'assets/js/prospects.js',
   'assets/js/app.js',
   'assets/img/cantinesca.png',
   'assets/img/sunlight-groove.png',

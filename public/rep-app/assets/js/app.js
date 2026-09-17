@@ -2682,6 +2682,578 @@
       });
   });
 
+  // ================= Prospecting: doors nobody has walked into yet =========
+  //
+  // The data (assets/js/prospects.js) is the CA ABC on-premise license export
+  // for LA ZIP group 01 with the Cantinesca visit plan applied: 551 rows, 414
+  // of them visitable, each carrying the route and stop number it was assigned
+  // in the plan. `id` is column A of that sheet and is permanent -- a rep's
+  // statuses are stored against it, so reclassifying an account in the sheet
+  // must never renumber it or every rep's history would point at the wrong
+  // door.
+  //
+  // Statuses are local to the device, by deliberate choice: a rep marking a
+  // door standing on the sidewalk should never be waiting on a network, and
+  // nothing here writes to Apps Script. The trade is that the office cannot
+  // see this, which the screen says in plain words rather than leaving a rep
+  // to assume otherwise.
+
+  var PROSPECT_STATUSES = [
+    { key: 'new',        label: 'Not visited', color: '#2f5fc0', blurb: 'Nobody has walked in yet.' },
+    { key: 'visited',    label: 'Visited',     color: '#f2a33c', blurb: 'Walked in. No decision on the table yet.' },
+    { key: 'interested', label: 'Interested',  color: '#d6187e', blurb: 'They want to talk. Follow up with product.' },
+    { key: 'comeback',   label: 'Come back',   color: '#ed633f', blurb: 'Decision-maker was out. Try another day or hour.' },
+    { key: 'signed',     label: 'Signed',      color: '#7a2fb5', blurb: 'It is an account. Add it and place the first order.' },
+    { key: 'nofit',      label: 'Not a fit',   color: '#8b97a3', blurb: 'Closed out. Kept on the map so it is not re-walked.' }
+  ];
+  var PROSPECT_STATUS_BY_KEY = {};
+  PROSPECT_STATUSES.forEach(function (s) { PROSPECT_STATUS_BY_KEY[s.key] = s; });
+
+  // The wave filter in the rep's words rather than the sheet's. `test` runs
+  // against column K, which is the only field that says what a row is for.
+  var PROSPECT_WAVES = [
+    { key: 'plan',    label: 'Whole plan',    test: function (p) { return p.wave.indexOf('Excluded') !== 0; } },
+    { key: 'first',   label: 'First push',    test: function (p) { return p.wave === 'First push'; } },
+    { key: 'second',  label: 'Second pass',   test: function (p) { return p.wave.indexOf('Second pass: outside') === 0; } },
+    { key: 'arts',    label: 'Arts District', test: function (p) { return p.wave.indexOf('Separate track') === 0; } },
+    { key: 'tierc',   label: 'Tier C',        test: function (p) { return p.wave.indexOf('Second pass: low concept fit') === 0; } },
+    { key: 'chains',  label: 'Chains to decide', test: function (p) { return !!PROSPECT_CHAIN_REVIEW[p.id]; } },
+    { key: 'all',     label: 'Everything',    test: function () { return true; } }
+  ];
+
+  // The chain doors flagged in the sheet for a team determination: SEGMENT
+  // says Chain (HQ decision), but the license sits with a local operator or
+  // franchisee rather than the brand's corporate parent -- the tell is a
+  // different license holder per door in column C -- so the beer decision may
+  // be local after all. Each one is either worked as Local multi-unit
+  // (owner-level) with a single owner meeting, or the exclusion is confirmed.
+  //
+  // Held as an explicit id list rather than read off the sheet's orange row
+  // fill, because the fill and the plan's prose disagree: the fill marks nine
+  // rows, the prose names these ten (415 Acapulco is filled yellow, not
+  // orange) and says "eleven". The likely eleventh is 424 Bob's Big Boy --
+  // filled yellow while ACTIVE, so it is not a "license not active" row
+  // either, and a franchised brand with a local license holder fits this
+  // pattern exactly. It is deliberately NOT in this list: nobody has said so.
+  // Add 424 here if the team confirms it.
+  var PROSPECT_CHAIN_REVIEW_IDS = [415, 442, 443, 448, 449, 450, 451, 455, 456, 460];
+  var PROSPECT_CHAIN_REVIEW = {};
+  PROSPECT_CHAIN_REVIEW_IDS.forEach(function (id) { PROSPECT_CHAIN_REVIEW[id] = true; });
+
+  var PROSPECT_PAGE = 40; // rows rendered before "show more" -- 414 <li> at once is a scroll no thumb wants
+
+  var prospectState = {
+    wave: 'plan',
+    status: 'all',
+    route: '',
+    sort: 'plan',
+    q: '',
+    limit: PROSPECT_PAGE,
+    here: null,       // {lat,lng} once the rep allows geolocation, for sort:'near'
+    marks: {},        // id -> { status, note, at }
+    map: null,
+    markers: {},      // id -> L.Marker, so a status change repaints one pin not 414
+    current: null     // the prospect open on screen-prospect
+  };
+
+  /** One store per rep on a shared phone; the key survives logout on purpose,
+   *  so a rep who signs back in still has the doors they marked this morning. */
+  function prospectStoreKey() {
+    return 'lm_prospect_marks_' + (state.rep || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  }
+
+  function loadProspectMarks() {
+    try {
+      var raw = localStorage.getItem(prospectStoreKey());
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) { return {}; }
+  }
+
+  function saveProspectMarks() {
+    try { localStorage.setItem(prospectStoreKey(), JSON.stringify(prospectState.marks)); }
+    catch (e) { toast('Could not save on this device', true); }
+  }
+
+  function prospectMark(id) { return prospectState.marks[id] || null; }
+  function prospectStatusKey(p) {
+    var m = prospectMark(p.id);
+    return (m && m.status) || 'new';
+  }
+  function prospectStatus(p) { return PROSPECT_STATUS_BY_KEY[prospectStatusKey(p)] || PROSPECT_STATUSES[0]; }
+
+  function allProspects() { return window.LM_PROSPECTS || []; }
+  function prospectSweep(p) {
+    var list = window.LM_PROSPECT_SWEEPS || [];
+    return p.sweep === null || p.sweep === undefined ? '' : (list[p.sweep] || '');
+  }
+  /** The line under a name: what the plan calls this door. */
+  function prospectPlanLine(p) {
+    if (p.route) return p.route + ' · stop ' + p.stop;
+    if (p.group) return p.group.split(' (')[0] + ' · stop ' + p.stop;
+    if (p.wave.indexOf('Separate track') === 0) return 'Arts District · stop ' + p.stop;
+    if (p.wave.indexOf('Excluded') === 0) return p.wave.replace('Excluded: ', 'Excluded — ');
+    return p.wave;
+  }
+  function prospectTitle(p) { return p.name || p.owner || ('License #' + p.id); }
+
+  function haversineMiles(a, b) {
+    var R = 3958.8, toRad = Math.PI / 180;
+    var dLat = (b.lat - a.lat) * toRad, dLng = (b.lng - a.lng) * toRad;
+    var s = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(a.lat * toRad) * Math.cos(b.lat * toRad) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    return 2 * R * Math.asin(Math.sqrt(s));
+  }
+
+  /** Routes and second-pass groups, in the plan's own working order, for the
+   *  Route dropdown. Built from the data so adding a route to the sheet needs
+   *  no change here. */
+  function prospectRouteOptions() {
+    var routes = [], seenR = {}, groups = [], seenG = {};
+    allProspects().forEach(function (p) {
+      if (p.route && !seenR[p.route]) { seenR[p.route] = true; routes.push({ value: 'route:' + p.route, label: p.route, order: p.routePriority || 99 }); }
+      if (p.group && !seenG[p.group]) { seenG[p.group] = true; groups.push({ value: 'group:' + p.group, label: p.group.split(' (')[0] }); }
+    });
+    routes.sort(function (a, b) { return a.order - b.order; });
+    groups.sort(function (a, b) { return a.label.localeCompare(b.label); });
+    return routes.concat(groups);
+  }
+
+  function prospectMatchesRoute(p) {
+    var sel = prospectState.route;
+    if (!sel) return true;
+    if (sel.indexOf('route:') === 0) return p.route === sel.slice(6);
+    if (sel.indexOf('group:') === 0) return p.group === sel.slice(6);
+    return true;
+  }
+
+  function filteredProspects() {
+    var wave = PROSPECT_WAVES.filter(function (w) { return w.key === prospectState.wave; })[0] || PROSPECT_WAVES[0];
+    var q = prospectState.q.trim().toLowerCase();
+    var list = allProspects().filter(function (p) {
+      if (!wave.test(p)) return false;
+      if (!prospectMatchesRoute(p)) return false;
+      if (prospectState.status !== 'all' && prospectStatusKey(p) !== prospectState.status) return false;
+      if (!q) return true;
+      return (p.name + ' ' + p.owner + ' ' + p.address + ' ' + p.city + ' ' + p.zip).toLowerCase().indexOf(q) !== -1;
+    });
+
+    var here = prospectState.here;
+    if (prospectState.sort === 'near' && here) {
+      list.forEach(function (p) { p._miles = haversineMiles(here, p); });
+      list.sort(function (a, b) { return a._miles - b._miles; });
+    } else if (prospectState.sort === 'name') {
+      list.sort(function (a, b) { return prospectTitle(a).localeCompare(prospectTitle(b)); });
+    } else {
+      // Plan order: column A already encodes it (route by route, stop by
+      // stop, then the second-pass groups, then everything excluded), which
+      // is exactly what "give it to them in an order that makes sense" means
+      // on this sheet. Sorting by id reproduces the printed plan.
+      list.sort(function (a, b) { return a.id - b.id; });
+    }
+    return list;
+  }
+
+  // ---- pins ---------------------------------------------------------------
+  function prospectPin(p) {
+    var s = prospectStatus(p);
+    var touched = prospectStatusKey(p) !== 'new';
+    return L.divIcon({
+      className: '',
+      html: '<div class="lm-pin' + (touched ? ' lm-pin--touched' : '') + '" style="background:' + s.color + ';"></div>',
+      iconSize: [24, 24],
+      iconAnchor: [12, 24],
+      popupAnchor: [0, -24]
+    });
+  }
+
+  function prospectPopupHtml(p) {
+    var s = prospectStatus(p);
+    return '<div class="prospect-popup"><strong>' + escapeHtml(prospectTitle(p)) + '</strong>' +
+      escapeHtml(p.address) +
+      '<span class="pp-status" style="color:' + s.color + ';">' +
+      '<i class="prospect-dot" style="background:' + s.color + ';"></i>' + escapeHtml(s.label) + '</span>' +
+      '<br/><a href="#" class="popup-open-prospect" data-prospect-id="' + p.id + '">Open this door →</a></div>';
+  }
+
+  function renderProspectMap(list) {
+    if (!window.L) return;
+    if (!prospectState.map) {
+      prospectState.map = L.map('prospects-map');
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        maxZoom: 19,
+        subdomains: 'abcd',
+        attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; OpenStreetMap contributors'
+      }).addTo(prospectState.map);
+      prospectState.map.on('popupopen', function (e) {
+        var link = e.popup._contentNode.querySelector('.popup-open-prospect');
+        if (!link) return;
+        link.addEventListener('click', function (evt) {
+          evt.preventDefault();
+          openProspect(parseInt(link.getAttribute('data-prospect-id'), 10));
+        });
+      });
+    }
+
+    Object.keys(prospectState.markers).forEach(function (id) {
+      prospectState.map.removeLayer(prospectState.markers[id]);
+    });
+    prospectState.markers = {};
+
+    var bounds = [];
+    list.forEach(function (p) {
+      var marker = L.marker([p.lat, p.lng], { icon: prospectPin(p) }).addTo(prospectState.map);
+      marker.bindPopup(prospectPopupHtml(p));
+      prospectState.markers[p.id] = marker;
+      bounds.push([p.lat, p.lng]);
+    });
+
+    if (bounds.length) prospectState.map.fitBounds(L.latLngBounds(bounds), { padding: [26, 26], maxZoom: 15 });
+    else prospectState.map.setView([33.97, -118.19], 11);
+    prospectState.map.invalidateSize();
+  }
+
+  /** One pin, repainted in place. Re-running renderProspectMap after every tap
+   *  would also refit the bounds and throw away the rep's pan and zoom. */
+  function refreshProspectPin(p) {
+    var marker = prospectState.markers[p.id];
+    if (!marker) return;
+    marker.setIcon(prospectPin(p));
+    marker.setPopupContent(prospectPopupHtml(p));
+  }
+
+  // ---- the screen ---------------------------------------------------------
+  function renderProspectProgress() {
+    var visitable = allProspects().filter(function (p) { return p.wave.indexOf('Excluded') !== 0; });
+    var counts = {};
+    PROSPECT_STATUSES.forEach(function (s) { counts[s.key] = 0; });
+    visitable.forEach(function (p) { counts[prospectStatusKey(p)]++; });
+    var walked = visitable.length - counts['new'];
+
+    var bar = PROSPECT_STATUSES.map(function (s) {
+      var pct = visitable.length ? (counts[s.key] / visitable.length) * 100 : 0;
+      return pct > 0 ? '<i style="width:' + pct.toFixed(2) + '%; background:' + s.color + ';" title="' +
+        escapeHtml(s.label + ': ' + counts[s.key]) + '"></i>' : '';
+    }).join('');
+
+    document.getElementById('prospect-progress').innerHTML =
+      '<div class="pp-line"><b>' + walked + '</b> of <b>' + visitable.length + '</b> doors in the plan worked · ' +
+      '<b>' + counts.interested + '</b> interested · <b>' + counts.signed + '</b> signed</div>' +
+      '<div class="pp-bar">' + bar + '</div>';
+  }
+
+  function renderProspectLegend() {
+    document.getElementById('prospect-legend').innerHTML = PROSPECT_STATUSES.map(function (s) {
+      return '<span><i class="prospect-dot" style="background:' + s.color + ';"></i>' + escapeHtml(s.label) + '</span>';
+    }).join('');
+  }
+
+  function renderProspectFilters() {
+    document.getElementById('prospect-wave-filter').innerHTML = PROSPECT_WAVES.map(function (w) {
+      return '<button type="button" class="chip' + (prospectState.wave === w.key ? ' selected' : '') +
+        '" data-wave="' + w.key + '">' + escapeHtml(w.label) + '</button>';
+    }).join('');
+
+    var statusChips = [{ key: 'all', label: 'Any status' }].concat(PROSPECT_STATUSES);
+    document.getElementById('prospect-status-filter').innerHTML = statusChips.map(function (s) {
+      var on = prospectState.status === s.key;
+      var style = on && s.color ? ' style="background:' + s.color + '; border-color:' + s.color + '; color:#fff;"' : '';
+      return '<button type="button" class="chip' + (on ? ' selected' : '') + '" data-status="' + s.key + '"' + style + '>' +
+        escapeHtml(s.label) + '</button>';
+    }).join('');
+
+    var select = document.getElementById('prospect-route');
+    if (!select.options.length) {
+      select.innerHTML = '<option value="">All routes</option>' + prospectRouteOptions().map(function (o) {
+        return '<option value="' + escapeHtml(o.value) + '">' + escapeHtml(o.label) + '</option>';
+      }).join('');
+    }
+    select.value = prospectState.route;
+    document.getElementById('prospect-sort').value = prospectState.sort;
+  }
+
+  /** The corridor sweep (column O) for whatever route is in view. It is the
+   *  instruction the rep walks, and it only means anything when one route is
+   *  selected -- with all nine on screen there is no single sweep to show. */
+  function renderProspectSweep(list) {
+    var el = document.getElementById('prospect-sweep');
+    var sweeps = {};
+    list.forEach(function (p) { var s = prospectSweep(p); if (s) sweeps[s] = true; });
+    var keys = Object.keys(sweeps);
+    el.innerHTML = keys.length === 1
+      ? '<strong>The sweep</strong>' + escapeHtml(keys[0])
+      : '';
+  }
+
+  function renderProspectList(list) {
+    var shown = list.slice(0, prospectState.limit);
+    document.getElementById('prospect-count-title').textContent =
+      list.length + (list.length === 1 ? ' door' : ' doors');
+
+    document.getElementById('prospect-list').innerHTML = shown.map(function (p) {
+      var s = prospectStatus(p);
+      var miles = prospectState.sort === 'near' && p._miles !== undefined
+        ? ' · ' + p._miles.toFixed(1) + ' mi' : '';
+      return '<div class="order-row clickable prospect-row" data-prospect-id="' + p.id + '">' +
+        '<span class="prospect-stop">' + (p.stop || '—') + '</span>' +
+        '<span class="prospect-body">' +
+          '<span class="oname"><i class="prospect-dot" style="background:' + s.color + ';"></i>' +
+            escapeHtml(prospectTitle(p)) + '</span>' +
+          '<span class="osub">' + escapeHtml(p.address.split(',')[0]) + ' · ' +
+            escapeHtml(titleCase(p.city)) + miles + '</span>' +
+          '<span class="prospect-tags">' +
+            '<span class="prospect-tag tier-' + escapeHtml(p.tier) + '">Tier ' + escapeHtml(p.tier) + '</span>' +
+            '<span class="prospect-tag">' + escapeHtml(prospectPlanLine(p)) + '</span>' +
+            (PROSPECT_CHAIN_REVIEW[p.id]
+              ? '<span class="prospect-tag prospect-tag--review">Team determination</span>'
+              : '') +
+            (prospectStatusKey(p) !== 'new'
+              ? '<span class="prospect-tag" style="background:' + s.color + '22; color:' + s.color + ';">' + escapeHtml(s.label) + '</span>'
+              : '') +
+          '</span>' +
+        '</span>' +
+        '<span>→</span>' +
+        '</div>';
+    }).join('') || '<div class="empty-note">No doors match these filters.</div>';
+
+    var more = document.getElementById('prospect-show-more');
+    if (list.length > shown.length) {
+      more.style.display = 'flex';
+      more.querySelector('small').textContent = shown.length + ' of ' + list.length + ' shown';
+    } else {
+      more.style.display = 'none';
+    }
+
+    document.getElementById('prospect-list').querySelectorAll('[data-prospect-id]').forEach(function (row) {
+      row.addEventListener('click', function () {
+        openProspect(parseInt(row.getAttribute('data-prospect-id'), 10));
+      });
+    });
+  }
+
+  /** ABC writes cities in caps; the rest of this app does not shout. */
+  function titleCase(str) {
+    return (str || '').toLowerCase().replace(/\b[a-z]/g, function (c) { return c.toUpperCase(); });
+  }
+
+  function renderProspects() {
+    var list = filteredProspects();
+    renderProspectProgress();
+    renderProspectFilters();
+    renderProspectSweep(list);
+    renderProspectList(list);
+    renderProspectMap(list);
+  }
+
+  function openProspects() {
+    prospectState.marks = loadProspectMarks();
+    prospectState.limit = PROSPECT_PAGE;
+    showScreen('screen-prospects');
+    renderProspectLegend();
+    // Leaflet measures the container, so it has to be visible first -- the
+    // same reason openAccountsMap defers.
+    setTimeout(renderProspects, 50);
+  }
+
+  document.getElementById('btn-prospects').addEventListener('click', openProspects);
+  document.getElementById('back-prospects-to-home').addEventListener('click', function () { showScreen('screen-home'); });
+
+  document.getElementById('prospect-wave-filter').addEventListener('click', function (e) {
+    var chip = e.target.closest('[data-wave]');
+    if (!chip) return;
+    prospectState.wave = chip.getAttribute('data-wave');
+    prospectState.limit = PROSPECT_PAGE;
+    renderProspects();
+  });
+
+  document.getElementById('prospect-status-filter').addEventListener('click', function (e) {
+    var chip = e.target.closest('[data-status]');
+    if (!chip) return;
+    prospectState.status = chip.getAttribute('data-status');
+    prospectState.limit = PROSPECT_PAGE;
+    renderProspects();
+  });
+
+  document.getElementById('prospect-route').addEventListener('change', function (e) {
+    prospectState.route = e.target.value;
+    prospectState.limit = PROSPECT_PAGE;
+    renderProspects();
+  });
+
+  // "Nearest to me" is the one control that can fail (permission denied, no
+  // fix indoors). It asks once, tells the rep what happened, and falls back to
+  // plan order rather than silently showing an unsorted list.
+  document.getElementById('prospect-sort').addEventListener('change', function (e) {
+    var value = e.target.value;
+    if (value !== 'near' || prospectState.here) {
+      prospectState.sort = value;
+      prospectState.limit = PROSPECT_PAGE;
+      renderProspects();
+      return;
+    }
+    if (!navigator.geolocation) {
+      toast('This phone will not share its location', true);
+      e.target.value = prospectState.sort;
+      return;
+    }
+    toast('Finding you…');
+    navigator.geolocation.getCurrentPosition(function (pos) {
+      prospectState.here = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      prospectState.sort = 'near';
+      prospectState.limit = PROSPECT_PAGE;
+      renderProspects();
+    }, function () {
+      toast('Could not get your location', true);
+      document.getElementById('prospect-sort').value = prospectState.sort;
+    }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
+  });
+
+  document.getElementById('prospect-show-more').addEventListener('click', function () {
+    prospectState.limit += PROSPECT_PAGE;
+    renderProspectList(filteredProspects());
+  });
+
+  var prospectSearchTimer = null;
+  document.getElementById('prospect-search').addEventListener('input', function (e) {
+    var value = e.target.value;
+    clearTimeout(prospectSearchTimer);
+    prospectSearchTimer = setTimeout(function () {
+      prospectState.q = value;
+      prospectState.limit = PROSPECT_PAGE;
+      renderProspects();
+    }, 180);
+  });
+
+  // ---- one door -----------------------------------------------------------
+  function findProspect(id) {
+    var list = allProspects();
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+    return null;
+  }
+
+  function openProspect(id) {
+    var p = findProspect(id);
+    if (!p) return;
+    prospectState.current = p;
+
+    document.getElementById('prospect-name').textContent = prospectTitle(p);
+    document.getElementById('prospect-address').textContent = p.address;
+    document.getElementById('prospect-note').value = (prospectMark(id) || {}).note || '';
+    document.getElementById('prospect-directions').href =
+      'https://www.google.com/maps/dir/?api=1&destination=' + p.lat + ',' + p.lng;
+
+    renderProspectStatusButtons();
+    renderProspectFacts(p);
+    showScreen('screen-prospect');
+  }
+
+  function renderProspectStatusButtons() {
+    var p = prospectState.current;
+    var current = prospectStatusKey(p);
+    var mark = prospectMark(p.id);
+
+    document.getElementById('prospect-status-buttons').innerHTML = PROSPECT_STATUSES.map(function (s) {
+      var on = s.key === current;
+      return '<button type="button" class="prospect-status-btn' + (on ? ' selected' : '') + '" data-status="' + s.key +
+        '" style="color:' + (on ? s.color : 'var(--ink)') + ';">' +
+        '<i style="background:' + s.color + ';"></i>' + escapeHtml(s.label) + '</button>';
+    }).join('');
+
+    var banner = document.getElementById('prospect-status-banner');
+    var status = PROSPECT_STATUS_BY_KEY[current];
+    banner.innerHTML = '<b style="color:' + status.color + ';">' + escapeHtml(status.label) + '</b> — ' +
+      escapeHtml(status.blurb) +
+      (mark && mark.at ? '<br/>Marked ' + escapeHtml(new Date(mark.at).toLocaleDateString()) + '.' : '');
+  }
+
+  function renderProspectFacts(p) {
+    var rows = [
+      ['Owner on the license', p.owner],
+      ['License type', p.licType + (p.abcStatus !== 'ACTIVE' ? ' · ' + p.abcStatus : '')],
+      ['Segment', p.segment],
+      ['Concept fit', 'Tier ' + p.tier + (p.tier === 'A' ? ' — Cantinesca concept' : p.tier === 'B' ? ' — beer-forward occasion' : ' — low fit on a first pass')],
+      ['Wave', p.wave],
+      ['Where it falls', prospectPlanLine(p)],
+      ['ZIP', p.zip]
+    ];
+    var sweep = prospectSweep(p);
+    if (sweep) rows.push(['The sweep', sweep]);
+    if (p.geo !== 'rooftop') rows.push(['Pin accuracy', p.geo === 'zip' ? 'ZIP centroid — check the address' : 'Street-level — close, not exact']);
+    if (PROSPECT_CHAIN_REVIEW[p.id]) {
+      rows.push(['Before you knock', 'Flagged for a team determination. The license here is held by a local operator, not the brand, so the beer decision may be local \u2014 but that call has not been made. Do not cold-walk it; ask the office.']);
+    }
+    if (p.segment === 'Local multi-unit (owner-level)') {
+      rows.push(['Before you knock', 'This is one of a family group. The owner meeting comes first — check with the office before walking in.']);
+    }
+
+    document.getElementById('prospect-facts').innerHTML = rows.filter(function (r) { return r[1]; }).map(function (r) {
+      return '<div class="oline"><span>' + escapeHtml(r[0]) + '</span><strong style="text-align:right; max-width:62%;">' +
+        escapeHtml(r[1]) + '</strong></div>';
+    }).join('');
+  }
+
+  document.getElementById('prospect-status-buttons').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-status]');
+    if (!btn || !prospectState.current) return;
+    var p = prospectState.current;
+    var key = btn.getAttribute('data-status');
+    var existing = prospectMark(p.id) || {};
+
+    if (key === 'new') {
+      // Back to untouched. The note is deliberately kept: a rep clearing a
+      // wrong status has not asked to lose what they wrote about the door.
+      if (existing.note) prospectState.marks[p.id] = { status: 'new', note: existing.note, at: Date.now() };
+      else delete prospectState.marks[p.id];
+    } else {
+      prospectState.marks[p.id] = { status: key, note: existing.note || '', at: Date.now() };
+    }
+
+    saveProspectMarks();
+    renderProspectStatusButtons();
+    refreshProspectPin(p);
+    renderProspectProgress();
+    toast(prospectTitle(p) + ' — ' + PROSPECT_STATUS_BY_KEY[key].label);
+  });
+
+  // Saved on the way out of the field rather than on every keystroke.
+  var prospectNoteTimer = null;
+  document.getElementById('prospect-note').addEventListener('input', function (e) {
+    if (!prospectState.current) return;
+    var p = prospectState.current, note = e.target.value;
+    clearTimeout(prospectNoteTimer);
+    prospectNoteTimer = setTimeout(function () {
+      var existing = prospectMark(p.id) || { status: 'new', at: Date.now() };
+      if (!note && existing.status === 'new') delete prospectState.marks[p.id];
+      else prospectState.marks[p.id] = { status: existing.status || 'new', note: note, at: existing.at || Date.now() };
+      saveProspectMarks();
+    }, 400);
+  });
+
+  document.getElementById('back-prospect').addEventListener('click', function () {
+    showScreen('screen-prospects');
+    // The list carries status chips and the map carries colours, so both have
+    // to catch up with whatever was just marked.
+    setTimeout(renderProspects, 50);
+  });
+
+  // A signed door is not an account until it exists in the customer sheet.
+  // This hands the rep the same new-account form as the home screen with the
+  // four fields ABC already told us filled in.
+  document.getElementById('prospect-add-account').addEventListener('click', function () {
+    var p = prospectState.current;
+    if (!p) return;
+    openNewCustomerForm('screen-prospect');
+    document.getElementById('nc-name').value = prospectTitle(p);
+    document.getElementById('nc-address-street').value = p.address.split(',')[0].trim();
+    document.getElementById('nc-address-city').value = titleCase(p.city);
+    document.getElementById('nc-address-state').value = 'CA';
+    document.getElementById('nc-address-zip').value = p.zip;
+    var region = document.getElementById('nc-region');
+    if (!region.value) {
+      var suggested = inferRegion(state.rep, titleCase(p.city));
+      if (suggested) region.value = suggested;
+    }
+  });
+
   // ---------- Boot ----------
   var existing = loadSession();
   if (existing) {
