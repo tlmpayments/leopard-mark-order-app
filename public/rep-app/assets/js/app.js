@@ -2740,10 +2740,101 @@
   var PROSPECT_CHAIN_REVIEW = {};
   PROSPECT_CHAIN_REVIEW_IDS.forEach(function (id) { PROSPECT_CHAIN_REVIEW[id] = true; });
 
+  // Step 2 of the plan: "At 10 to 12 doors a day a 36-door route is three
+  // days: cut each route into day-sized pieces along the sweep, never across
+  // it." 12 is the top of that range, so a day-sized piece here is a ceiling
+  // rather than a quota -- and the cut always follows STOP order, which is
+  // the sweep, so a day is a contiguous run of street rather than a slice
+  // taken across the corridor.
+  var PROSPECT_DOORS_PER_DAY = 12;
+
+  // Step 3: the split is by territory, not by rows. Each rep owns a
+  // contiguous block of routes and works them in priority order, and each
+  // second-pass group goes to whoever ran the route it extends -- so a tail
+  // is the same streets, worked by the same person, after the parent route.
+  //
+  // Keyed on the rep's LAST NAME, the way LA_TERRITORY_REPS above already
+  // keys them, so whatever exact form the Apps Script login returns
+  // ("James Williams", "J. Williams") still resolves. The two names and
+  // colours come from that same map, so a rep is one colour everywhere in
+  // this app.
+  //
+  // WHICH REP TAKES WHICH HALF IS AN ASSUMPTION, not something the plan
+  // states: the plan defines the two territories and names the two reps, and
+  // leaves the pairing to the team. Swap the two `rep` values below to swap
+  // territories; nothing else needs to change.
+  var PROSPECT_TERRITORIES = [
+    {
+      key: 'ne',
+      rep: 'williams',
+      label: 'North & East',
+      routes: [
+        'R3B East Los Angeles + Commerce',
+        'R5 Downey core',
+        'R3A Boyle Heights',
+        'R6 Montebello + Pico Rivera Whittier'
+      ],
+      groups: ['S1', 'S2', 'S4'] // Downey outer, Pico Rivera, Commerce
+    },
+    {
+      key: 'ws',
+      rep: 'villanueva',
+      label: 'West & South',
+      routes: [
+        'R1 Huntington Park',
+        'R2A Maywood + Bell',
+        'R4A South Gate',
+        'R2B Bell Gardens + Cudahy',
+        'R4B Lynwood + South Gate south'
+      ],
+      groups: ['S3'] // South LA
+    }
+  ];
+
+  // The plan's three-rep split, held here so that adding the third person is
+  // an edit rather than a rebuild: North (R3B, R3A, R6 + S2, S4), Centre
+  // (R1, R2A, R2B + S3), South & East (R4A, R4B, R5 + S1). Counted against
+  // the data it comes to 89, 78 and 94 first-push doors -- the plan's "78 to
+  // 94 each". Deliberately not wired up: only two reps have been named.
+  //
+  // var PROSPECT_TERRITORIES_THREE = [
+  //   { key: 'n',  rep: '?', label: 'North',        routes: ['R3B East Los Angeles + Commerce', 'R3A Boyle Heights', 'R6 Montebello + Pico Rivera Whittier'], groups: ['S2', 'S4'] },
+  //   { key: 'c',  rep: '?', label: 'Centre',       routes: ['R1 Huntington Park', 'R2A Maywood + Bell', 'R2B Bell Gardens + Cudahy'], groups: ['S3'] },
+  //   { key: 'se', rep: '?', label: 'South & East', routes: ['R4A South Gate', 'R4B Lynwood + South Gate south', 'R5 Downey core'], groups: ['S1'] }
+  // ];
+
+  /** The territory a door falls in, or null for the tracks that stay outside
+   *  the split. Route and group only: the Arts District track has neither and
+   *  is one buyer's job, and tier C and the exclusions are not dispatched to
+   *  anyone yet.
+   *
+   *  A multi-unit door DOES belong to a territory -- step 6 keeps its stop
+   *  number "so reps know where they fall" even though the owner meeting
+   *  comes first. It is the owner meeting that sits outside the split, not
+   *  the door. */
+  function prospectTerritory(p) {
+    for (var i = 0; i < PROSPECT_TERRITORIES.length; i++) {
+      var t = PROSPECT_TERRITORIES[i];
+      if (p.route && t.routes.indexOf(p.route) !== -1) return t;
+      if (p.group && t.groups.some(function (g) { return p.group.indexOf(g) === 0; })) return t;
+    }
+    return null;
+  }
+
+  function prospectTerritoryRep(t) {
+    return t ? (LA_TERRITORY_REPS[t.rep] || UNKNOWN_TERRITORY_REP) : UNKNOWN_TERRITORY_REP;
+  }
+
+  /** Which day of that route or group a stop falls on, cut along the sweep. */
+  function prospectDay(p) {
+    return p.stop ? Math.ceil(p.stop / PROSPECT_DOORS_PER_DAY) : null;
+  }
+
   var PROSPECT_PAGE = 40; // rows rendered before "show more" -- 414 <li> at once is a scroll no thumb wants
 
   var prospectState = {
     wave: 'plan',
+    rep: 'mine',    // 'mine' | a territory key | 'outside' | 'all'
     status: 'all',
     route: '',
     sort: 'plan',
@@ -2788,8 +2879,10 @@
   }
   /** The line under a name: what the plan calls this door. */
   function prospectPlanLine(p) {
-    if (p.route) return p.route + ' · stop ' + p.stop;
-    if (p.group) return p.group.split(' (')[0] + ' · stop ' + p.stop;
+    var day = prospectDay(p);
+    var suffix = day ? ' · day ' + day : '';
+    if (p.route) return p.route + ' · stop ' + p.stop + suffix;
+    if (p.group) return p.group.split(' (')[0] + ' · stop ' + p.stop + suffix;
     if (p.wave.indexOf('Separate track') === 0) return 'Arts District · stop ' + p.stop;
     if (p.wave.indexOf('Excluded') === 0) return p.wave.replace('Excluded: ', 'Excluded — ');
     return p.wave;
@@ -2826,12 +2919,34 @@
     return true;
   }
 
+
+  /** The logged-in rep's own territory, if they have one. A rep who is not in
+   *  the split (Steve guiding, or anyone else signing in) has none, and the
+   *  "Mine" chip then shows everything rather than an empty screen. */
+  function myTerritory() {
+    var last = repLastName(state.rep);
+    return PROSPECT_TERRITORIES.filter(function (t) { return t.rep === last; })[0] || null;
+  }
+
+  function prospectMatchesRep(p) {
+    var sel = prospectState.rep;
+    if (sel === 'all') return true;
+    var t = prospectTerritory(p);
+    if (sel === 'outside') return !t;
+    if (sel === 'mine') {
+      var mine = myTerritory();
+      return mine ? t === mine : true;
+    }
+    return t && t.key === sel;
+  }
+
   function filteredProspects() {
     var wave = PROSPECT_WAVES.filter(function (w) { return w.key === prospectState.wave; })[0] || PROSPECT_WAVES[0];
     var q = prospectState.q.trim().toLowerCase();
     var list = allProspects().filter(function (p) {
       if (!wave.test(p)) return false;
       if (!prospectMatchesRoute(p)) return false;
+      if (!prospectMatchesRep(p)) return false;
       if (prospectState.status !== 'all' && prospectStatusKey(p) !== prospectState.status) return false;
       if (!q) return true;
       return (p.name + ' ' + p.owner + ' ' + p.address + ' ' + p.city + ' ' + p.zip).toLowerCase().indexOf(q) !== -1;
@@ -2948,6 +3063,25 @@
   }
 
   function renderProspectFilters() {
+    // Whose doors, before which doors. Step 3 splits the map by territory, so
+    // the first chip is the rep's own half -- that is the answer to "where do
+    // I go today" and the only chip most reps will ever tap. The others are
+    // there so a rep can see the whole board and so Steve can look at either
+    // half while guiding.
+    var mine = myTerritory();
+    var repChips = [{ key: 'mine', label: mine ? 'Mine · ' + mine.label : 'Mine', color: mine ? prospectTerritoryRep(mine).color : null }]
+      .concat(PROSPECT_TERRITORIES.map(function (t) {
+        return { key: t.key, label: prospectTerritoryRep(t).name + ' · ' + t.label, color: prospectTerritoryRep(t).color };
+      }))
+      .concat([{ key: 'outside', label: 'Outside the split' }, { key: 'all', label: 'Everyone' }]);
+
+    document.getElementById('prospect-rep-filter').innerHTML = repChips.map(function (c) {
+      var on = prospectState.rep === c.key;
+      var style = on && c.color ? ' style="background:' + c.color + '; border-color:' + c.color + '; color:#102f44;"' : '';
+      return '<button type="button" class="chip' + (on ? ' selected' : '') + '" data-rep="' + c.key + '"' + style + '>' +
+        escapeHtml(c.label) + '</button>';
+    }).join('');
+
     document.getElementById('prospect-wave-filter').innerHTML = PROSPECT_WAVES.map(function (w) {
       return '<button type="button" class="chip' + (prospectState.wave === w.key ? ' selected' : '') +
         '" data-wave="' + w.key + '">' + escapeHtml(w.label) + '</button>';
@@ -2989,11 +3123,28 @@
     document.getElementById('prospect-count-title').textContent =
       list.length + (list.length === 1 ? ' door' : ' doors');
 
+    // Day dividers, but only when the list is one route or group in plan
+    // order -- that is the only arrangement where "day 2" is a contiguous run
+    // of the sweep rather than a number attached to scattered rows.
+    var cutIntoDays = Boolean(prospectState.route) && prospectState.sort === 'plan';
+    var lastStopInView = list.reduce(function (m, x) { return Math.max(m, x.stop || 0); }, 0);
+    var lastDay = null;
+
     document.getElementById('prospect-list').innerHTML = shown.map(function (p) {
       var s = prospectStatus(p);
+      var divider = '';
+      if (cutIntoDays) {
+        var day = prospectDay(p);
+        if (day && day !== lastDay) {
+          lastDay = day;
+          var firstStop = (day - 1) * PROSPECT_DOORS_PER_DAY + 1;
+          var endStop = Math.min(day * PROSPECT_DOORS_PER_DAY, lastStopInView);
+          divider = '<div class="prospect-day-divider">Day ' + day + ' · stops ' + firstStop + '–' + endStop + '</div>';
+        }
+      }
       var miles = prospectState.sort === 'near' && p._miles !== undefined
         ? ' · ' + p._miles.toFixed(1) + ' mi' : '';
-      return '<div class="order-row clickable prospect-row" data-prospect-id="' + p.id + '">' +
+      return divider + '<div class="order-row clickable prospect-row" data-prospect-id="' + p.id + '">' +
         '<span class="prospect-stop">' + (p.stop || '—') + '</span>' +
         '<span class="prospect-body">' +
           '<span class="oname"><i class="prospect-dot" style="background:' + s.color + ';"></i>' +
@@ -3056,6 +3207,14 @@
 
   document.getElementById('btn-prospects').addEventListener('click', openProspects);
   document.getElementById('back-prospects-to-home').addEventListener('click', function () { showScreen('screen-home'); });
+
+  document.getElementById('prospect-rep-filter').addEventListener('click', function (e) {
+    var chip = e.target.closest('[data-rep]');
+    if (!chip) return;
+    prospectState.rep = chip.getAttribute('data-rep');
+    prospectState.limit = PROSPECT_PAGE;
+    renderProspects();
+  });
 
   document.getElementById('prospect-wave-filter').addEventListener('click', function (e) {
     var chip = e.target.closest('[data-wave]');
@@ -3173,6 +3332,10 @@
       ['Concept fit', 'Tier ' + p.tier + (p.tier === 'A' ? ' — Cantinesca concept' : p.tier === 'B' ? ' — beer-forward occasion' : ' — low fit on a first pass')],
       ['Wave', p.wave],
       ['Where it falls', prospectPlanLine(p)],
+      ['Territory', (function () {
+        var t = prospectTerritory(p);
+        return t ? prospectTerritoryRep(t).name + ' — ' + t.label : 'Outside the split';
+      })()],
       ['ZIP', p.zip]
     ];
     var sweep = prospectSweep(p);

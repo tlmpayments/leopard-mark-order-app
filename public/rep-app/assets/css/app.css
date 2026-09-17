@@ -1537,3 +1537,19 @@ input:focus, select:focus, textarea:focus { outline-color: var(--coral); border-
 /* The eleven-ish chain doors whose license sits with a local operator: a
    determination is owed on each, so the tag reads as a question, not a label. */
 .prospect-tag--review { background: #ede3ff; color: #5b3a9c; }
+
+/* A day-sized piece of a route: 10 to 12 doors, cut along the sweep. The
+   divider is a break in the street, so it reads as a heading in the list
+   rather than as another row. */
+.prospect-day-divider {
+  margin: 18px 2px 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-display, inherit);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--silver-dim);
+}
+.prospect-day-divider:first-child { margin-top: 2px; }

@@ -587,6 +587,11 @@
     </div>
 
     <div class="prospect-controls">
+      <!-- Whose doors, then which doors. Step 3 of the plan splits the map by
+           territory rather than by rows, so the rep filter comes first: a rep
+           opening this screen should be looking at his own streets before he
+           looks at anything else. -->
+      <div class="chip-row" id="prospect-rep-filter" role="group" aria-label="Whose doors to show"></div>
       <div class="chip-row" id="prospect-wave-filter" role="group" aria-label="Which doors to show"></div>
       <div class="chip-row" id="prospect-status-filter" role="group" aria-label="Filter by visit status"></div>
       <div class="field field-row" style="margin-top:4px;">
