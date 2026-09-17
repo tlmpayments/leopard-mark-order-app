@@ -2922,6 +2922,15 @@
   }
 
 
+  /** The hub view versus the field view. An admin is looking at the whole
+   *  board and needs to compare the two halves; James and Ricardo are looking
+   *  at their own streets on their own phone, where another rep's doors are
+   *  not context, they are noise. So the rep chips exist for one and not the
+   *  other, and a rep's screen is locked to his own territory. */
+  function prospectIsAdmin() {
+    return (state.repRole || '') === 'Admin';
+  }
+
   /** The logged-in rep's own territory, if they have one. A rep who is not in
    *  the split (Steve guiding, or anyone else signing in) has none, and the
    *  "Mine" chip then shows everything rather than an empty screen. */
@@ -3022,6 +3031,7 @@
     return lower.concat(upper);
   }
 
+  var PROSPECT_TERRITORY_PANE = 'lmTerritories';
   var prospectTerritoryShapes = [];
 
   function renderTerritoryShapes() {
@@ -3042,7 +3052,14 @@
       if (hullPts.length < 3) return;
 
       var color = prospectTerritoryRep(t).color;
+      // Drawn into a pane of its own rather than added and then sent to the
+      // back. bringToBack() reaches for the path's parentNode, which does not
+      // exist until the map has a view -- and on this screen the shapes are
+      // drawn before the first fitBounds, so it threw, aborted the render and
+      // left the map blank with no pins and no tiles. A pane fixes the
+      // stacking order declaratively and cannot fail this way.
       var shape = L.polygon(hullPts, {
+        pane: PROSPECT_TERRITORY_PANE,
         color: color,
         weight: 2,
         opacity: 0.85,
@@ -3051,7 +3068,6 @@
         fillOpacity: 0.08,
         interactive: false
       }).addTo(prospectState.map);
-      shape.bringToBack();
       prospectTerritoryShapes.push(shape);
 
       // The name sits at the top of the shape rather than its centre, where
@@ -3059,6 +3075,7 @@
       var lats = hullPts.map(function (q) { return q[0]; });
       var lngs = hullPts.map(function (q) { return q[1]; });
       var label = L.marker([Math.max.apply(null, lats), (Math.min.apply(null, lngs) + Math.max.apply(null, lngs)) / 2], {
+        pane: PROSPECT_TERRITORY_PANE,
         interactive: false,
         icon: L.divIcon({
           className: '',
@@ -3075,6 +3092,9 @@
     if (!window.L) return;
     if (!prospectState.map) {
       prospectState.map = L.map('prospects-map');
+      // Above the tiles (200), below the pins (600), so a territory is ground
+      // the doors sit on rather than a sheet over the top of them.
+      prospectState.map.createPane(PROSPECT_TERRITORY_PANE).style.zIndex = 350;
       L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         maxZoom: 19,
         subdomains: 'abcd',
@@ -3095,18 +3115,23 @@
     });
     prospectState.markers = {};
 
-    var bounds = [];
+    // The view comes first. A Leaflet map with no view has no zoom to project
+    // against, so every layer added before this point stays invisible even
+    // once the view arrives -- which is what a "broken" blank map here has
+    // always turned out to be.
+    if (list.length) {
+      prospectState.map.fitBounds(L.latLngBounds(list.map(function (p) { return [p.lat, p.lng]; })), { padding: [26, 26], maxZoom: 15 });
+    } else if (!prospectState.map._loaded) {
+      prospectState.map.setView([33.97, -118.19], 11);
+    }
+
     list.forEach(function (p) {
       var marker = L.marker([p.lat, p.lng], { icon: prospectPin(p) }).addTo(prospectState.map);
       marker.bindPopup(prospectPopupHtml(p));
       prospectState.markers[p.id] = marker;
-      bounds.push([p.lat, p.lng]);
     });
 
     renderTerritoryShapes();
-
-    if (bounds.length) prospectState.map.fitBounds(L.latLngBounds(bounds), { padding: [26, 26], maxZoom: 15 });
-    else prospectState.map.setView([33.97, -118.19], 11);
     prospectState.map.invalidateSize();
   }
 
@@ -3120,48 +3145,89 @@
   }
 
   // ---- the screen ---------------------------------------------------------
-  function renderProspectProgress() {
-    var visitable = allProspects().filter(function (p) { return p.wave.indexOf('Excluded') !== 0; });
+  function renderProspectProgress(list) {
+    // The bar is the rep's own ground, not the whole county: on James's phone
+    // "worked" has to mean worked out of his 174, or the number is somebody
+    // else's progress.
+    var scope = allProspects().filter(function (p) {
+      return p.wave.indexOf('Excluded') !== 0 && prospectMatchesRep(p);
+    });
     var counts = {};
-    PROSPECT_STATUSES.forEach(function (s) { counts[s.key] = 0; });
-    visitable.forEach(function (p) { counts[prospectStatusKey(p)]++; });
-    var walked = visitable.length - counts['new'];
+    PROSPECT_STATUSES.forEach(function (st) { counts[st.key] = 0; });
+    scope.forEach(function (p) { counts[prospectStatusKey(p)]++; });
+    var walked = scope.length - counts['new'];
 
-    var bar = PROSPECT_STATUSES.map(function (s) {
-      var pct = visitable.length ? (counts[s.key] / visitable.length) * 100 : 0;
-      return pct > 0 ? '<i style="width:' + pct.toFixed(2) + '%; background:' + s.color + ';" title="' +
-        escapeHtml(s.label + ': ' + counts[s.key]) + '"></i>' : '';
+    var bar = PROSPECT_STATUSES.map(function (st) {
+      var pct = scope.length ? (counts[st.key] / scope.length) * 100 : 0;
+      return pct > 0 ? '<i style="width:' + pct.toFixed(2) + '%; background:' + st.color + ';" title="' +
+        escapeHtml(st.label + ': ' + counts[st.key]) + '"></i>' : '';
     }).join('');
+
+    var whose = prospectScopeLabel();
+    var orphan = !prospectIsAdmin() && !myTerritory()
+      ? '<div class="prospect-orphan-note">No prospecting territory is assigned to you yet, so this is the whole Los Angeles list. Ask the office which routes are yours.</div>'
+      : '';
+    var line = '<div class="pp-line">' + (whose ? '<b>' + escapeHtml(whose) + '</b> \u00b7 ' : '') +
+      '<b>' + walked + '</b> of <b>' + scope.length + '</b> doors worked \u00b7 ' +
+      '<b>' + counts.interested + '</b> interested \u00b7 <b>' + counts.signed + '</b> signed</div>';
+
+    // The colour breakdown: every status with its count, so the bar can be
+    // read rather than guessed at. It doubles as the map's legend, which is
+    // why the old standalone legend row is gone.
+    var breakdown = '<div class="prospect-legend">' + PROSPECT_STATUSES.map(function (st) {
+      return '<span><i class="prospect-dot" style="background:' + st.color + ';"></i>' +
+        escapeHtml(st.label) + ' <b>' + counts[st.key] + '</b></span>';
+    }).join('') + '</div>';
+
+    // An admin also gets both halves side by side, which is the comparison
+    // the hub view exists for.
+    var perRep = '';
+    if (prospectIsAdmin()) {
+      perRep = '<div class="prospect-legend">' + PROSPECT_TERRITORIES.map(function (t) {
+        var rep = prospectTerritoryRep(t);
+        var doors = allProspects().filter(function (p) { return prospectTerritory(p) === t; });
+        var done = doors.filter(function (p) { return prospectStatusKey(p) !== 'new'; }).length;
+        return '<span><i class="prospect-dot" style="background:' + rep.color + ';"></i>' +
+          escapeHtml(rep.name + ' \u00b7 ' + t.label) + ' <b>' + done + '/' + doors.length + '</b></span>';
+      }).join('') + '</div>';
+    }
 
     document.getElementById('prospect-progress').innerHTML =
-      '<div class="pp-line"><b>' + walked + '</b> of <b>' + visitable.length + '</b> doors in the plan worked · ' +
-      '<b>' + counts.interested + '</b> interested · <b>' + counts.signed + '</b> signed</div>' +
-      '<div class="pp-bar">' + bar + '</div>';
+      line + '<div class="pp-bar">' + bar + '</div>' + breakdown + perRep + orphan;
   }
 
-  function renderProspectLegend() {
-    document.getElementById('prospect-legend').innerHTML = PROSPECT_STATUSES.map(function (s) {
-      return '<span><i class="prospect-dot" style="background:' + s.color + ';"></i>' + escapeHtml(s.label) + '</span>';
-    }).join('');
+  /** Whose doors this screen is currently showing, in words. */
+  function prospectScopeLabel() {
+    if (prospectState.rep === 'all') return 'Everyone';
+    var t = prospectState.rep === 'mine' ? myTerritory()
+      : PROSPECT_TERRITORIES.filter(function (x) { return x.key === prospectState.rep; })[0];
+    if (!t) return prospectIsAdmin() ? 'Everyone' : '';
+    return prospectTerritoryRep(t).name + ' \u00b7 ' + t.label;
   }
 
   function renderProspectFilters() {
-    // Four chips: my half, each rep's half, everyone. The territory name is
-    // not repeated on every chip -- it is on the map, drawn, which is a
-    // better place for a geography than a word in a pill.
-    var mine = myTerritory();
-    var repChips = [{ key: 'mine', label: 'Mine', color: mine ? prospectTerritoryRep(mine).color : null }]
-      .concat(PROSPECT_TERRITORIES.map(function (t) {
-        return { key: t.key, label: prospectTerritoryRep(t).name, color: prospectTerritoryRep(t).color };
-      }))
-      .concat([{ key: 'all', label: 'Everyone' }]);
+    var row = document.getElementById('prospect-rep-filter');
 
-    document.getElementById('prospect-rep-filter').innerHTML = repChips.map(function (c) {
-      var on = prospectState.rep === c.key;
-      var style = on && c.color ? ' style="background:' + c.color + '; border-color:' + c.color + '; color:#102f44;"' : '';
-      return '<button type="button" class="chip' + (on ? ' selected' : '') + '" data-rep="' + c.key + '"' + style + '>' +
-        escapeHtml(c.label) + '</button>';
-    }).join('');
+    if (prospectIsAdmin()) {
+      // The hub: one chip per rep, plus both together. No "Mine" -- an admin
+      // has no territory of his own, and a chip that silently meant
+      // "everyone" would be a lie on his screen.
+      var repChips = PROSPECT_TERRITORIES.map(function (t) {
+        return { key: t.key, label: prospectTerritoryRep(t).name, color: prospectTerritoryRep(t).color };
+      }).concat([{ key: 'all', label: 'Everyone' }]);
+
+      row.innerHTML = repChips.map(function (c) {
+        var on = prospectState.rep === c.key;
+        var style = on && c.color ? ' style="background:' + c.color + '; border-color:' + c.color + '; color:#102f44;"' : '';
+        return '<button type="button" class="chip' + (on ? ' selected' : '') + '" data-rep="' + c.key + '"' + style + '>' +
+          escapeHtml(c.label) + '</button>';
+      }).join('');
+    } else {
+      // The field: no chips at all. The screen is his own territory, and the
+      // only question left is which region of it.
+      row.innerHTML = '';
+      prospectState.rep = 'mine';
+    }
 
     renderProspectRegionSelect();
 
@@ -3199,7 +3265,7 @@
       }).join('');
     }
 
-    var html = '<option value="">All my regions</option>';
+    var html = '<option value="">' + (prospectIsAdmin() ? 'All regions' : 'All my regions') + '</option>';
     if (routes.length) html += '<optgroup label="Routes">' + opts(routes) + '</optgroup>';
     if (groups.length) html += '<optgroup label="Second pass (the route\u2019s tail)">' + opts(groups) + '</optgroup>';
     html += '<optgroup label="Outside the split">' + opts(PROSPECT_OUTSIDE_TRACKS) + '</optgroup>';
@@ -3331,8 +3397,11 @@
   function openProspects() {
     prospectState.marks = loadProspectMarks();
     prospectState.limit = PROSPECT_PAGE;
+    // An admin opens on the whole board; a rep opens on his own streets.
+    prospectState.rep = prospectIsAdmin() ? 'all' : 'mine';
+    prospectState.region = '';
+    document.getElementById('prospect-region').removeAttribute('data-built-for');
     showScreen('screen-prospects');
-    renderProspectLegend();
     // Leaflet measures the container, so it has to be visible first -- the
     // same reason openAccountsMap defers.
     setTimeout(renderProspects, 50);

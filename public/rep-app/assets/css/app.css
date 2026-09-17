@@ -1566,3 +1566,16 @@ input:focus, select:focus, textarea:focus { outline-color: var(--coral); border-
   white-space: nowrap;
   box-shadow: 0 2px 6px rgba(16,47,68,.25);
 }
+
+/* A rep who is not in the split needs to know why he is looking at 414 doors
+   instead of his own 174. */
+.prospect-orphan-note {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fff0bd;
+  color: #98610b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.prospect-progress .prospect-legend { margin-top: 10px; }
