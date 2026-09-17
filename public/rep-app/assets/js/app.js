@@ -2873,7 +2873,8 @@
     marks: {},        // id -> { status, note, at }
     map: null,
     markers: {},      // id -> L.Marker, so a status change repaints one pin not 414
-    current: null     // the prospect open on screen-prospect
+    current: null,    // the prospect open on screen-prospect
+    run: null         // the route being worked stop by stop, see startRun()
   };
 
   /** One store per rep on a shared phone; the key survives logout on purpose,
@@ -3278,6 +3279,278 @@
     marker.setPopupContent(prospectPopupHtml(p));
   }
 
+  // ---- running a route ----------------------------------------------------
+  //
+  // The delivery app's shape, for a rep: one door on screen, where it falls in
+  // the route, the button that navigates to it and the buttons that say what
+  // happened. Marking a door advances to the next, so the thumb stays put.
+  //
+  // A run is the whole route, not a day of it -- a 36-door route is three
+  // days' work and a rep picks it up tomorrow where he left it, which is why
+  // the run is written to the device on every step rather than held in memory.
+
+  function prospectRunKey() {
+    return 'lm_prospect_run_' + (state.rep || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  }
+
+  function loadRun() {
+    try {
+      var raw = localStorage.getItem(prospectRunKey());
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+
+  function saveRun(run) {
+    try {
+      if (run) localStorage.setItem(prospectRunKey(), JSON.stringify(run));
+      else localStorage.removeItem(prospectRunKey());
+    } catch (e) {}
+  }
+
+  /** The doors of one region, in the order they should be walked: plan order,
+   *  then the shortest walk inside each day, exactly as the list shows them.
+   *  Excluded doors are never in a run. */
+  function prospectRunDoors(region) {
+    var list = allProspects().filter(function (p) {
+      if (p.wave.indexOf('Excluded') === 0) return false;
+      if (!prospectMatchesRep(p)) return false;
+      if (region.indexOf('route:') === 0) return p.route === region.slice(6);
+      if (region.indexOf('group:') === 0) return p.group === region.slice(6);
+      return false;
+    });
+    list.sort(function (a, b) { return a.id - b.id; });
+    var walked = [];
+    prospectGroupByDay(list).forEach(function (d) {
+      var optimised = prospectOptimiseDay(d.doors, null);
+      walked = walked.concat(prospectPathMiles(optimised) < prospectPathMiles(d.doors) ? optimised : d.doors);
+    });
+    return walked;
+  }
+
+  /** The region a run should cover: whatever is selected, or else the rep's
+   *  first route that still has unworked doors in it. "Generate" should not
+   *  make him choose before it will do anything. */
+  function prospectSuggestedRegion() {
+    if (/^(route|group):/.test(prospectState.region)) return prospectState.region;
+    var options = [];
+    prospectVisibleTerritories().forEach(function (t) {
+      t.routes.forEach(function (r) { options.push({ value: 'route:' + r, order: prospectRoutePriority(r) }); });
+      t.groups.forEach(function (g) {
+        var full = prospectGroupName(g);
+        if (full) options.push({ value: 'group:' + full, order: 90 });
+      });
+    });
+    options.sort(function (a, b) { return a.order - b.order; });
+    for (var i = 0; i < options.length; i++) {
+      var doors = prospectRunDoors(options[i].value);
+      if (doors.some(function (p) { return prospectStatusKey(p) === 'new'; })) return options[i].value;
+    }
+    return options.length ? options[0].value : '';
+  }
+
+  function prospectRegionLabel(region) {
+    if (region.indexOf('route:') === 0) return region.slice(6);
+    if (region.indexOf('group:') === 0) return region.slice(6).split(' (')[0];
+    return '';
+  }
+
+  function startRun(region) {
+    var doors = prospectRunDoors(region);
+    if (!doors.length) { toast('No doors in that region', true); return; }
+    var run = {
+      region: region,
+      label: prospectRegionLabel(region),
+      ids: doors.map(function (p) { return p.id; }),
+      index: 0,
+      started: Date.now()
+    };
+    // Start at the first door nobody has been to. Restarting a route a rep is
+    // halfway through should not walk him back past doors he has already done.
+    run.index = runNextUnworked(run, 0);
+    saveRun(run);
+    prospectState.run = run;
+    openRunScreen();
+  }
+
+  /** The next index at or after `from` whose door is still untouched, or the
+   *  list length when there is none left. */
+  function runNextUnworked(run, from) {
+    for (var i = from; i < run.ids.length; i++) {
+      var p = findProspect(run.ids[i]);
+      if (p && prospectStatusKey(p) === 'new') return i;
+    }
+    return run.ids.length;
+  }
+
+  function runWorkedCount(run) {
+    return run.ids.filter(function (id) {
+      var p = findProspect(id);
+      return p && prospectStatusKey(p) !== 'new';
+    }).length;
+  }
+
+  function openRunScreen() {
+    showScreen('screen-run');
+    renderRun();
+  }
+
+  function renderRun() {
+    var run = prospectState.run;
+    if (!run) { showScreen('screen-prospects'); return; }
+
+    var total = run.ids.length;
+    var worked = runWorkedCount(run);
+    document.getElementById('run-route').textContent = run.label;
+    document.getElementById('run-bar-fill').style.width = (total ? (worked / total) * 100 : 0) + '%';
+
+    var finished = run.index >= total;
+    document.getElementById('run-card').style.display = finished ? 'none' : 'block';
+    document.getElementById('run-status-buttons').style.display = finished ? 'none' : 'grid';
+    document.getElementById('run-note').parentNode.style.display = finished ? 'none' : 'flex';
+    document.querySelector('.run-actions').style.display = finished ? 'none' : 'flex';
+
+    if (finished) {
+      document.getElementById('run-count').textContent = worked + ' of ' + total + ' worked';
+      var marks = {};
+      PROSPECT_STATUSES.forEach(function (st) { marks[st.key] = 0; });
+      run.ids.forEach(function (id) {
+        var p = findProspect(id);
+        if (p) marks[prospectStatusKey(p)]++;
+      });
+      document.getElementById('run-done').innerHTML =
+        '<strong>' + escapeHtml(run.label) + ' is done.</strong>' +
+        '<div class="run-done-line">' + PROSPECT_STATUSES.filter(function (st) { return marks[st.key]; }).map(function (st) {
+          return '<span><i class="prospect-dot" style="background:' + st.color + ';"></i>' +
+            escapeHtml(st.label) + ' <b>' + marks[st.key] + '</b></span>';
+        }).join('') + '</div>' +
+        '<button class="btn btn-primary btn-block" id="run-finish" type="button">Back to the map</button>';
+      document.getElementById('run-finish').addEventListener('click', function () {
+        saveRun(null);
+        prospectState.run = null;
+        showScreen('screen-prospects');
+        setTimeout(renderProspects, 50);
+      });
+      return;
+    }
+
+    document.getElementById('run-done').innerHTML = '';
+    var p = findProspect(run.ids[run.index]);
+    if (!p) { runAdvance(); return; }
+
+    var day = prospectDay(p);
+    document.getElementById('run-count').textContent =
+      'Stop ' + (run.index + 1) + ' of ' + total + (day ? ' \u00b7 day ' + day : '');
+    document.getElementById('run-stop-no').textContent = p.stop || '\u2014';
+    document.getElementById('run-name').textContent = prospectTitle(p);
+    document.getElementById('run-address').textContent = p.address;
+    document.getElementById('run-navigate').href =
+      'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + p.lat + ',' + p.lng;
+    document.getElementById('run-note').value = (prospectMark(p.id) || {}).note || '';
+
+    document.getElementById('run-tags').innerHTML =
+      '<span class="prospect-tag tier-' + escapeHtml(p.tier) + '">Tier ' + escapeHtml(p.tier) + '</span>' +
+      '<span class="prospect-tag">' + escapeHtml(p.segment) + '</span>' +
+      (p.owner ? '<span class="prospect-tag">' + escapeHtml(p.owner) + '</span>' : '');
+
+    // The two doors that need a human before a rep walks in.
+    var warn = '';
+    if (PROSPECT_CHAIN_REVIEW[p.id]) {
+      warn = 'Flagged for a team determination \u2014 ask the office before you walk in.';
+    } else if (p.segment === 'Local multi-unit (owner-level)') {
+      warn = 'Part of a family group. The owner meeting comes first \u2014 skip unless the office says it is done.';
+    }
+    var warnEl = document.getElementById('run-warning');
+    warnEl.textContent = warn;
+    warnEl.style.display = warn ? 'block' : 'none';
+
+    document.getElementById('run-status-buttons').innerHTML = PROSPECT_STATUSES.filter(function (st) {
+      return st.key !== 'new';
+    }).map(function (st) {
+      return '<button type="button" class="prospect-status-btn" data-status="' + st.key + '" style="color:' + st.color + ';">' +
+        '<i style="background:' + st.color + ';"></i>' + escapeHtml(st.label) + '</button>';
+    }).join('');
+  }
+
+  function runAdvance() {
+    var run = prospectState.run;
+    if (!run) return;
+    run.index = runNextUnworked(run, run.index + 1);
+    saveRun(run);
+    renderRun();
+  }
+
+  document.getElementById('run-status-buttons').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-status]');
+    var run = prospectState.run;
+    if (!btn || !run) return;
+    var p = findProspect(run.ids[run.index]);
+    if (!p) return;
+    var key = btn.getAttribute('data-status');
+    var existing = prospectMark(p.id) || {};
+    prospectState.marks[p.id] = {
+      status: key,
+      note: document.getElementById('run-note').value || existing.note || '',
+      at: Date.now()
+    };
+    saveProspectMarks();
+    refreshProspectPin(p);
+    toast(prospectTitle(p) + ' \u2014 ' + PROSPECT_STATUS_BY_KEY[key].label);
+    runAdvance();
+  });
+
+  document.getElementById('run-skip').addEventListener('click', runAdvance);
+
+  document.getElementById('run-open').addEventListener('click', function () {
+    var run = prospectState.run;
+    if (!run) return;
+    openProspect(run.ids[run.index]);
+    state.prospectReturn = 'screen-run';
+  });
+
+  document.getElementById('back-run').addEventListener('click', function () {
+    showScreen('screen-prospects');
+    setTimeout(renderProspects, 50);
+  });
+
+  /** The button (or the resume banner) at the top of the prospecting screen. */
+  function renderRunCta() {
+    var el = document.getElementById('prospect-run-cta');
+    var run = prospectState.run;
+
+    if (run && run.index < run.ids.length) {
+      var worked = runWorkedCount(run);
+      el.innerHTML =
+        '<button class="cta-btn cta-btn--run" id="prospect-resume-run" type="button">' +
+          '<span>Resume ' + escapeHtml(run.label) +
+            '<small>Stop ' + (run.index + 1) + ' of ' + run.ids.length + ' \u00b7 ' + worked + ' worked</small></span>' +
+          '<span class="cta-btn-icon" aria-hidden="true">\u2192</span>' +
+        '</button>' +
+        '<button class="run-abandon" id="prospect-end-run" type="button">End this run</button>';
+      document.getElementById('prospect-resume-run').addEventListener('click', openRunScreen);
+      document.getElementById('prospect-end-run').addEventListener('click', function () {
+        saveRun(null);
+        prospectState.run = null;
+        renderProspects();
+      });
+      return;
+    }
+
+    var region = prospectSuggestedRegion();
+    if (!region) { el.innerHTML = ''; return; }
+    var doors = prospectRunDoors(region);
+    var left = doors.filter(function (p) { return prospectStatusKey(p) === 'new'; }).length;
+    var days = Math.ceil(doors.length / PROSPECT_DOORS_PER_DAY);
+
+    el.innerHTML =
+      '<button class="cta-btn cta-btn--run" id="prospect-generate-run" type="button">' +
+        '<span>Generate a route<small>' + escapeHtml(prospectRegionLabel(region)) + ' \u00b7 ' +
+          left + ' door' + (left === 1 ? '' : 's') + ' left \u00b7 about ' + days + ' day' + (days === 1 ? '' : 's') +
+        '</small></span>' +
+        '<span class="cta-btn-icon" aria-hidden="true">\u2192</span>' +
+      '</button>';
+    document.getElementById('prospect-generate-run').addEventListener('click', function () { startRun(region); });
+  }
+
   // ---- the screen ---------------------------------------------------------
   function renderProspectProgress(list) {
     // The bar is the rep's own ground, not the whole county: on James's phone
@@ -3590,6 +3863,7 @@
   function renderProspects() {
     var list = filteredProspects();
     renderProspectProgress();
+    renderRunCta();
     renderProspectFilters();
     renderProspectSweep(list);
     renderProspectList(list);
@@ -3598,6 +3872,7 @@
 
   function openProspects() {
     prospectState.marks = loadProspectMarks();
+    prospectState.run = loadRun();
     prospectState.limit = PROSPECT_PAGE;
     // An admin opens on the whole board; a rep opens on his own streets.
     prospectState.rep = prospectIsAdmin() ? 'all' : 'mine';
@@ -3798,6 +4073,11 @@
   });
 
   document.getElementById('back-prospect').addEventListener('click', function () {
+    if (state.prospectReturn === 'screen-run' && prospectState.run) {
+      state.prospectReturn = null;
+      openRunScreen();
+      return;
+    }
     showScreen('screen-prospects');
     // The list carries status chips and the map carries colours, so both have
     // to catch up with whatever was just marked.

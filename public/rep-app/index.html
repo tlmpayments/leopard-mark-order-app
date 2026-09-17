@@ -578,6 +578,11 @@
 
     <div class="prospect-progress" id="prospect-progress" aria-live="polite"></div>
 
+    <!-- Generate a route. One route at a time, worked stop by stop, picked up
+         again tomorrow where it was left -- a 36-door route is three days, so
+         a run that forgot itself overnight would be useless. -->
+    <div class="prospect-run-cta" id="prospect-run-cta"></div>
+
     <div id="prospects-map" class="accounts-map prospects-map"></div>
 
     <div class="field" style="margin:14px 0 10px;">
@@ -632,6 +637,45 @@
       Visit statuses are saved on this phone, for this rep. They are not sent to the
       office and another rep will not see them.
     </p>
+  </section>
+
+  <!-- RUNNING A ROUTE ------------------------------------------------------
+       The delivery app's stop screen, for a rep instead of a driver: one door
+       at a time, where it sits in the route, the button that navigates there
+       and the buttons that say what happened. Marking a door advances to the
+       next one, so a rep's thumb never leaves the same place on the screen. -->
+  <section id="screen-run" class="screen">
+    <a class="back-link" id="back-run">← Back to the map</a>
+
+    <div class="run-head">
+      <div class="run-route" id="run-route">—</div>
+      <div class="run-count" id="run-count">—</div>
+      <div class="run-bar"><i id="run-bar-fill"></i></div>
+    </div>
+
+    <div class="run-card" id="run-card">
+      <div class="run-stop-no" id="run-stop-no">—</div>
+      <div class="run-name" id="run-name">—</div>
+      <div class="run-address" id="run-address">—</div>
+      <div class="prospect-tags" id="run-tags"></div>
+      <div class="run-warning" id="run-warning"></div>
+      <a class="run-navigate" id="run-navigate" target="_blank" rel="noopener">Navigate to this door</a>
+    </div>
+
+    <div class="section-title">What happened?</div>
+    <div class="prospect-status-grid" id="run-status-buttons" role="group" aria-label="Record this visit"></div>
+
+    <div class="field" style="margin-top:14px;">
+      <label for="run-note">Note <small style="font-weight:400; color:var(--silver-dim);">(saved on this phone)</small></label>
+      <textarea id="run-note" rows="2" placeholder="Who you spoke to, when to come back…"></textarea>
+    </div>
+
+    <div class="run-actions">
+      <button class="btn btn-ghost" id="run-skip" type="button">Skip for now</button>
+      <button class="btn btn-ghost" id="run-open" type="button">Full details</button>
+    </div>
+
+    <div class="run-done" id="run-done"></div>
   </section>
 
   <!-- PROSPECT DETAIL: one door, its plan context, and the six buttons that

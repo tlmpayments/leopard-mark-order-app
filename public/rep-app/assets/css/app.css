@@ -1627,3 +1627,88 @@ input:focus, select:focus, textarea:focus { outline-color: var(--coral); border-
   letter-spacing: 0;
   text-transform: none;
 }
+
+/* ---- Running a route ------------------------------------------------------
+   The delivery app's stop screen, in the ordering app's clothes: one door
+   filling the top of the screen, the six answers filling the bottom, and a
+   thumb that never has to travel between them. */
+.prospect-run-cta { margin-bottom: 16px; }
+#screen-home .cta-btn--run, .cta-btn--run {
+  background: var(--coral);
+  color: #fffdf8;
+  box-shadow: 0 8px 0 #c74c30, 0 15px 24px rgba(193,67,34,.16);
+  width: 100%;
+}
+.cta-btn--run small { color: rgba(255,253,248,.86); }
+.cta-btn--run .cta-btn-icon { background: rgba(255,253,248,.2); }
+.run-abandon {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px;
+  border: none;
+  background: none;
+  color: var(--silver-dim);
+  font: 600 12px var(--font-body);
+  cursor: pointer;
+}
+
+.run-head { margin-bottom: 18px; }
+.run-route { font-family: var(--font-serif); font-size: 24px; line-height: 1.1; color: var(--ink); }
+.run-count { margin-top: 5px; color: var(--silver-dim); font-size: 12px; font-weight: 600; }
+.run-bar { margin-top: 10px; height: 8px; border-radius: 999px; background: #e8d8bd; overflow: hidden; }
+.run-bar i { display: block; height: 100%; background: var(--coral); transition: width .25s ease; }
+
+.run-card {
+  padding: 18px 16px;
+  border-radius: 22px;
+  background: #263b78;
+  color: #fffdf8;
+  box-shadow: 0 16px 31px rgba(38,59,120,.18);
+}
+.run-stop-no {
+  display: inline-grid;
+  place-items: center;
+  min-width: 34px;
+  height: 34px;
+  padding: 0 9px;
+  border-radius: 12px;
+  background: rgba(255,253,248,.17);
+  font-size: 13px;
+  font-weight: 700;
+}
+.run-name { margin-top: 10px; font-family: var(--font-serif); font-size: 25px; line-height: 1.12; }
+.run-address { margin-top: 5px; color: rgba(255,253,248,.78); font-size: 13px; line-height: 1.45; }
+.run-card .prospect-tags { margin-top: 12px; }
+.run-card .prospect-tag { background: rgba(255,253,248,.15); color: #fffdf8; }
+.run-card .prospect-tag.tier-A { background: #ffbd28; color: #4a3102; }
+.run-card .prospect-tag.tier-B { background: #cfe0f7; color: #21396d; }
+.run-card .prospect-tag.tier-C { background: rgba(255,253,248,.15); color: #fffdf8; }
+.run-warning {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #ffbd28;
+  color: #4a3102;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.run-navigate {
+  display: block;
+  margin-top: 14px;
+  padding: 13px;
+  border-radius: 14px;
+  background: #fffdf8;
+  color: #263b78;
+  font: 600 14px var(--font-body);
+  text-align: center;
+  text-decoration: none;
+}
+.run-actions { display: flex; gap: 10px; margin-top: 16px; }
+.run-actions .btn { flex: 1; }
+.run-done { text-align: center; }
+.run-done strong { display: block; font-family: var(--font-serif); font-size: 22px; color: var(--ink); }
+.run-done-line { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 14px; margin: 14px 0 20px; font-size: 12px; color: var(--silver-dim); }
+.run-done-line span { display: inline-flex; align-items: center; gap: 6px; }
+.run-done-line b { color: var(--ink); }
