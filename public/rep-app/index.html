@@ -593,6 +593,12 @@
          then. -->
     <div class="prospect-controls">
       <div class="chip-row" id="prospect-rep-filter" role="group" aria-label="Whose doors to show"></div>
+      <!-- Concept fit (column J). Chips rather than another dropdown because
+           this is the one filter a rep uses mid-sweep -- "just the A doors on
+           this street" -- and because tapping one has to be able to answer
+           what the tier means, which the note below does. -->
+      <div class="chip-row" id="prospect-tier-filter" role="group" aria-label="Filter by concept fit"></div>
+      <div class="prospect-tier-note" id="prospect-tier-note"></div>
       <div class="field">
         <label for="prospect-region">Region</label>
         <select id="prospect-region"></select>

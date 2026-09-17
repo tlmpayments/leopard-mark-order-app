@@ -1579,3 +1579,20 @@ input:focus, select:focus, textarea:focus { outline-color: var(--coral); border-
   line-height: 1.45;
 }
 .prospect-progress .prospect-legend { margin-top: 10px; }
+
+/* What a tier means, shown when a rep picks one. Three short lines: what the
+   tier is, how to work it, and the reminder that it is only a prior. */
+.prospect-tier-note {
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: #fffdf8;
+  border: 1px solid var(--line);
+  color: var(--silver);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.prospect-tier-note:empty { display: none; }
+.prospect-tier-note strong { display: block; margin-bottom: 3px; color: var(--ink); }
+.prospect-tier-note .tier-how { display: block; margin-top: 7px; color: var(--ink); font-weight: 600; }
+.prospect-tier-note .tier-prior { display: block; margin-top: 7px; font-style: italic; color: var(--silver-dim); }
+.prospect-tier-filter .chip b { font-weight: 700; }

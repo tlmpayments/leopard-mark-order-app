@@ -2739,6 +2739,38 @@
   var PROSPECT_CHAIN_REVIEW = {};
   PROSPECT_CHAIN_REVIEW_IDS.forEach(function (id) { PROSPECT_CHAIN_REVIEW[id] = true; });
 
+  // Column J: concept fit for Cantinesca, inferred from the name. The wording
+  // is the plan's own, because a rep tapping a tier chip is asking exactly
+  // what the plan means by it -- and the last line matters most: this is a
+  // prior, not a verdict. The rep standing at the door overrides it.
+  var PROSPECT_TIERS = [
+    {
+      key: 'A',
+      label: 'Tier A',
+      swatch: '#8a5a06',
+      chip: '#ffe9c2',
+      what: 'Mexican or Central American concept: cantina, sports bar, nightclub, mariscos, birrieria, taqueria, pupuseria.',
+      how: 'The Cantinesca fit. These are the doors the routes were built around \u2014 work them first.'
+    },
+    {
+      key: 'B',
+      label: 'Tier B',
+      swatch: '#2f4d8c',
+      chip: '#e2eaf7',
+      what: 'Other independent with a beer-forward occasion: pizza, wings, crab boil, bowling, craft beer bar, diner with bar, steakhouse.',
+      how: 'On a sweep, visit only if it sits on the same block as the A doors. No detours for it.'
+    },
+    {
+      key: 'C',
+      label: 'Tier C',
+      swatch: '#66727d',
+      chip: '#eceef0',
+      what: 'Low fit on a first pass: sushi, Thai, Chinese, Indian, cafe, unknown.',
+      how: 'Not a list to work. These come in only if tier B converts in the first push at a rate that pays for a cold visit; otherwise they belong to the distributor\u2019s general reps.'
+    }
+  ];
+  var PROSPECT_TIER_PRIOR = 'A prior, not a verdict \u2014 what you find at the door beats what the name suggested.';
+
   var PROSPECT_DOORS_PER_DAY = 12;
 
   // Step 3: the split is by territory, not by rows. Each rep owns a
@@ -2832,6 +2864,7 @@
     // to one piece of it; 'wave:' selects a track that sits outside the
     // routes entirely.
     region: '',
+    tier: 'all',
     status: 'all',
     sort: 'plan',
     q: '',
@@ -2956,6 +2989,7 @@
     var list = allProspects().filter(function (p) {
       if (!prospectMatchesRegion(p)) return false;
       if (!prospectMatchesRep(p)) return false;
+      if (prospectState.tier !== 'all' && p.tier !== prospectState.tier) return false;
       if (prospectState.status !== 'all' && prospectStatusKey(p) !== prospectState.status) return false;
       if (!q) return true;
       return (p.name + ' ' + p.owner + ' ' + p.address + ' ' + p.city + ' ' + p.zip).toLowerCase().indexOf(q) !== -1;
@@ -3230,6 +3264,7 @@
     }
 
     renderProspectRegionSelect();
+    renderProspectTierChips();
 
     var statusSelect = document.getElementById('prospect-status');
     if (!statusSelect.options.length) {
@@ -3239,6 +3274,41 @@
     }
     statusSelect.value = prospectState.status;
     document.getElementById('prospect-sort').value = prospectState.sort;
+  }
+
+  /** Tier chips, counted against what the rep is actually looking at: the
+   *  plan's 324/156/71 are county-wide totals and would be somebody else's
+   *  numbers on James's phone. */
+  function renderProspectTierChips() {
+    var scope = allProspects().filter(function (p) {
+      return prospectMatchesRegion(p) && prospectMatchesRep(p);
+    });
+    var counts = { A: 0, B: 0, C: 0 };
+    scope.forEach(function (p) { if (counts[p.tier] !== undefined) counts[p.tier]++; });
+
+    var chips = [{ key: 'all', label: 'All tiers', count: scope.length }].concat(
+      PROSPECT_TIERS.map(function (t) {
+        return { key: t.key, label: t.label, count: counts[t.key], chip: t.chip, swatch: t.swatch };
+      })
+    );
+
+    document.getElementById('prospect-tier-filter').innerHTML = chips.map(function (c) {
+      var on = prospectState.tier === c.key;
+      var style = on && c.chip ? ' style="background:' + c.chip + '; border-color:' + c.swatch + '; color:' + c.swatch + ';"' : '';
+      return '<button type="button" class="chip' + (on ? ' selected' : '') + '" data-tier="' + c.key + '"' + style + '>' +
+        escapeHtml(c.label) + ' <b>' + c.count + '</b></button>';
+    }).join('');
+
+    // What the tier means, shown only once a rep has asked for one. Showing
+    // all three definitions at once would be the wall of text this screen
+    // just got rid of.
+    var note = document.getElementById('prospect-tier-note');
+    var tier = PROSPECT_TIERS.filter(function (t) { return t.key === prospectState.tier; })[0];
+    note.innerHTML = tier
+      ? '<strong>' + escapeHtml(tier.label) + '</strong>' + escapeHtml(tier.what) +
+        '<span class="tier-how">' + escapeHtml(tier.how) + '</span>' +
+        '<span class="tier-prior">' + escapeHtml(PROSPECT_TIER_PRIOR) + '</span>'
+      : '';
   }
 
   /** The region list is rebuilt whenever the rep changes, because a rep's
@@ -3400,6 +3470,7 @@
     // An admin opens on the whole board; a rep opens on his own streets.
     prospectState.rep = prospectIsAdmin() ? 'all' : 'mine';
     prospectState.region = '';
+    prospectState.tier = 'all';
     document.getElementById('prospect-region').removeAttribute('data-built-for');
     showScreen('screen-prospects');
     // Leaflet measures the container, so it has to be visible first -- the
@@ -3414,6 +3485,14 @@
     var chip = e.target.closest('[data-rep]');
     if (!chip) return;
     prospectState.rep = chip.getAttribute('data-rep');
+    prospectState.limit = PROSPECT_PAGE;
+    renderProspects();
+  });
+
+  document.getElementById('prospect-tier-filter').addEventListener('click', function (e) {
+    var chip = e.target.closest('[data-tier]');
+    if (!chip) return;
+    prospectState.tier = chip.getAttribute('data-tier');
     prospectState.limit = PROSPECT_PAGE;
     renderProspects();
   });
@@ -3521,7 +3600,10 @@
       ['Owner on the license', p.owner],
       ['License type', p.licType + (p.abcStatus !== 'ACTIVE' ? ' · ' + p.abcStatus : '')],
       ['Segment', p.segment],
-      ['Concept fit', 'Tier ' + p.tier + (p.tier === 'A' ? ' — Cantinesca concept' : p.tier === 'B' ? ' — beer-forward occasion' : ' — low fit on a first pass')],
+      ['Concept fit', (function () {
+        var t = PROSPECT_TIERS.filter(function (x) { return x.key === p.tier; })[0];
+        return t ? t.label + ' — ' + t.what : 'Tier ' + p.tier;
+      })()],
       ['Wave', p.wave],
       ['Where it falls', prospectPlanLine(p)],
       ['Territory', (function () {
