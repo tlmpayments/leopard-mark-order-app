@@ -1553,3 +1553,16 @@ input:focus, select:focus, textarea:focus { outline-color: var(--coral); border-
   color: var(--silver-dim);
 }
 .prospect-day-divider:first-child { margin-top: 2px; }
+
+/* A territory's name, pinned to the top edge of its outline. Centred on its
+   own anchor because the divIcon has no size to offset against. */
+.territory-tag {
+  display: inline-block;
+  transform: translate(-50%, -100%);
+  padding: 3px 9px;
+  border-radius: 999px;
+  color: #102f44;
+  font: 600 11px var(--font-body);
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(16,47,68,.25);
+}

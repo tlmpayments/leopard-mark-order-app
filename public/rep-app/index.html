@@ -586,23 +586,28 @@
       <input id="prospect-search" placeholder="Search name, owner, street, city or ZIP" autocomplete="off" />
     </div>
 
+    <!-- Two questions, two controls: whose doors, and which region of them.
+         This was twenty chips across three rows -- rep, wave and status all
+         competing for one glance. Wave folded into the region dropdown (the
+         plan's waves ARE geography: the routes, their tails, and the tracks
+         that sit outside both) and status became a dropdown, because a rep
+         picks a territory every morning and filters by status only now and
+         then. -->
     <div class="prospect-controls">
-      <!-- Whose doors, then which doors. Step 3 of the plan splits the map by
-           territory rather than by rows, so the rep filter comes first: a rep
-           opening this screen should be looking at his own streets before he
-           looks at anything else. -->
       <div class="chip-row" id="prospect-rep-filter" role="group" aria-label="Whose doors to show"></div>
-      <div class="chip-row" id="prospect-wave-filter" role="group" aria-label="Which doors to show"></div>
-      <div class="chip-row" id="prospect-status-filter" role="group" aria-label="Filter by visit status"></div>
-      <div class="field field-row" style="margin-top:4px;">
+      <div class="field">
+        <label for="prospect-region">Region</label>
+        <select id="prospect-region"></select>
+      </div>
+      <div class="field-row">
         <div class="field" style="flex:1;">
-          <label for="prospect-route">Route</label>
-          <select id="prospect-route"></select>
+          <label for="prospect-status">Status</label>
+          <select id="prospect-status"></select>
         </div>
         <div class="field" style="flex:1;">
           <label for="prospect-sort">Order</label>
           <select id="prospect-sort">
-            <option value="plan">Plan order (route, then stop)</option>
+            <option value="plan">Plan order</option>
             <option value="near">Nearest to me</option>
             <option value="name">Name (A–Z)</option>
           </select>

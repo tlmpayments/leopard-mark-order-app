@@ -2709,16 +2709,15 @@
   var PROSPECT_STATUS_BY_KEY = {};
   PROSPECT_STATUSES.forEach(function (s) { PROSPECT_STATUS_BY_KEY[s.key] = s; });
 
-  // The wave filter in the rep's words rather than the sheet's. `test` runs
-  // against column K, which is the only field that says what a row is for.
-  var PROSPECT_WAVES = [
-    { key: 'plan',    label: 'Whole plan',    test: function (p) { return p.wave.indexOf('Excluded') !== 0; } },
-    { key: 'first',   label: 'First push',    test: function (p) { return p.wave === 'First push'; } },
-    { key: 'second',  label: 'Second pass',   test: function (p) { return p.wave.indexOf('Second pass: outside') === 0; } },
-    { key: 'arts',    label: 'Arts District', test: function (p) { return p.wave.indexOf('Separate track') === 0; } },
-    { key: 'tierc',   label: 'Tier C',        test: function (p) { return p.wave.indexOf('Second pass: low concept fit') === 0; } },
-    { key: 'chains',  label: 'Chains to decide', test: function (p) { return !!PROSPECT_CHAIN_REVIEW[p.id]; } },
-    { key: 'all',     label: 'Everything',    test: function () { return true; } }
+  // The tracks that sit outside the routes and their tails. They were chips;
+  // they are now the last group in the region dropdown, because they answer
+  // the same question a route does -- which part of the map am I working --
+  // and a rep should not have to read two rows of chips to find that out.
+  var PROSPECT_OUTSIDE_TRACKS = [
+    { value: 'wave:arts',   label: 'Arts District (separate track)' },
+    { value: 'wave:chains', label: 'Chains to decide' },
+    { value: 'wave:tierc',  label: 'Tier C (evidence-gated)' },
+    { value: 'wave:all',    label: 'Everything, including excluded' }
   ];
 
   // The chain doors flagged in the sheet for a team determination: SEGMENT
@@ -2740,12 +2739,6 @@
   var PROSPECT_CHAIN_REVIEW = {};
   PROSPECT_CHAIN_REVIEW_IDS.forEach(function (id) { PROSPECT_CHAIN_REVIEW[id] = true; });
 
-  // Step 2 of the plan: "At 10 to 12 doors a day a 36-door route is three
-  // days: cut each route into day-sized pieces along the sweep, never across
-  // it." 12 is the top of that range, so a day-sized piece here is a ceiling
-  // rather than a quota -- and the cut always follows STOP order, which is
-  // the sweep, so a day is a contiguous run of street rather than a slice
-  // taken across the corridor.
   var PROSPECT_DOORS_PER_DAY = 12;
 
   // Step 3: the split is by territory, not by rows. Each rep owns a
@@ -2833,10 +2826,13 @@
   var PROSPECT_PAGE = 40; // rows rendered before "show more" -- 414 <li> at once is a scroll no thumb wants
 
   var prospectState = {
-    wave: 'plan',
-    rep: 'mine',    // 'mine' | a territory key | 'outside' | 'all'
+    rep: 'mine',    // 'mine' | a territory key | 'all'
+    // One control for both questions the wave chips and the route dropdown
+    // used to ask separately. '' is the whole plan; 'route:'/'group:' narrow
+    // to one piece of it; 'wave:' selects a track that sits outside the
+    // routes entirely.
+    region: '',
     status: 'all',
-    route: '',
     sort: 'plan',
     q: '',
     limit: PROSPECT_PAGE,
@@ -2911,11 +2907,17 @@
     return routes.concat(groups);
   }
 
-  function prospectMatchesRoute(p) {
-    var sel = prospectState.route;
-    if (!sel) return true;
+  /** The one filter that used to be two. '' means the whole plan minus the
+   *  exclusions -- the doors there are actually to work. */
+  function prospectMatchesRegion(p) {
+    var sel = prospectState.region;
+    if (!sel) return p.wave.indexOf('Excluded') !== 0;
     if (sel.indexOf('route:') === 0) return p.route === sel.slice(6);
     if (sel.indexOf('group:') === 0) return p.group === sel.slice(6);
+    if (sel === 'wave:arts') return p.wave.indexOf('Separate track') === 0;
+    if (sel === 'wave:tierc') return p.wave.indexOf('Second pass: low concept fit') === 0;
+    if (sel === 'wave:chains') return !!PROSPECT_CHAIN_REVIEW[p.id];
+    if (sel === 'wave:all') return true;
     return true;
   }
 
@@ -2941,11 +2943,9 @@
   }
 
   function filteredProspects() {
-    var wave = PROSPECT_WAVES.filter(function (w) { return w.key === prospectState.wave; })[0] || PROSPECT_WAVES[0];
     var q = prospectState.q.trim().toLowerCase();
     var list = allProspects().filter(function (p) {
-      if (!wave.test(p)) return false;
-      if (!prospectMatchesRoute(p)) return false;
+      if (!prospectMatchesRegion(p)) return false;
       if (!prospectMatchesRep(p)) return false;
       if (prospectState.status !== 'all' && prospectStatusKey(p) !== prospectState.status) return false;
       if (!q) return true;
@@ -2990,6 +2990,87 @@
       '<br/><a href="#" class="popup-open-prospect" data-prospect-id="' + p.id + '">Open this door →</a></div>';
   }
 
+  // ---- territories, drawn -------------------------------------------------
+  // A rep asked where his half of the map is; the honest answer is a shape,
+  // not a word in a chip. Each territory is the convex hull of the doors
+  // assigned to it -- computed here rather than stored, so it follows the
+  // split: reassign a route in PROSPECT_TERRITORIES and the outline moves
+  // with it.
+  //
+  // The two hulls overlap a little, and that is the truth of the geography
+  // rather than a defect: Bell Gardens and Cudahy (West & South) sit between
+  // Downey and East LA (North & East). They are drawn with a light fill and a
+  // dashed edge so the overlap reads as two claims on the same ground rather
+  // than a solid block hiding the pins underneath.
+  function convexHull(points) {
+    if (points.length < 3) return points.slice();
+    var pts = points.slice().sort(function (a, b) { return a[0] - b[0] || a[1] - b[1]; });
+    var cross = function (o, a, b) {
+      return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    };
+    var lower = [];
+    pts.forEach(function (pt) {
+      while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], pt) <= 0) lower.pop();
+      lower.push(pt);
+    });
+    var upper = [];
+    pts.slice().reverse().forEach(function (pt) {
+      while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], pt) <= 0) upper.pop();
+      upper.push(pt);
+    });
+    lower.pop(); upper.pop();
+    return lower.concat(upper);
+  }
+
+  var prospectTerritoryShapes = [];
+
+  function renderTerritoryShapes() {
+    prospectTerritoryShapes.forEach(function (layer) { prospectState.map.removeLayer(layer); });
+    prospectTerritoryShapes = [];
+    if (!prospectState.map) return;
+
+    // Drawn for the territories in view, and only when the map is showing
+    // doors that belong to one: a tier C or Arts District view has no
+    // territory to outline.
+    if (prospectState.region.indexOf('wave:') === 0) return;
+
+    prospectVisibleTerritories().forEach(function (t) {
+      var pts = allProspects()
+        .filter(function (p) { return prospectTerritory(p) === t; })
+        .map(function (p) { return [p.lat, p.lng]; });
+      var hullPts = convexHull(pts);
+      if (hullPts.length < 3) return;
+
+      var color = prospectTerritoryRep(t).color;
+      var shape = L.polygon(hullPts, {
+        color: color,
+        weight: 2,
+        opacity: 0.85,
+        dashArray: '7 6',
+        fillColor: color,
+        fillOpacity: 0.08,
+        interactive: false
+      }).addTo(prospectState.map);
+      shape.bringToBack();
+      prospectTerritoryShapes.push(shape);
+
+      // The name sits at the top of the shape rather than its centre, where
+      // it would land on top of the densest cluster of pins.
+      var lats = hullPts.map(function (q) { return q[0]; });
+      var lngs = hullPts.map(function (q) { return q[1]; });
+      var label = L.marker([Math.max.apply(null, lats), (Math.min.apply(null, lngs) + Math.max.apply(null, lngs)) / 2], {
+        interactive: false,
+        icon: L.divIcon({
+          className: '',
+          html: '<span class="territory-tag" style="background:' + color + ';">' +
+            escapeHtml(prospectTerritoryRep(t).name + ' \u00b7 ' + t.label) + '</span>',
+          iconSize: [0, 0]
+        })
+      }).addTo(prospectState.map);
+      prospectTerritoryShapes.push(label);
+    });
+  }
+
   function renderProspectMap(list) {
     if (!window.L) return;
     if (!prospectState.map) {
@@ -3021,6 +3102,8 @@
       prospectState.markers[p.id] = marker;
       bounds.push([p.lat, p.lng]);
     });
+
+    renderTerritoryShapes();
 
     if (bounds.length) prospectState.map.fitBounds(L.latLngBounds(bounds), { padding: [26, 26], maxZoom: 15 });
     else prospectState.map.setView([33.97, -118.19], 11);
@@ -3063,17 +3146,15 @@
   }
 
   function renderProspectFilters() {
-    // Whose doors, before which doors. Step 3 splits the map by territory, so
-    // the first chip is the rep's own half -- that is the answer to "where do
-    // I go today" and the only chip most reps will ever tap. The others are
-    // there so a rep can see the whole board and so Steve can look at either
-    // half while guiding.
+    // Four chips: my half, each rep's half, everyone. The territory name is
+    // not repeated on every chip -- it is on the map, drawn, which is a
+    // better place for a geography than a word in a pill.
     var mine = myTerritory();
-    var repChips = [{ key: 'mine', label: mine ? 'Mine · ' + mine.label : 'Mine', color: mine ? prospectTerritoryRep(mine).color : null }]
+    var repChips = [{ key: 'mine', label: 'Mine', color: mine ? prospectTerritoryRep(mine).color : null }]
       .concat(PROSPECT_TERRITORIES.map(function (t) {
-        return { key: t.key, label: prospectTerritoryRep(t).name + ' · ' + t.label, color: prospectTerritoryRep(t).color };
+        return { key: t.key, label: prospectTerritoryRep(t).name, color: prospectTerritoryRep(t).color };
       }))
-      .concat([{ key: 'outside', label: 'Outside the split' }, { key: 'all', label: 'Everyone' }]);
+      .concat([{ key: 'all', label: 'Everyone' }]);
 
     document.getElementById('prospect-rep-filter').innerHTML = repChips.map(function (c) {
       var on = prospectState.rep === c.key;
@@ -3082,27 +3163,79 @@
         escapeHtml(c.label) + '</button>';
     }).join('');
 
-    document.getElementById('prospect-wave-filter').innerHTML = PROSPECT_WAVES.map(function (w) {
-      return '<button type="button" class="chip' + (prospectState.wave === w.key ? ' selected' : '') +
-        '" data-wave="' + w.key + '">' + escapeHtml(w.label) + '</button>';
-    }).join('');
+    renderProspectRegionSelect();
 
-    var statusChips = [{ key: 'all', label: 'Any status' }].concat(PROSPECT_STATUSES);
-    document.getElementById('prospect-status-filter').innerHTML = statusChips.map(function (s) {
-      var on = prospectState.status === s.key;
-      var style = on && s.color ? ' style="background:' + s.color + '; border-color:' + s.color + '; color:#fff;"' : '';
-      return '<button type="button" class="chip' + (on ? ' selected' : '') + '" data-status="' + s.key + '"' + style + '>' +
-        escapeHtml(s.label) + '</button>';
-    }).join('');
+    var statusSelect = document.getElementById('prospect-status');
+    if (!statusSelect.options.length) {
+      statusSelect.innerHTML = '<option value="all">Any status</option>' + PROSPECT_STATUSES.map(function (st) {
+        return '<option value="' + st.key + '">' + escapeHtml(st.label) + '</option>';
+      }).join('');
+    }
+    statusSelect.value = prospectState.status;
+    document.getElementById('prospect-sort').value = prospectState.sort;
+  }
 
-    var select = document.getElementById('prospect-route');
-    if (!select.options.length) {
-      select.innerHTML = '<option value="">All routes</option>' + prospectRouteOptions().map(function (o) {
+  /** The region list is rebuilt whenever the rep changes, because a rep's
+   *  regions are the only ones worth offering him -- showing James the option
+   *  to filter to R1 would be offering him a route he does not work. */
+  function renderProspectRegionSelect() {
+    var select = document.getElementById('prospect-region');
+    var territories = prospectVisibleTerritories();
+
+    var routes = [], groups = [];
+    territories.forEach(function (t) {
+      t.routes.forEach(function (r) { routes.push({ value: 'route:' + r, label: r, order: prospectRoutePriority(r) }); });
+      t.groups.forEach(function (g) {
+        var full = prospectGroupName(g);
+        if (full) groups.push({ value: 'group:' + full, label: full.split(' (')[0] });
+      });
+    });
+    routes.sort(function (a, b) { return a.order - b.order; });
+    groups.sort(function (a, b) { return a.label.localeCompare(b.label); });
+
+    function opts(list) {
+      return list.map(function (o) {
         return '<option value="' + escapeHtml(o.value) + '">' + escapeHtml(o.label) + '</option>';
       }).join('');
     }
-    select.value = prospectState.route;
-    document.getElementById('prospect-sort').value = prospectState.sort;
+
+    var html = '<option value="">All my regions</option>';
+    if (routes.length) html += '<optgroup label="Routes">' + opts(routes) + '</optgroup>';
+    if (groups.length) html += '<optgroup label="Second pass (the route\u2019s tail)">' + opts(groups) + '</optgroup>';
+    html += '<optgroup label="Outside the split">' + opts(PROSPECT_OUTSIDE_TRACKS) + '</optgroup>';
+
+    if (select.getAttribute('data-built-for') !== prospectState.rep) {
+      select.innerHTML = html;
+      select.setAttribute('data-built-for', prospectState.rep);
+      // A region that belonged to the rep we just switched away from is no
+      // longer in the list, so the select would silently fall back to its
+      // first option while prospectState still held the old value.
+      if (!select.querySelector('option[value="' + prospectState.region.replace(/"/g, '\\"') + '"]')) {
+        prospectState.region = '';
+      }
+    }
+    select.value = prospectState.region;
+  }
+
+  /** Which territories the current rep chip is looking at. */
+  function prospectVisibleTerritories() {
+    if (prospectState.rep === 'all') return PROSPECT_TERRITORIES;
+    if (prospectState.rep === 'mine') {
+      var mine = myTerritory();
+      return mine ? [mine] : PROSPECT_TERRITORIES;
+    }
+    return PROSPECT_TERRITORIES.filter(function (t) { return t.key === prospectState.rep; });
+  }
+
+  function prospectRoutePriority(route) {
+    var hit = allProspects().filter(function (p) { return p.route === route; })[0];
+    return hit && hit.routePriority ? hit.routePriority : 99;
+  }
+
+  /** S1 -> the group's full sheet name, which is what the data carries. */
+  function prospectGroupName(prefix) {
+    var hit = allProspects().filter(function (p) { return p.group.indexOf(prefix) === 0; })[0];
+    return hit ? hit.group : '';
   }
 
   /** The corridor sweep (column O) for whatever route is in view. It is the
@@ -3126,7 +3259,7 @@
     // Day dividers, but only when the list is one route or group in plan
     // order -- that is the only arrangement where "day 2" is a contiguous run
     // of the sweep rather than a number attached to scattered rows.
-    var cutIntoDays = Boolean(prospectState.route) && prospectState.sort === 'plan';
+    var cutIntoDays = /^(route|group):/.test(prospectState.region) && prospectState.sort === 'plan';
     var lastStopInView = list.reduce(function (m, x) { return Math.max(m, x.stop || 0); }, 0);
     var lastDay = null;
 
@@ -3216,24 +3349,14 @@
     renderProspects();
   });
 
-  document.getElementById('prospect-wave-filter').addEventListener('click', function (e) {
-    var chip = e.target.closest('[data-wave]');
-    if (!chip) return;
-    prospectState.wave = chip.getAttribute('data-wave');
+  document.getElementById('prospect-region').addEventListener('change', function (e) {
+    prospectState.region = e.target.value;
     prospectState.limit = PROSPECT_PAGE;
     renderProspects();
   });
 
-  document.getElementById('prospect-status-filter').addEventListener('click', function (e) {
-    var chip = e.target.closest('[data-status]');
-    if (!chip) return;
-    prospectState.status = chip.getAttribute('data-status');
-    prospectState.limit = PROSPECT_PAGE;
-    renderProspects();
-  });
-
-  document.getElementById('prospect-route').addEventListener('change', function (e) {
-    prospectState.route = e.target.value;
+  document.getElementById('prospect-status').addEventListener('change', function (e) {
+    prospectState.status = e.target.value;
     prospectState.limit = PROSPECT_PAGE;
     renderProspects();
   });
