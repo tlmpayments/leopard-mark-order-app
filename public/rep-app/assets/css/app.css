@@ -1596,3 +1596,34 @@ input:focus, select:focus, textarea:focus { outline-color: var(--coral); border-
 .prospect-tier-note .tier-how { display: block; margin-top: 7px; color: var(--ink); font-weight: 600; }
 .prospect-tier-note .tier-prior { display: block; margin-top: 7px; font-style: italic; color: var(--silver-dim); }
 .prospect-tier-filter .chip b { font-weight: 700; }
+
+/* The day divider now carries the day's driving, so it is a row rather than
+   a line of text: the name on the left, the Maps links on the right. */
+.prospect-day-divider {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+}
+.prospect-day-divider .day-name {
+  font-family: var(--font-display, inherit);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+.prospect-day-divider .day-name b { color: var(--good); font-weight: 700; }
+.prospect-day-divider .day-links { display: flex; gap: 8px; flex-wrap: wrap; }
+.prospect-day-divider .day-links a {
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: #263b78;
+  color: #fffdf8;
+  font: 600 11px var(--font-body);
+  text-decoration: none;
+  letter-spacing: 0;
+  text-transform: none;
+}

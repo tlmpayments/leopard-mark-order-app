@@ -3007,8 +3007,108 @@
       // is exactly what "give it to them in an order that makes sense" means
       // on this sheet. Sorting by id reproduces the printed plan.
       list.sort(function (a, b) { return a.id - b.id; });
+
+      // ...and then, if asked, walked in the shortest order within each day.
+      // The sheet's stop order is a one-way sweep by house number, set before
+      // anyone had coordinates for these addresses; now that every door is
+      // geocoded, the same doors can be put in the order that actually walks
+      // shortest. Days stay as the plan cut them.
+      if (prospectState.sort === 'walk' && /^(route|group):/.test(prospectState.region)) {
+        var walked = [];
+        prospectGroupByDay(list).forEach(function (d) {
+          // Nearest-neighbour is a heuristic: it is usually better than the
+          // house-number sweep and occasionally worse. Measure both and keep
+          // the shorter one, so turning this on can never lengthen a day.
+          var optimised = prospectOptimiseDay(d.doors, prospectState.here);
+          walked = walked.concat(
+            prospectPathMiles(optimised) < prospectPathMiles(d.doors) ? optimised : d.doors
+          );
+        });
+        list = walked;
+      }
     }
     return list;
+  }
+
+  // ---- a day's driving ----------------------------------------------------
+  //
+  // Google's Maps URL API takes at most nine intermediate waypoints. Leaving
+  // `origin` out entirely makes Maps start from wherever the rep actually is,
+  // which is what he wants and also buys a slot back: nine waypoints plus a
+  // destination is ten doors per link. A twelve-door day therefore needs two
+  // links, and they are split evenly (6 and 6) rather than 10 and 2 -- an
+  // orphan link with one stop on it reads like a bug.
+  var PROSPECT_MAPS_MAX_STOPS = 10;
+
+  function prospectMapsChunks(doors) {
+    if (doors.length <= PROSPECT_MAPS_MAX_STOPS) return [doors];
+    var parts = Math.ceil(doors.length / PROSPECT_MAPS_MAX_STOPS);
+    var size = Math.ceil(doors.length / parts);
+    var chunks = [];
+    for (var i = 0; i < doors.length; i += size) chunks.push(doors.slice(i, i + size));
+    return chunks;
+  }
+
+  function prospectMapsUrl(doors) {
+    var pt = function (p) { return p.lat + ',' + p.lng; };
+    var destination = doors[doors.length - 1];
+    var waypoints = doors.slice(0, -1).map(pt).join('|');
+    return 'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' +
+      encodeURIComponent(pt(destination)) +
+      (waypoints ? '&waypoints=' + encodeURIComponent(waypoints) : '');
+  }
+
+  /** Straight-line length of a run of doors, in miles. Not driving distance --
+   *  it is a comparison between two orders of the same stops, and for that
+   *  the crow's flight is honest enough. */
+  function prospectPathMiles(doors) {
+    var total = 0;
+    for (var i = 1; i < doors.length; i++) total += haversineMiles(doors[i - 1], doors[i]);
+    return total;
+  }
+
+  /** Nearest-neighbour over one day's doors. It never crosses a day boundary,
+   *  so the corridor logic the plan built survives: this reorders the walk
+   *  inside a day-sized piece of one sweep, it does not re-cut the sweep.
+   *
+   *  Starts from the rep's own position when he has shared it -- the first
+   *  stop of the day should be the one nearest him, not whichever door the
+   *  house numbers happened to put first -- and otherwise from the day's
+   *  first stop in plan order. */
+  function prospectOptimiseDay(doors, from) {
+    if (doors.length < 3) return doors.slice();
+    var remaining = doors.slice();
+    var route = [];
+    var cursor = from;
+    if (!cursor) { cursor = remaining.shift(); route.push(cursor); }
+    while (remaining.length) {
+      var best = 0;
+      for (var i = 1; i < remaining.length; i++) {
+        if (haversineMiles(cursor, remaining[i]) < haversineMiles(cursor, remaining[best])) best = i;
+      }
+      cursor = remaining.splice(best, 1)[0];
+      route.push(cursor);
+    }
+    return route;
+  }
+
+  /** The doors, grouped into the day-sized pieces the dividers describe. */
+  function prospectGroupByDay(list) {
+    var days = [], byDay = {};
+    list.forEach(function (p) {
+      var day = prospectDay(p) || 1;
+      if (!byDay[day]) { byDay[day] = { day: day, doors: [] }; days.push(byDay[day]); }
+      byDay[day].doors.push(p);
+    });
+    days.sort(function (a, b) { return a.day - b.day; });
+    return days;
+  }
+
+  /** Is the list currently arranged as days of one route? Both the dividers
+   *  and the optimiser need the same answer. */
+  function prospectShowsDays() {
+    return /^(route|group):/.test(prospectState.region) &&
+      (prospectState.sort === 'plan' || prospectState.sort === 'walk');
   }
 
   // ---- pins ---------------------------------------------------------------
@@ -3392,11 +3492,30 @@
     document.getElementById('prospect-count-title').textContent =
       list.length + (list.length === 1 ? ' door' : ' doors');
 
-    // Day dividers, but only when the list is one route or group in plan
-    // order -- that is the only arrangement where "day 2" is a contiguous run
-    // of the sweep rather than a number attached to scattered rows.
-    var cutIntoDays = /^(route|group):/.test(prospectState.region) && prospectState.sort === 'plan';
-    var lastStopInView = list.reduce(function (m, x) { return Math.max(m, x.stop || 0); }, 0);
+    // Day dividers carry the day's driving: how far it is, and the link that
+    // opens it in Maps as one multi-stop trip rather than twelve separate
+    // address lookups.
+    var cutIntoDays = prospectShowsDays();
+    var dayInfo = {};
+    if (cutIntoDays) {
+      // Built from the whole filtered list, not the page of it on screen, so
+      // "Day 2" means the whole of day 2 even when the list is still showing
+      // the first forty rows.
+      prospectGroupByDay(list).forEach(function (d) {
+        var chunks = prospectMapsChunks(d.doors);
+        dayInfo[d.day] = {
+          doors: d.doors.length,
+          miles: prospectPathMiles(d.doors),
+          planMiles: prospectPathMiles(d.doors.slice().sort(function (a, b) { return a.id - b.id; })),
+          links: chunks.map(function (chunk, i) {
+            return {
+              url: prospectMapsUrl(chunk),
+              label: chunks.length === 1 ? 'Directions' : 'Directions ' + (i + 1) + '/' + chunks.length
+            };
+          })
+        };
+      });
+    }
     var lastDay = null;
 
     document.getElementById('prospect-list').innerHTML = shown.map(function (p) {
@@ -3406,11 +3525,24 @@
         var day = prospectDay(p);
         if (day && day !== lastDay) {
           lastDay = day;
-          var firstStop = (day - 1) * PROSPECT_DOORS_PER_DAY + 1;
-          var endStop = Math.min(day * PROSPECT_DOORS_PER_DAY, lastStopInView);
-          divider = '<div class="prospect-day-divider">Day ' + day + ' · stops ' + firstStop + '–' + endStop + '</div>';
+          var info = dayInfo[day] || { doors: 0, miles: 0, planMiles: 0, links: [] };
+          // Only worth saying when the optimiser actually saved something.
+          var saved = prospectState.sort === 'walk' && info.planMiles - info.miles > 0.15
+            ? ' \u00b7 <b>' + (info.planMiles - info.miles).toFixed(1) + ' mi shorter</b>'
+            : '';
+          divider =
+            '<div class="prospect-day-divider">' +
+              '<span class="day-name">Day ' + day + ' \u00b7 ' + info.doors +
+                (info.doors === 1 ? ' door \u00b7 ' : ' doors \u00b7 ') +
+                info.miles.toFixed(1) + ' mi' + saved + '</span>' +
+              '<span class="day-links">' + info.links.map(function (l) {
+                return '<a href="' + l.url + '" target="_blank" rel="noopener">' + escapeHtml(l.label) + '</a>';
+              }).join('') + '</span>' +
+            '</div>';
         }
       }
+      // How far this door is from the rep, but only in the mode where that is
+      // the thing being sorted on.
       var miles = prospectState.sort === 'near' && p._miles !== undefined
         ? ' · ' + p._miles.toFixed(1) + ' mi' : '';
       return divider + '<div class="order-row clickable prospect-row" data-prospect-id="' + p.id + '">' +
