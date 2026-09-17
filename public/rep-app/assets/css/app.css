@@ -1712,3 +1712,60 @@ input:focus, select:focus, textarea:focus { outline-color: var(--coral); border-
 .run-done-line { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 14px; margin: 14px 0 20px; font-size: 12px; color: var(--silver-dim); }
 .run-done-line span { display: inline-flex; align-items: center; gap: 6px; }
 .run-done-line b { color: var(--ink); }
+
+/* ---- Route overview: the shape of the day before it starts -------------- */
+.run-ov-map { height: 320px; margin-top: 14px; border: 4px solid rgba(255,253,248,.95); border-radius: 16px; }
+.run-ov-links { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.run-ov-day {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 13px;
+  border-radius: 14px;
+  background: rgba(38,59,120,.07);
+  border: 1px solid rgba(38,59,120,.12);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--silver);
+}
+.run-ov-day a {
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: #263b78;
+  color: #fffdf8;
+  font: 600 11px var(--font-body);
+  text-decoration: none;
+}
+.run-ov-row { cursor: pointer; }
+.run-ov-row.is-worked { opacity: .62; }
+.run-ov-footer .btn, .run-footer .btn { letter-spacing: .06em; }
+
+/* A numbered pin: position in the walk, coloured by what is recorded there. */
+.run-pin {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid #fffdf8;
+  box-shadow: 0 2px 6px rgba(16,47,68,.35);
+  color: #fff;
+  font: 700 11px var(--font-body);
+}
+
+/* Reset: quiet until it is armed, then unmistakable. */
+.prospect-reset {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--silver-dim);
+  font: 600 12px var(--font-body);
+  cursor: pointer;
+}
+.prospect-reset.is-armed { background: #ffe0e0; border-color: #e35b5b; color: #a32020; }

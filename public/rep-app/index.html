@@ -637,6 +637,30 @@
       Visit statuses are saved on this phone, for this rep. They are not sent to the
       office and another rep will not see them.
     </p>
+    <button class="prospect-reset" id="prospect-reset" type="button"></button>
+  </section>
+
+  <!-- ROUTE OVERVIEW: what the day looks like before it starts ------------
+       A rep should see the shape of the route -- every stop on a map, joined
+       in the order he will walk them, and the list of who they are -- before
+       the app puts him in front of one door. START is the only way in. -->
+  <section id="screen-run-overview" class="screen">
+    <a class="back-link" id="back-run-overview">← Back to the map</a>
+    <div class="run-route" id="run-ov-route">—</div>
+    <div class="run-count" id="run-ov-meta">—</div>
+
+    <div id="run-ov-map" class="accounts-map run-ov-map"></div>
+
+    <div class="run-ov-links" id="run-ov-links"></div>
+
+    <div class="section-title">The stops, in order</div>
+    <div id="run-ov-list" class="order-history"></div>
+
+    <div class="sticky-footer run-ov-footer" id="run-ov-footer">
+      <div class="footer-inner">
+        <button class="btn btn-primary btn-block" id="run-ov-start" type="button">START</button>
+      </div>
+    </div>
   </section>
 
   <!-- RUNNING A ROUTE ------------------------------------------------------
@@ -671,11 +695,20 @@
     </div>
 
     <div class="run-actions">
-      <button class="btn btn-ghost" id="run-skip" type="button">Skip for now</button>
       <button class="btn btn-ghost" id="run-open" type="button">Full details</button>
+      <button class="btn btn-ghost" id="run-overview" type="button">See the whole route</button>
     </div>
 
     <div class="run-done" id="run-done"></div>
+
+    <!-- Advancing is its own deliberate tap. Marking a door used to jump
+         straight to the next one, which meant a mis-tap was a door the rep
+         never saw again until he noticed the name had changed. -->
+    <div class="sticky-footer run-footer" id="run-footer">
+      <div class="footer-inner">
+        <button class="btn btn-primary btn-block" id="run-next" type="button">Next Location →</button>
+      </div>
+    </div>
   </section>
 
   <!-- PROSPECT DETAIL: one door, its plan context, and the six buttons that

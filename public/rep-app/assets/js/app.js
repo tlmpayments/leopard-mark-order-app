@@ -21,13 +21,16 @@
   // whatever screen comes next.
   var SCREEN_FOOTERS = {
     'screen-order': 'order-footer',
-    'screen-marketing': 'marketing-footer'
+    'screen-marketing': 'marketing-footer',
+    'screen-run': 'run-footer',
+    'screen-run-overview': 'run-ov-footer'
   };
 
   function showScreen(id) {
     Object.keys(screens).forEach(function (k) { screens[k].classList.toggle('active', k === id); });
     Object.keys(SCREEN_FOOTERS).forEach(function (screenId) {
-      document.getElementById(SCREEN_FOOTERS[screenId]).style.display = screenId === id ? 'flex' : 'none';
+      var footer = document.getElementById(SCREEN_FOOTERS[screenId]);
+      if (footer) footer.style.display = screenId === id ? 'flex' : 'none';
     });
     window.scrollTo(0, 0);
     if (id === 'screen-home') {
@@ -3369,7 +3372,7 @@
     run.index = runNextUnworked(run, 0);
     saveRun(run);
     prospectState.run = run;
-    openRunScreen();
+    openRunOverview();
   }
 
   /** The next index at or after `from` whose door is still untouched, or the
@@ -3388,6 +3391,118 @@
       return p && prospectStatusKey(p) !== 'new';
     }).length;
   }
+
+  var runOverviewMap = null;
+  var runOverviewLayers = [];
+
+  /** A numbered pin: the stop's position in the run, coloured by whatever the
+   *  rep has already recorded there. */
+  function runOverviewPin(p, position) {
+    var st = prospectStatus(p);
+    return L.divIcon({
+      className: '',
+      html: '<div class="run-pin" style="background:' + st.color + ';">' + position + '</div>',
+      iconSize: [26, 26],
+      iconAnchor: [13, 13],
+      popupAnchor: [0, -13]
+    });
+  }
+
+  function openRunOverview() {
+    var run = prospectState.run;
+    if (!run) { showScreen('screen-prospects'); return; }
+    var doors = run.ids.map(findProspect).filter(Boolean);
+    var worked = runWorkedCount(run);
+    var left = doors.length - worked;
+    var days = Math.ceil(doors.length / PROSPECT_DOORS_PER_DAY);
+
+    document.getElementById('run-ov-route').textContent = run.label;
+    document.getElementById('run-ov-meta').textContent =
+      doors.length + ' stops \u00b7 ' + prospectPathMiles(doors).toFixed(1) + ' mi \u00b7 about ' +
+      days + ' day' + (days === 1 ? '' : 's') + (worked ? ' \u00b7 ' + worked + ' already worked' : '');
+
+    document.getElementById('run-ov-start').textContent =
+      worked && run.index < run.ids.length ? 'RESUME AT STOP ' + (run.index + 1) : 'START';
+
+    // Each day's drive, as a Maps link, on the page a rep looks at before he
+    // sets off rather than buried in the list behind him.
+    document.getElementById('run-ov-links').innerHTML = prospectGroupByDay(doors).map(function (d) {
+      var chunks = prospectMapsChunks(d.doors);
+      return '<div class="run-ov-day"><span>Day ' + d.day + ' \u00b7 ' + d.doors.length + ' stops \u00b7 ' +
+        prospectPathMiles(d.doors).toFixed(1) + ' mi</span>' +
+        chunks.map(function (chunk, i) {
+          return '<a href="' + prospectMapsUrl(chunk) + '" target="_blank" rel="noopener">' +
+            (chunks.length === 1 ? 'Directions' : 'Directions ' + (i + 1) + '/' + chunks.length) + '</a>';
+        }).join('') + '</div>';
+    }).join('');
+
+    document.getElementById('run-ov-list').innerHTML = doors.map(function (p, i) {
+      var st = prospectStatus(p);
+      var done = prospectStatusKey(p) !== 'new';
+      return '<div class="order-row prospect-row run-ov-row' + (done ? ' is-worked' : '') +
+          '" data-run-index="' + i + '">' +
+        '<span class="prospect-stop" style="background:' + (done ? st.color : '#f1e7d6') +
+          '; color:' + (done ? '#fff' : '#645442') + ';">' + (i + 1) + '</span>' +
+        '<span class="prospect-body">' +
+          '<span class="oname">' + escapeHtml(prospectTitle(p)) + '</span>' +
+          '<span class="osub">' + escapeHtml(p.address.split(',')[0]) + ' \u00b7 ' + escapeHtml(titleCase(p.city)) + '</span>' +
+          '<span class="prospect-tags">' +
+            '<span class="prospect-tag tier-' + escapeHtml(p.tier) + '">Tier ' + escapeHtml(p.tier) + '</span>' +
+            '<span class="prospect-tag">day ' + (prospectDay(p) || 1) + '</span>' +
+            (done ? '<span class="prospect-tag" style="background:' + st.color + '22; color:' + st.color + ';">' +
+              escapeHtml(st.label) + '</span>' : '') +
+          '</span>' +
+        '</span>' +
+        '</div>';
+    }).join('');
+
+    document.getElementById('run-ov-list').querySelectorAll('[data-run-index]').forEach(function (row) {
+      row.addEventListener('click', function () {
+        run.index = parseInt(row.getAttribute('data-run-index'), 10);
+        saveRun(run);
+        openRunScreen();
+      });
+    });
+
+    showScreen('screen-run-overview');
+    setTimeout(function () { renderRunOverviewMap(doors); }, 50);
+  }
+
+  function renderRunOverviewMap(doors) {
+    if (!window.L) return;
+    if (!runOverviewMap) {
+      runOverviewMap = L.map('run-ov-map');
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        maxZoom: 19,
+        subdomains: 'abcd',
+        attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; OpenStreetMap contributors'
+      }).addTo(runOverviewMap);
+    }
+    runOverviewLayers.forEach(function (l) { runOverviewMap.removeLayer(l); });
+    runOverviewLayers = [];
+    if (!doors.length) return;
+
+    var points = doors.map(function (p) { return [p.lat, p.lng]; });
+    runOverviewMap.fitBounds(L.latLngBounds(points), { padding: [28, 28], maxZoom: 15 });
+
+    // The line is the order of the walk, which is the thing this page exists
+    // to show: a rep can see at a glance whether the route doubles back.
+    var line = L.polyline(points, { color: '#ed633f', weight: 3, opacity: 0.75, dashArray: '5 6' }).addTo(runOverviewMap);
+    runOverviewLayers.push(line);
+
+    doors.forEach(function (p, i) {
+      var marker = L.marker([p.lat, p.lng], { icon: runOverviewPin(p, i + 1) }).addTo(runOverviewMap);
+      marker.bindPopup('<strong>' + escapeHtml(prospectTitle(p)) + '</strong>' + escapeHtml(p.address));
+      runOverviewLayers.push(marker);
+    });
+    runOverviewMap.invalidateSize();
+  }
+
+  document.getElementById('run-ov-start').addEventListener('click', openRunScreen);
+  document.getElementById('back-run-overview').addEventListener('click', function () {
+    showScreen('screen-prospects');
+    setTimeout(renderProspects, 50);
+  });
 
   function openRunScreen() {
     showScreen('screen-run');
@@ -3408,6 +3523,7 @@
     document.getElementById('run-status-buttons').style.display = finished ? 'none' : 'grid';
     document.getElementById('run-note').parentNode.style.display = finished ? 'none' : 'flex';
     document.querySelector('.run-actions').style.display = finished ? 'none' : 'flex';
+    document.getElementById('run-footer').style.display = finished ? 'none' : 'flex';
 
     if (finished) {
       document.getElementById('run-count').textContent = worked + ' of ' + total + ' worked';
@@ -3463,10 +3579,21 @@
     warnEl.textContent = warn;
     warnEl.style.display = warn ? 'block' : 'none';
 
+    renderRunStatusButtons(p);
+    // Until something is recorded, the footer says what skipping means rather
+    // than pretending the door is done.
+    document.getElementById('run-next').textContent =
+      prospectStatusKey(p) === 'new' ? 'Skip \u00b7 Next Location \u2192' : 'Next Location \u2192';
+  }
+
+  function renderRunStatusButtons(p) {
+    var current = prospectStatusKey(p);
     document.getElementById('run-status-buttons').innerHTML = PROSPECT_STATUSES.filter(function (st) {
       return st.key !== 'new';
     }).map(function (st) {
-      return '<button type="button" class="prospect-status-btn" data-status="' + st.key + '" style="color:' + st.color + ';">' +
+      var on = st.key === current;
+      return '<button type="button" class="prospect-status-btn' + (on ? ' selected' : '') +
+        '" data-status="' + st.key + '" style="color:' + st.color + ';">' +
         '<i style="background:' + st.color + ';"></i>' + escapeHtml(st.label) + '</button>';
     }).join('');
   }
@@ -3495,10 +3622,14 @@
     saveProspectMarks();
     refreshProspectPin(p);
     toast(prospectTitle(p) + ' \u2014 ' + PROSPECT_STATUS_BY_KEY[key].label);
-    runAdvance();
+    // Show the answer as taken rather than jumping to the next door: a
+    // mis-tap on a moving screen is a door the rep never sees again.
+    renderRunStatusButtons(p);
+    document.getElementById('run-next').textContent = 'Next Location \u2192';
   });
 
-  document.getElementById('run-skip').addEventListener('click', runAdvance);
+  document.getElementById('run-next').addEventListener('click', runAdvance);
+  document.getElementById('run-overview').addEventListener('click', openRunOverview);
 
   document.getElementById('run-open').addEventListener('click', function () {
     var run = prospectState.run;
@@ -3510,6 +3641,47 @@
   document.getElementById('back-run').addEventListener('click', function () {
     showScreen('screen-prospects');
     setTimeout(renderProspects, 50);
+  });
+
+  // Wiping the rep's own marks. Two taps rather than a confirm() dialog: a
+  // modal in a PWA is a blunt instrument, and the second tap has to be
+  // deliberate anyway. It clears the statuses and any run in progress, since
+  // a run whose doors were all just un-worked is not a run any more.
+  var prospectResetArmed = false;
+
+  function renderProspectReset() {
+    var btn = document.getElementById('prospect-reset');
+    var marks = Object.keys(prospectState.marks).length;
+    if (!marks) {
+      btn.style.display = 'none';
+      prospectResetArmed = false;
+      return;
+    }
+    btn.style.display = 'block';
+    btn.textContent = prospectResetArmed
+      ? 'Tap again to erase ' + marks + ' mark' + (marks === 1 ? '' : 's')
+      : 'Reset my visit statuses';
+    btn.classList.toggle('is-armed', prospectResetArmed);
+  }
+
+  document.getElementById('prospect-reset').addEventListener('click', function () {
+    if (!prospectResetArmed) {
+      prospectResetArmed = true;
+      renderProspectReset();
+      setTimeout(function () {
+        if (!prospectResetArmed) return;
+        prospectResetArmed = false;
+        renderProspectReset();
+      }, 5000);
+      return;
+    }
+    prospectState.marks = {};
+    saveProspectMarks();
+    prospectState.run = null;
+    saveRun(null);
+    prospectResetArmed = false;
+    toast('Every door is back to not visited');
+    renderProspects();
   });
 
   /** The button (or the resume banner) at the top of the prospecting screen. */
@@ -3526,7 +3698,7 @@
           '<span class="cta-btn-icon" aria-hidden="true">\u2192</span>' +
         '</button>' +
         '<button class="run-abandon" id="prospect-end-run" type="button">End this run</button>';
-      document.getElementById('prospect-resume-run').addEventListener('click', openRunScreen);
+      document.getElementById('prospect-resume-run').addEventListener('click', openRunOverview);
       document.getElementById('prospect-end-run').addEventListener('click', function () {
         saveRun(null);
         prospectState.run = null;
@@ -3864,6 +4036,7 @@
     var list = filteredProspects();
     renderProspectProgress();
     renderRunCta();
+    renderProspectReset();
     renderProspectFilters();
     renderProspectSweep(list);
     renderProspectList(list);
