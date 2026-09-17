@@ -1758,8 +1758,7 @@ input:focus, select:focus, textarea:focus { outline-color: var(--coral); border-
 /* Reset: quiet until it is armed, then unmistakable. */
 .prospect-reset {
   display: block;
-  width: 100%;
-  margin-top: 14px;
+  margin: 10px 0 16px auto;
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 12px;

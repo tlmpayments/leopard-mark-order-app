@@ -577,6 +577,9 @@
     <div class="section-title">Find Prospective Accounts</div>
 
     <div class="prospect-progress" id="prospect-progress" aria-live="polite"></div>
+    <!-- Next to the counts it erases, not at the foot of a 40-row list where
+         nobody could find it. -->
+    <button class="prospect-reset" id="prospect-reset" type="button"></button>
 
     <!-- Generate a route. One route at a time, worked stop by stop, picked up
          again tomorrow where it was left -- a 36-door route is three days, so
@@ -637,7 +640,6 @@
       Visit statuses are saved on this phone, for this rep. They are not sent to the
       office and another rep will not see them.
     </p>
-    <button class="prospect-reset" id="prospect-reset" type="button"></button>
   </section>
 
   <!-- ROUTE OVERVIEW: what the day looks like before it starts ------------
