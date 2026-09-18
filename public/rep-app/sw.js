@@ -1,4 +1,4 @@
-var CACHE = 'lmb-orders-v11';
+var CACHE = 'lmb-orders-v12';
 var ASSETS = [
   './',
   'index.html',

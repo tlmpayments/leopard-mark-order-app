@@ -2235,23 +2235,68 @@
     document.getElementById('mk-catalog').innerHTML =
       '<div class="empty-note"><span class="spinner"></span> Loading the catalogue…</div>';
 
-    window.LM_MARKETING.load(mkToken(), function () {
+    loadMarketingCatalog();
+  }
+
+  // Split out of openMarketingForm so the reconnect prompt below can retry it.
+  function loadMarketingCatalog() {
+    return window.LM_MARKETING.load(mkToken(), function () {
       // Fired only when the server's copy differs from what was drawn.
       mkPurposeOptions();
       renderMarketingBrandFilter();
       renderMarketingCatalog();
+    }, function (err) {
+      // The background refresh failed behind a cached catalogue. Only a 401
+      // is worth interrupting for: the rep is looking at a stale list his
+      // token can no longer submit against.
+      if (err && err.status === 401) renderMarketingReconnect('This device needs to reconnect before you can submit.');
     })
       .then(function () {
         mkPurposeOptions();
         renderMarketingBrandFilter();
         renderMarketingCatalog();
       })
-      .catch(function () {
+      .catch(function (err) {
+        mkPurposeOptions();
+        // A rep whose session was restored from localStorage never went
+        // through the PIN pad, so he may hold no rep token at all -- and one
+        // issued a month ago has expired. Either way the catalogue 401s.
+        //
+        // This did not matter before: the catalogue used to be a bundled file
+        // that needed no server. It does now, so the screen has to be able to
+        // ask for the four digits again rather than telling a rep standing in
+        // a bar that his catalogue is simply gone.
+        if (err && err.status === 401) { renderMarketingReconnect(); return; }
         document.getElementById('mk-catalog').innerHTML =
           '<div class="empty-note">The catalogue could not be loaded and this phone has no copy saved yet. ' +
           'You can still describe what you need under <strong>Custom Request</strong> below and submit.</div>';
-        mkPurposeOptions();
       });
+  }
+
+  function renderMarketingReconnect(message) {
+    document.getElementById('mk-catalog').innerHTML =
+      '<div class="empty-note">' +
+        (message ? escapeHtml(message) : 'This device needs to reconnect before it can load the catalogue.') +
+        '<div class="mk-reconnect">' +
+          '<input id="mk-reconnect-pin" inputmode="numeric" pattern="[0-9]*" maxlength="4" ' +
+            'placeholder="PIN" aria-label="Your four-digit PIN" />' +
+          '<button type="button" class="btn btn-ghost" id="mk-reconnect-go">Reconnect</button>' +
+        '</div>' +
+      '</div>';
+
+    document.getElementById('mk-reconnect-go').addEventListener('click', function () {
+      var input = document.getElementById('mk-reconnect-pin');
+      var pin = (input.value || '').trim();
+      if (!/^\d{4}$/.test(pin)) { renderMarketingReconnect('Enter your four-digit PIN.'); return; }
+      this.disabled = true;
+      this.innerHTML = '<span class="spinner"></span>';
+      requestProspectToken(pin).then(function (ok) {
+        if (!ok) { renderMarketingReconnect('That PIN was not recognised. Try again.'); return; }
+        document.getElementById('mk-catalog').innerHTML =
+          '<div class="empty-note"><span class="spinner"></span> Loading the catalogue…</div>';
+        loadMarketingCatalog();
+      });
+    });
   }
 
   document.getElementById('btn-marketing-order').addEventListener('click', openMarketingForm);
@@ -2685,9 +2730,11 @@
 
     var token = mkToken();
     if (!token) {
-      // No token means this phone has never reached the API since sign-in.
-      // Saying so is better than a 401 the rep cannot act on.
-      finish(false, 'Sign out and back in to reconnect, then resubmit.');
+      // No token means this phone has never reached the API since sign-in --
+      // a restored session never goes through the PIN pad. Offer the four
+      // digits here rather than making him sign out and lose the form.
+      finish(false, 'This device needs to reconnect. Scroll up to Materials and enter your PIN.');
+      renderMarketingReconnect('Enter your PIN to reconnect, then submit again.');
       return;
     }
 
@@ -2714,7 +2761,15 @@
       })
       .then(function (r) { return r.json().catch(function () { return { ok: false, error: 'The server sent something unreadable.' }; }); })
       .then(function (res) {
-        if (!res.ok) { finish(false, res.error || 'Request failed to submit'); return; }
+        if (!res.ok) {
+          if (/not signed in/i.test(res.error || '')) {
+            finish(false, 'This device needs to reconnect. Scroll up to Materials and enter your PIN.');
+            renderMarketingReconnect('Enter your PIN to reconnect, then submit again.');
+            return;
+          }
+          finish(false, res.error || 'Request failed to submit');
+          return;
+        }
         var what = res.lines ? res.lines + ' line item(s)' : 'Custom request';
         var msg = what + ' sent to marketing' + (res.requestNumber ? ' — ' + res.requestNumber : '');
         // Told, not swallowed: a rep who attached a mock-up that did not make
@@ -2966,6 +3021,10 @@
     } catch (e) {}
   }
 
+  // Resolves true when a token was obtained. The login caller ignores the
+  // result (an offline sign-in is fine; the prospect queue keeps retrying),
+  // but the marketing screen needs to know, because without a token its
+  // catalogue is a 401 rather than a stale copy.
   function requestProspectToken(pin) {
     return fetch(PROSPECT_API + '/session', {
       method: 'POST',
@@ -2974,9 +3033,10 @@
     })
       .then(function (r) { return r.json(); })
       .then(function (res) {
-        if (res && res.ok && res.token) saveProspectToken(res.token);
+        if (res && res.ok && res.token) { saveProspectToken(res.token); return true; }
+        return false;
       })
-      .catch(function () { /* offline at login; the queue will keep trying */ });
+      .catch(function () { return false; });
   }
 
   function prospectQueueKey() {

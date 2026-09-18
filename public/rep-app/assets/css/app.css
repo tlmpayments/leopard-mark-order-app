@@ -1012,6 +1012,24 @@ input[readonly]:focus { outline: none; border-color: var(--navy-600); }
 }
 .mk-size-input:focus { outline: none; border-color: var(--accent); }
 
+/* Reconnect prompt: shown when the catalogue 401s because this device holds
+   no rep token (a restored session never passes the PIN pad) or an expired
+   one. Four digits and a button, inline in the catalogue slot. */
+.mk-reconnect { display: flex; gap: 8px; margin-top: 10px; justify-content: center; }
+.mk-reconnect input {
+  width: 92px;
+  text-align: center;
+  letter-spacing: 0.3em;
+  background: var(--navy-800);
+  border: 1px solid var(--navy-600);
+  border-radius: 10px;
+  color: var(--white);
+  font-family: inherit;
+  font-size: 15px;
+  padding: 8px 10px;
+}
+.mk-reconnect input:focus { outline: none; border-color: var(--accent); }
+
 /* Firestone Walker's "Select files... / or drag and drop files here" box. */
 .file-drop {
   border: 1px dashed var(--navy-500);
@@ -1306,6 +1324,7 @@ input:focus, select:focus, textarea:focus { outline-color: var(--coral); border-
 .mk-thumb--empty { color: #b9a68a; }
 .mk-tag { background: #f3e3c4; color: #6d5a3a; }
 .mk-size-input { background: #fffdf8; border-color: #ecdfcb; color: var(--ink); }
+.mk-reconnect input { background: #fffdf8; border-color: #ecdfcb; color: var(--ink); }
 .qty-stepper button {
   background: #fff0cb;
   border-color: #f5d889;

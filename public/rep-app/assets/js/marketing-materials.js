@@ -113,7 +113,7 @@
    * adopted, so a rep whose catalogue has not changed does not watch the list
    * flicker every time he opens the form.
    */
-  function load(token, onUpdate) {
+  function load(token, onUpdate, onError) {
     var cached = readCache();
     var hadCache = adopt(cached, true);
 
@@ -122,7 +122,14 @@
       cache: 'no-store'
     })
       .then(function (r) {
-        if (!r.ok) throw new Error('catalog ' + r.status);
+        if (!r.ok) {
+          // The status rides on the error: a 401 means this device needs to
+          // reconnect and the caller can offer that, where any other failure
+          // is just "no signal".
+          var err = new Error('catalog ' + r.status);
+          err.status = r.status;
+          throw err;
+        }
         return r.json();
       })
       .then(function (res) {
@@ -135,13 +142,23 @@
         return store;
       })
       .catch(function (err) {
-        // Offline with a cache is a normal state in this app, not an error.
-        // Offline without one is the caller's problem to report.
-        if (hadCache) return store;
+        // Offline with a cache is a normal state in this app, not an error --
+        // except for a 401, which a cache cannot paper over: the rep could
+        // browse a stale catalogue and then fail at submit.
+        if (hadCache && err && err.status !== 401) return store;
         throw err;
       });
 
-    return hadCache ? Promise.resolve(store) : network;
+    // With a cache in hand the caller is resolved immediately, so a failure on
+    // the background refresh would otherwise be an unhandled rejection that
+    // never reaches anyone -- and a 401 there is exactly the case the caller
+    // most needs to hear about (stale catalogue on screen, dead token behind
+    // it). Hand it to onError instead of dropping it.
+    if (hadCache) {
+      network.catch(function (err) { if (typeof onError === 'function') onError(err); });
+      return Promise.resolve(store);
+    }
+    return network;
   }
 
   function byCategory() {
