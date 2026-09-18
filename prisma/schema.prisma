@@ -936,6 +936,25 @@ model BolSequence {
 // The BOL Maker's "Previously Generated" log: paperwork with NO ledger effect.
 // This is what bol.tlmbg.co produces today and what `docs_only` users can do.
 // shipmentId is set only if the document is later attached to a real shipment.
+model ArchivedDocument {
+  id           String   @id @default(cuid())
+  docNumber    String   @map("doc_number")
+  docType      String   @map("doc_type")
+  sha256       String
+  renderedHtml String   @map("rendered_html")
+  payloadJson  Json     @map("payload_json")
+  summary      String
+  accountId    String?  @map("account_id")
+  orderId      String?  @map("order_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([docNumber, sha256])
+  @@index([orderId])
+  @@index([accountId])
+  @@index([createdAt])
+  @@map("archived_documents")
+}
+
 model DocumentLog {
   docNumber       String   @id @map("doc_number")
   docType         DocType  @map("doc_type")
@@ -1086,6 +1105,8 @@ model DeliveryRoute {
   // one route out of the same warehouse.
   name        String?
 
+  routingSnapshot    Json?    @map("routing_snapshot")
+
   dispatchedAt       DateTime? @map("dispatched_at")
   dispatchedByUserId String?   @map("dispatched_by_user_id")
   startedAt          DateTime? @map("started_at")
@@ -1110,7 +1131,10 @@ model RouteStop {
   routeId String @map("route_id")
   // One order rides one route. A split delivery would relax this the same way
   // Shipment.orderId would have to.
-  orderId String @unique @map("order_id")
+  orderId String? @unique @map("order_id")
+  stopName String? @map("stop_name")
+  stopAddress String? @map("stop_address")
+  accountRef String? @map("account_ref")
   // 1-based position in the driver's day. Unique per route so two stops can
   // never claim the same position -- reordering rewrites the whole run through
   // a negative holding range, since a plain swap would trip this constraint.
@@ -1126,7 +1150,7 @@ model RouteStop {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   route  DeliveryRoute   @relation(fields: [routeId], references: [id], onDelete: Cascade)
-  order  Order           @relation(fields: [orderId], references: [id])
+  order  Order?          @relation(fields: [orderId], references: [id])
   photos DeliveryPhoto[]
 
   @@unique([routeId, sequence])
@@ -1210,4 +1234,54 @@ model DriverAccessToken {
 
   @@index([repId, revokedAt])
   @@map("driver_access_tokens")
+}
+
+/// One prospective door's standing status, keyed on the permanent ID from
+/// column A of the ABC plan sheet (BEER_SALES_CA_LA_ZIP_Code_Group_01 ...).
+///
+/// The door list itself is NOT here: 551 rows of public licence data ship with
+/// the rep app as a static file, they change only when the sheet is re-cut,
+/// and putting them in Postgres would buy nothing but a round trip. What is
+/// here is the part that is nobody else's -- what a rep found when he walked
+/// in -- so that the office can see coverage and a rep's work survives his
+/// phone.
+///
+/// One row per door rather than one per rep: territories do not overlap, so a
+/// door has one status. `repName` records who last set it, which is the
+/// question ops actually asks ("who has been to this one, and when").
+model ProspectVisit {
+  id         String              @id @default(cuid())
+  /// Column A of the plan sheet. Permanent: never renumbered, even when an
+  /// account is reclassified, which is what makes it safe as a foreign key
+  /// into a file that lives outside the database.
+  prospectId Int                 @unique @map("prospect_id")
+  status     ProspectVisitStatus
+  note       String?
+  /// The rep as the PIN login names him ("James Williams"), not an id: the
+  /// rep app authenticates against the Apps Script Reps sheet, which has no
+  /// stable key of its own.
+  repName    String              @map("rep_name")
+  /// When the rep tapped it, by his device's clock. Kept apart from
+  /// updatedAt so that a queued offline mark records when it happened rather
+  /// than when the phone next found signal -- and so last-write-wins between
+  /// two devices resolves on the visit, not on the sync.
+  markedAt   DateTime            @map("marked_at")
+  createdAt  DateTime            @default(now()) @map("created_at")
+  updatedAt  DateTime            @updatedAt @map("updated_at")
+
+  @@index([repName])
+  @@index([status])
+  @@map("prospect_visits")
+}
+
+/// Mirrors PROSPECT_STATUSES in the rep app. `new` is deliberately absent:
+/// unvisited is the absence of a row, not a row saying nothing happened.
+enum ProspectVisitStatus {
+  visited
+  interested
+  comeback
+  signed
+  nofit
+
+  @@map("prospect_visit_status")
 }

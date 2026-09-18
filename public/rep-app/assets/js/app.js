@@ -252,6 +252,10 @@
       .then(function (res) {
         if (res && res.ok) {
           completeLogin(res.rep, res.role);
+          // Trade the same PIN for a token the prospect API accepts. Fire and
+          // forget: prospecting is one tab of this app and a rep who cannot
+          // reach it should still be able to place an order.
+          requestProspectToken(pin);
           resetPinPad();
           return;
         }
@@ -2898,6 +2902,170 @@
     catch (e) { toast('Could not save on this device', true); }
   }
 
+  // ---- keeping the office in the loop -------------------------------------
+  //
+  // The device is still the thing a rep writes to: he marks a door standing on
+  // a sidewalk, and waiting on a network there would be the difference between
+  // recording a visit and not bothering. So a mark lands in localStorage
+  // first, always, and a queue carries it to the server when there is signal.
+  //
+  // What that buys, now that the server has it: the office can see coverage,
+  // a lost phone is not lost work, and a rep's marks survive a browser that
+  // decides to clear site data.
+
+  var PROSPECT_API = '/api/prospects';
+
+  function prospectTokenKey() { return 'lm_prospect_token'; }
+  function loadProspectToken() {
+    try { return localStorage.getItem(prospectTokenKey()) || ''; } catch (e) { return ''; }
+  }
+  function saveProspectToken(token) {
+    try {
+      if (token) localStorage.setItem(prospectTokenKey(), token);
+      else localStorage.removeItem(prospectTokenKey());
+    } catch (e) {}
+  }
+
+  function requestProspectToken(pin) {
+    return fetch(PROSPECT_API + '/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: pin })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res && res.ok && res.token) saveProspectToken(res.token);
+      })
+      .catch(function () { /* offline at login; the queue will keep trying */ });
+  }
+
+  function prospectQueueKey() {
+    return 'lm_prospect_queue_' + (state.rep || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  }
+  function loadProspectQueue() {
+    try {
+      var raw = localStorage.getItem(prospectQueueKey());
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) { return []; }
+  }
+  function saveProspectQueue(queue) {
+    try { localStorage.setItem(prospectQueueKey(), JSON.stringify(queue)); } catch (e) {}
+  }
+
+  /** Queue one mark for the server. The door is keyed, not appended, so a rep
+   *  who changes his mind three times at the same door sends one row. */
+  function queueProspectVisit(prospectId, mark) {
+    var queue = loadProspectQueue().filter(function (item) { return item.prospectId !== prospectId; });
+    queue.push({
+      prospectId: prospectId,
+      status: mark.status,
+      note: mark.note || '',
+      markedAt: new Date(mark.at || Date.now()).toISOString()
+    });
+    saveProspectQueue(queue);
+    flushProspectQueue();
+  }
+
+  /** Un-marking a door. A delete rather than a status, because "not visited"
+   *  is the absence of a row -- see ProspectVisit in the schema. */
+  function queueProspectDelete(prospectId) {
+    var token = loadProspectToken();
+    saveProspectQueue(loadProspectQueue().filter(function (item) { return item.prospectId !== prospectId; }));
+    if (!token) return Promise.resolve();
+    return fetch(PROSPECT_API + '/visits?prospectId=' + prospectId, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer ' + token }
+    }).then(function () { renderProspectSyncState(); }).catch(function () {});
+  }
+
+  var prospectFlushing = false;
+
+  function flushProspectQueue() {
+    var token = loadProspectToken();
+    var queue = loadProspectQueue();
+    if (prospectFlushing || !queue.length || !token) return Promise.resolve();
+    prospectFlushing = true;
+
+    return fetch(PROSPECT_API + '/visits', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ visits: queue })
+    })
+      .then(function (r) {
+        if (r.status === 401) { saveProspectToken(''); return null; } // token aged out; next login re-issues
+        return r.json();
+      })
+      .then(function (res) {
+        // Only clear what was actually sent: a mark made while this request
+        // was in flight is still in the queue and must not be dropped.
+        if (res && res.ok) {
+          var sent = {};
+          queue.forEach(function (item) { sent[item.prospectId] = item.markedAt; });
+          saveProspectQueue(loadProspectQueue().filter(function (item) {
+            return sent[item.prospectId] !== item.markedAt;
+          }));
+          renderProspectSyncState();
+        }
+      })
+      .catch(function () { /* still offline; it stays queued */ })
+      .then(function () { prospectFlushing = false; });
+  }
+
+  /** Pull what everyone has recorded and fold it into this device's copy.
+   *  The server wins, except for marks this phone has not managed to send
+   *  yet -- those are newer by definition and would otherwise be undone by
+   *  the very sync that is meant to preserve them. */
+  function pullProspectVisits() {
+    var token = loadProspectToken();
+    if (!token) return Promise.resolve(false);
+
+    return fetch(PROSPECT_API + '/visits', { headers: { Authorization: 'Bearer ' + token } })
+      .then(function (r) {
+        if (r.status === 401) { saveProspectToken(''); return null; }
+        return r.json();
+      })
+      .then(function (res) {
+        if (!res || !res.ok) return false;
+        var pending = {};
+        loadProspectQueue().forEach(function (item) { pending[item.prospectId] = true; });
+
+        var merged = {};
+        res.visits.forEach(function (v) {
+          if (pending[v.prospectId]) return;
+          merged[v.prospectId] = { status: v.status, note: v.note || '', at: new Date(v.markedAt).getTime(), rep: v.rep };
+        });
+        Object.keys(prospectState.marks).forEach(function (id) {
+          if (pending[Number(id)] || !merged[id]) merged[id] = prospectState.marks[id];
+        });
+        prospectState.marks = merged;
+        saveProspectMarks();
+        return true;
+      })
+      .catch(function () { return false; });
+  }
+
+  /** A quiet line saying whether the office has this yet. A rep should never
+   *  have to wonder whether his morning is only on his phone. */
+  function renderProspectSyncState() {
+    var el = document.getElementById('prospect-sync');
+    if (!el) return;
+    var queued = loadProspectQueue().length;
+    if (!loadProspectToken()) {
+      el.textContent = 'Saved on this phone only \u2014 sign out and back in to sync with the office.';
+      el.className = 'prospect-sync is-local';
+      return;
+    }
+    el.textContent = queued
+      ? queued + ' mark' + (queued === 1 ? '' : 's') + ' waiting to reach the office'
+      : 'Synced with the office';
+    el.className = 'prospect-sync' + (queued ? ' is-pending' : '');
+  }
+
+  window.addEventListener('online', function () {
+    flushProspectQueue();
+  });
+
+
   function prospectMark(id) { return prospectState.marks[id] || null; }
   function prospectStatusKey(p) {
     var m = prospectMark(p.id);
@@ -3620,6 +3788,7 @@
       at: Date.now()
     };
     saveProspectMarks();
+    queueProspectVisit(p.id, prospectState.marks[p.id]);
     refreshProspectPin(p);
     toast(prospectTitle(p) + ' \u2014 ' + PROSPECT_STATUS_BY_KEY[key].label);
     // Show the answer as taken rather than jumping to the next door: a
@@ -3677,9 +3846,20 @@
     }
     prospectState.marks = {};
     saveProspectMarks();
+    saveProspectQueue([]);
     prospectState.run = null;
     saveRun(null);
     prospectResetArmed = false;
+    var token = loadProspectToken();
+    if (token) {
+      // Clears this rep's rows for everyone, which is the point: a reset that
+      // left the office looking at marks the rep had just wiped would be
+      // worse than no reset at all.
+      fetch(PROSPECT_API + '/visits?rep=' + encodeURIComponent(state.rep || ''), {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + token }
+      }).then(function () { renderProspects(); }).catch(function () {});
+    }
     toast('Every door is back to not visited');
     renderProspects();
   });
@@ -4035,6 +4215,7 @@
   function renderProspects() {
     var list = filteredProspects();
     renderProspectProgress();
+    renderProspectSyncState();
     renderRunCta();
     renderProspectReset();
     renderProspectFilters();
@@ -4046,6 +4227,12 @@
   function openProspects() {
     prospectState.marks = loadProspectMarks();
     prospectState.run = loadRun();
+    // Send anything stranded from yesterday, then take what the office has.
+    flushProspectQueue();
+    pullProspectVisits().then(function (changed) {
+      if (changed) renderProspects();
+      renderProspectSyncState();
+    });
     prospectState.limit = PROSPECT_PAGE;
     // An admin opens on the whole board; a rep opens on his own streets.
     prospectState.rep = prospectIsAdmin() ? 'all' : 'mine';
@@ -4225,6 +4412,8 @@
     }
 
     saveProspectMarks();
+    if (key === 'new') queueProspectDelete(p.id);
+    else queueProspectVisit(p.id, prospectState.marks[p.id]);
     renderProspectStatusButtons();
     refreshProspectPin(p);
     renderProspectProgress();
@@ -4242,6 +4431,9 @@
       if (!note && existing.status === 'new') delete prospectState.marks[p.id];
       else prospectState.marks[p.id] = { status: existing.status || 'new', note: note, at: existing.at || Date.now() };
       saveProspectMarks();
+      if (prospectState.marks[p.id] && prospectState.marks[p.id].status !== 'new') {
+        queueProspectVisit(p.id, prospectState.marks[p.id]);
+      }
     }, 400);
   });
 

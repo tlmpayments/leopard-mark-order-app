@@ -1,11 +1,10 @@
-import Link from "next/link";
 import "./ops.css";
 import { db } from "@/lib/db";
 import { signOut } from "@/auth";
 import { requireOpsUser } from "@/lib/ops/session";
 import { healthChips } from "@/lib/ops/queries";
 import { initials } from "@/lib/ops/format";
-import { NavIcon } from "./_components/icons";
+import { Navigation } from "./_components/Navigation";
 import { GlobalSearch } from "./_components/GlobalSearch";
 import { Shortcuts } from "./_components/Shortcuts";
 
@@ -23,19 +22,20 @@ export default async function OpsLayout({ children }: LayoutProps<"/ops">) {
 
   const [openOrders, needsSetup, deadJobs, failedInvoices, chips] = await Promise.all([
     db.order.count({
-      where: { status: { notIn: ["cancelled", "rejected", "expired"] }, invoice: { is: null } },
+      where: { status: { notIn: ["cancelled", "rejected", "expired", "draft"] }, scheduledFor: null, deliveredAt: null, deliveryDate: null, NOT: { invoice: { is: { stripeInvoiceId: { startsWith: "sheet:" } } } } },
     }),
-    db.account.count({ where: { firstOrderAt: null, approvalStatus: { not: "rejected" } } }),
+    db.account.count({ where: { stripeCustomerId: null } }),
     db.jobRun.count({ where: { status: "dead" } }),
     db.invoice.count({ where: { status: "local_error" } }),
     healthChips(),
   ]);
 
   const nav: Array<{ href: string; key: string; label: string; count?: number; hot?: boolean }> = [
-    { href: "/ops", key: "home", label: "Command Center" },
+    { href: "/ops", key: "home", label: "Today" },
     { href: "/ops/orders", key: "orders", label: "Orders", count: openOrders },
     { href: "/ops/accounts", key: "accounts", label: "Accounts", count: needsSetup },
     { href: "/ops/deliveries", key: "deliveries", label: "Deliveries" },
+    { href: "/ops/prospects", key: "prospects", label: "Prospecting" },
     { href: "/ops/inventory", key: "inventory", label: "Inventory" },
     { href: "/ops/documents", key: "documents", label: "Documents" },
     { href: "/ops/billing", key: "billing", label: "Billing", count: failedInvoices, hot: failedInvoices > 0 },
@@ -57,15 +57,7 @@ export default async function OpsLayout({ children }: LayoutProps<"/ops">) {
               <small>Ops</small>
             </div>
           </div>
-          <nav className="nav" aria-label="Sections">
-            {nav.map((item) => (
-              <Link key={item.href} href={item.href}>
-                <NavIcon name={item.key} />
-                {item.label}
-                {item.count ? <span className={`cnt${item.hot ? " hot" : ""}`}>{item.count}</span> : null}
-              </Link>
-            ))}
-          </nav>
+          <Navigation items={nav} />
           <div className="foot">
             Signed in as <b>{user.name}</b> · {user.role}
             <br />

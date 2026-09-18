@@ -12,6 +12,8 @@ export const NAV_ICON_PATHS: Record<string, string> = {
   deliveries:
     "M3 7h11v9H3zM14 10h4l3 3v3h-7zM6 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm12 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z",
   inventory: "M4 8l8-4 8 4v9l-8 4-8-4zM4 8l8 4 8-4M12 12v9",
+  // A map pin: the prospecting screen is a map before it is anything else.
+  prospects: "M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Zm0-8.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z",
   documents: "M7 3h7l5 5v13H7zM14 3v5h5",
   billing: "M3 6h18v12H3zM3 10h18M7 15h4",
   automations: "M12 3v3M12 18v3M3 12h3M18 12h3M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z",
