@@ -2978,6 +2978,33 @@
     }).then(function () { renderProspectSyncState(); }).catch(function () {});
   }
 
+  /** Everything this phone recorded before there was a server to send it to.
+   *  Without this, a rep who had been marking doors for a week would sync
+   *  from that moment on and quietly leave the week behind -- the marks would
+   *  still be on his phone, look completely normal, and never reach anyone. */
+  function backfillProspectMarks() {
+    var flag = 'lm_prospect_backfilled_' + (state.rep || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    try {
+      if (localStorage.getItem(flag)) return;
+      var ids = Object.keys(prospectState.marks);
+      var queue = loadProspectQueue();
+      var queued = {};
+      queue.forEach(function (item) { queued[item.prospectId] = true; });
+      ids.forEach(function (id) {
+        var mark = prospectState.marks[id];
+        if (!mark || mark.status === 'new' || queued[Number(id)]) return;
+        queue.push({
+          prospectId: Number(id),
+          status: mark.status,
+          note: mark.note || '',
+          markedAt: new Date(mark.at || Date.now()).toISOString()
+        });
+      });
+      saveProspectQueue(queue);
+      localStorage.setItem(flag, String(Date.now()));
+    } catch (e) {}
+  }
+
   var prospectFlushing = false;
 
   function flushProspectQueue() {
@@ -4227,7 +4254,9 @@
   function openProspects() {
     prospectState.marks = loadProspectMarks();
     prospectState.run = loadRun();
-    // Send anything stranded from yesterday, then take what the office has.
+    // Send anything stranded from yesterday -- including whatever this phone
+    // recorded before the server existed -- then take what the office has.
+    if (loadProspectToken()) backfillProspectMarks();
     flushProspectQueue();
     pullProspectVisits().then(function (changed) {
       if (changed) renderProspects();
