@@ -929,39 +929,88 @@ input[readonly]:focus { outline: none; border-color: var(--navy-600); }
   padding: 10px 12px;
 }
 .mk-item.has-qty { border-color: var(--accent); }
-.mk-item-text { min-width: 0; }
+.mk-item-text { min-width: 0; flex: 1; }
 .mk-item-name { font-size: 13px; font-weight: 600; }
 .mk-item-sub { font-size: 11px; color: var(--silver-dim); margin-top: 2px; }
+/* The board's own description line. Clamped to two lines: it is a sentence
+   of context, not the item's documentation, and letting it run pushes the
+   stepper off a phone screen. */
+.mk-item-desc {
+  font-size: 11px;
+  color: var(--silver);
+  margin-top: 4px;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .mk-item-id {
   font-size: 10px;
   color: var(--silver-dim);
+  margin-top: 4px;
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
-/* A sized item (garments) becomes a header row plus one stepper per size,
-   indented under it -- ordering 12 tees is useless without the size split. */
-.mk-sized { display: flex; flex-direction: column; gap: 0; }
-.mk-sized .mk-item { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
-.mk-size-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
-  gap: 8px;
-  background: var(--navy-900);
-  border: 1px solid var(--navy-600);
-  border-top: none;
-  border-radius: 0 0 10px 10px;
-  padding: 10px 12px;
+/* Artwork, from the catalogue. 52px because that is enough to tell a coaster
+   from a tap handle at arm's length in a dark bar, and small enough that
+   twenty of them still scroll smoothly. `contain`, not `cover`: these are
+   product shots on their own backgrounds, and cropping a sell sheet to a
+   square hides the thing being ordered. */
+.mk-thumb {
+  width: 52px;
+  height: 52px;
+  flex: none;
+  border-radius: 8px;
+  object-fit: contain;
+  background: var(--navy-800);
 }
+.mk-thumb--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--silver-dim);
+  font-size: 20px;
+}
+/* Digital items ship as a link, not a box. Worth saying on the card so a rep
+   does not put a shipping address on a logo pack. */
+.mk-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--navy-600);
+  color: var(--silver);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
+/* Apparel. The catalogue records the range in `specs` ("TT51 ... XS-3XL")
+   rather than as one sku per size, so the rep types the split he wants and it
+   travels on the line. The row only renders for items whose specs name a size
+   -- see mkNeedsSize() in app.js. */
 .mk-size-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 6px;
+  gap: 8px;
+  margin-top: 6px;
 }
-.mk-size-label { font-size: 12px; font-weight: 600; color: var(--silver); }
-.mk-size-row .qty-stepper { gap: 6px; }
-.mk-size-row .qty-stepper button { width: 26px; height: 26px; font-size: 15px; }
-.mk-size-row .qty-stepper .qty-val { width: 20px; font-size: 13px; }
+.mk-size-label { font-size: 11px; font-weight: 600; color: var(--silver); flex: none; }
+.mk-size-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--navy-800);
+  border: 1px solid var(--navy-600);
+  border-radius: 8px;
+  color: var(--white);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 5px 8px;
+}
+.mk-size-input:focus { outline: none; border-color: var(--accent); }
 
 /* Firestone Walker's "Select files... / or drag and drop files here" box. */
 .file-drop {
@@ -1003,19 +1052,6 @@ input[readonly]:focus { outline: none; border-color: var(--navy-600); }
 .file-row button:active { color: #e35b5b; }
 
 /* ---- Marketing catalog: taxonomy sections & unstocked branches ---------- */
-.mk-section {
-  margin: 18px 0 6px;
-  padding: 0 2px;
-  font-family: var(--font-display, inherit);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .16em;
-  text-transform: uppercase;
-  color: var(--silver-dim);
-  border-bottom: 1px solid var(--hairline, rgba(255,255,255,.08));
-  padding-bottom: 6px;
-}
-.mk-section:first-child { margin-top: 4px; }
 
 
 /* --------------------------------------------------------------------------
@@ -1265,6 +1301,11 @@ input:focus, select:focus, textarea:focus { outline-color: var(--coral); border-
   border-radius: 14px;
 }
 .format-row .fdetail, .format-row .fcode, .mk-item-sub, .mk-item-id { color: var(--silver-dim); }
+.mk-item-desc { color: #6d6154; }
+.mk-thumb { background: #fff4e1; }
+.mk-thumb--empty { color: #b9a68a; }
+.mk-tag { background: #f3e3c4; color: #6d5a3a; }
+.mk-size-input { background: #fffdf8; border-color: #ecdfcb; color: var(--ink); }
 .qty-stepper button {
   background: #fff0cb;
   border-color: #f5d889;
@@ -1295,7 +1336,6 @@ input:focus, select:focus, textarea:focus { outline-color: var(--coral); border-
 .mk-cat-head { color: var(--ink); }
 .mk-cat-head:active { background: #fff4e1; }
 .mk-cat-body { border-top-color: #f1e7d7; }
-.mk-section { color: var(--silver-dim); border-bottom-color: #eadcc6; }
 .file-drop { background: #fffaf1; border-color: #d7b875; }
 
 .back-link { color: #566c78; }

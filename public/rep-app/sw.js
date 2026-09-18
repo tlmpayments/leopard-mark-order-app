@@ -1,4 +1,4 @@
-var CACHE = 'lmb-orders-v10';
+var CACHE = 'lmb-orders-v11';
 var ASSETS = [
   './',
   'index.html',
@@ -39,8 +39,14 @@ self.addEventListener('activate', function (e) {
 
 // Network-first: always try the live server so deploys show up immediately.
 // Only fall back to the cache when the network is unavailable (offline).
+//
+// Marketing catalogue artwork (/marketing/<sku>.jpg) is deliberately NOT in
+// ASSETS above: precaching a megabyte of product shots on install would cost
+// every rep that megabyte whether or not he ever opens the materials form.
+// Network-first catches them the first time he does, which is also the first
+// time they matter offline.
 self.addEventListener('fetch', function (e) {
-  if (e.request.method !== 'GET') return; // never cache POSTs to Apps Script
+  if (e.request.method !== 'GET') return; // never cache POSTs to Apps Script or /api
   e.respondWith(
     fetch(e.request).then(function (res) {
       var copy = res.clone();

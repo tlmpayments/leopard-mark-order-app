@@ -2156,25 +2156,27 @@
   });
 
   // ---------- Marketing materials request ----------
-  // The catalog lives in assets/js/marketing-materials.js (transcribed from
-  // the Marketing Materials & Merch Master Tracker). This section is the
-  // form over it: 78 items in 12 categories, an optional ship-to account,
-  // and the free-text request fields carried over from Firestone Walker's
-  // form for anything the catalog doesn't cover.
+  // The catalogue comes from /api/marketing/catalog via assets/js/
+  // marketing-materials.js -- ops maintains it at ops.tlmbg.co/marketing/
+  // catalog, and it reaches the field on the next load rather than the next
+  // deploy. See that file for what changed and why.
+  //
+  // The item shape is the Field Supply Board's: sku, brand, category, type,
+  // specs, unit, supplier, leadTime, imageUrl. A request is submitted to
+  // /api/marketing/requests, gets a number back (MR-2609-0001), and posts to
+  // the marketing Slack channel. The old Apps Script `marketingOrder` path is
+  // gone.
   var MK_MAX_FILES = 5;
   var MK_MAX_FILE_BYTES = 5 * 1024 * 1024;
   var MK_MAX_TOTAL_BYTES = 15 * 1024 * 1024;
-  var MK_NO_SIZE = ''; // the size key used for items that aren't ordered by size
+  var MARKETING_API = '/api/marketing/requests';
 
-  // itemId -> { item, category }. Built once; the catalog is a static bundle,
-  // and submit has to resolve a bare id back to its category and brand.
-  var mkIndex = (function () {
-    var map = {};
-    (window.LM_MARKETING_CATEGORIES || []).forEach(function (cat) {
-      cat.items.forEach(function (item) { map[item.id] = { item: item, category: cat }; });
-    });
-    return map;
-  })();
+  // The rep token the prospect API already issues at sign-in. Reused rather
+  // than minted a second time: it is the same rep, signed with the same key,
+  // and verifyRepToken on the server does not care which surface asked for
+  // it. The storage key keeps its original name so that shipping this does
+  // not sign every rep out of prospecting.
+  function mkToken() { return loadProspectToken(); }
 
   function mkState() {
     if (!state.marketing) resetMarketingForm();
@@ -2184,8 +2186,9 @@
   function resetMarketingForm() {
     state.marketing = {
       account: null,
-      selection: {}, // itemId -> { sizeKey: qty }
-      openCats: {},  // categoryId -> true when expanded
+      selection: {}, // sku -> qty
+      sizes: {},     // sku -> free-text size, for apparel (see mkItemHtml)
+      openCats: {},  // category name -> true when expanded
       brand: 'All',
       query: '',
       files: []      // { file, name, size } -- read to base64 only at submit
@@ -2203,36 +2206,52 @@
     document.getElementById('mk-error').textContent = '';
   }
 
+  function mkPurposeOptions() {
+    var sel = document.getElementById('mk-purpose');
+    var chosen = sel.value;
+    var purposes = window.LM_MARKETING.state.purposes || [];
+    sel.innerHTML = '<option value="">Choose one</option>' + purposes.map(function (p) {
+      return '<option value="' + escapeHtml(p) + '">' + escapeHtml(p) + '</option>';
+    }).join('');
+    if (chosen) sel.value = chosen;
+  }
+
   function openMarketingForm() {
     resetMarketingForm();
     document.getElementById('mk-requestor').value = state.rep || '';
-
-    var sel = document.getElementById('mk-purpose');
-    if (sel.options.length <= 1) {
-      (window.LM_MARKETING_PURPOSES || []).forEach(function (p) {
-        var opt = document.createElement('option');
-        opt.value = p;
-        opt.textContent = p;
-        sel.appendChild(opt);
-      });
-    }
 
     // Nothing can be needed in the past, and today is a legitimate answer
     // (a rep standing in an account asking for stickers on the next run).
     document.getElementById('mk-needed-by').min = new Date().toISOString().slice(0, 10);
 
-    var total = Object.keys(mkIndex).length;
-    var stocked = (window.LM_MARKETING_CATEGORIES || []).filter(function (c) { return c.items.length; });
-    document.getElementById('mk-catalog-hint').textContent =
-      'Tap a category, then set quantities. ' + total + ' items across ' +
-      stocked.length + ' categories.';
-
-    renderMarketingBrandFilter();
-    renderMarketingCatalog();
     renderMarketingAccount();
     renderMarketingFileList();
     renderMarketingSummary();
     showScreen('screen-marketing');
+
+    // Render whatever is cached immediately, then refresh behind it. A rep
+    // opening this in a basement sees his catalogue, not a spinner that never
+    // resolves.
+    document.getElementById('mk-catalog').innerHTML =
+      '<div class="empty-note"><span class="spinner"></span> Loading the catalogue…</div>';
+
+    window.LM_MARKETING.load(mkToken(), function () {
+      // Fired only when the server's copy differs from what was drawn.
+      mkPurposeOptions();
+      renderMarketingBrandFilter();
+      renderMarketingCatalog();
+    })
+      .then(function () {
+        mkPurposeOptions();
+        renderMarketingBrandFilter();
+        renderMarketingCatalog();
+      })
+      .catch(function () {
+        document.getElementById('mk-catalog').innerHTML =
+          '<div class="empty-note">The catalogue could not be loaded and this phone has no copy saved yet. ' +
+          'You can still describe what you need under <strong>Custom Request</strong> below and submit.</div>';
+        mkPurposeOptions();
+      });
   }
 
   document.getElementById('btn-marketing-order').addEventListener('click', openMarketingForm);
@@ -2287,9 +2306,9 @@
     renderMarketingAccount();
   });
 
-  // ---- Catalog ----
+  // ---- Catalogue ----
   function renderMarketingBrandFilter() {
-    var brands = ['All'].concat(window.LM_MARKETING_BRANDS || []);
+    var brands = ['All'].concat(window.LM_MARKETING.state.brands || []);
     var mk = mkState();
     document.getElementById('mk-brand-filter').innerHTML = brands.map(function (b) {
       return '<button type="button" class="chip' + (mk.brand === b ? ' selected' : '') +
@@ -2297,130 +2316,148 @@
     }).join('');
   }
 
-  function mkItemMatches(item, cat, mk) {
-    // Multi-Brand items stay visible under a specific brand filter -- they
-    // carry all three marks, so a rep filtered to Cantinesca still wants the
-    // shared bar mats and stadium cups in front of them.
-    if (mk.brand !== 'All' && item.brand !== mk.brand && item.brand !== 'Multi-Brand') return false;
+  function mkItemMatches(item, mk) {
+    if (mk.brand !== 'All' && item.brand !== mk.brand) return false;
     if (!mk.query) return true;
-    var haystack = (item.name + ' ' + item.brand + ' ' + item.id + ' ' +
-      cat.section + ' ' + cat.name + ' ' + (item.note || '')).toLowerCase();
+    // Searched across everything printed on the card, so "vistaprint" finds
+    // the four things that supplier makes and "8.5" finds the sell sheets.
+    var haystack = [
+      item.name, item.brand, item.sku, item.category,
+      item.specs, item.supplier, item.description
+    ].join(' ').toLowerCase();
     return haystack.indexOf(mk.query) !== -1;
   }
 
-  // The full classification path, for the summary and the order row. Sections
-  // whose only node is themselves (Packaging, Trade Support) would otherwise
-  // read "Trade Support > Trade Support".
-  function mkCategoryPath(cat) {
-    return cat.section === cat.name ? cat.name : cat.section + ' › ' + cat.name;
+  function mkItemQty(sku) { return mkState().selection[sku] || 0; }
+
+  function mkCategoryQty(group) {
+    return group.items.reduce(function (sum, item) { return sum + mkItemQty(item.sku); }, 0);
   }
 
-  function mkItemQty(itemId) {
-    var sizes = mkState().selection[itemId];
-    if (!sizes) return 0;
-    return Object.keys(sizes).reduce(function (sum, k) { return sum + sizes[k]; }, 0);
-  }
-
-  function mkCategoryQty(cat) {
-    return cat.items.reduce(function (sum, item) { return sum + mkItemQty(item.id); }, 0);
-  }
-
-  function mkStepperHtml(itemId, sizeKey, qty) {
-    return '<div class="qty-stepper" data-item="' + itemId + '" data-size="' + escapeHtml(sizeKey) + '">' +
+  function mkStepperHtml(sku, qty) {
+    return '<div class="qty-stepper" data-sku="' + escapeHtml(sku) + '">' +
       '<button type="button" data-step="-1">−</button>' +
       '<span class="qty-val">' + qty + '</span>' +
       '<button type="button" data-step="1">+</button>' +
       '</div>';
   }
 
-  function mkItemHtml(item, cat) {
-    var subParts = [item.brand];
-    if (item.note) subParts.push(item.note);
-    if (item.unit) subParts.push('per ' + item.unit);
-    var text =
-      '<div class="mk-item-text">' +
-        '<div class="mk-item-name">' + escapeHtml(item.name) + '</div>' +
-        '<div class="mk-item-sub">' + escapeHtml(subParts.join(' · ')) + '</div>' +
-        '<div class="mk-item-id">' + escapeHtml(item.id) + '</div>' +
-      '</div>';
-    var qty = mkItemQty(item.id);
+  // Apparel is the one thing in the catalogue that is genuinely ordered per
+  // size, and the board records that range in `specs` ("TT51 ... XS–3XL")
+  // rather than as separate skus. Rather than make every item carry a size
+  // box to serve two polos, the size line appears when the specs name a size
+  // range. If apparel ever gets one sku per size this heuristic goes away
+  // and nothing else changes.
+  function mkNeedsSize(item) {
+    return /\bXS\b/i.test(item.specs || '');
+  }
 
-    if (!item.sizes) {
-      return '<div class="mk-item' + (qty ? ' has-qty' : '') + '" data-item="' + item.id + '">' +
-        text + mkStepperHtml(item.id, MK_NO_SIZE, qty) + '</div>';
+  function mkItemHtml(item) {
+    var qty = mkItemQty(item.sku);
+    var meta = [item.brand];
+    if (item.specs) meta.push(item.specs);
+    if (item.unit && item.unit !== 'each') meta.push(item.unit);
+
+    var foot = [];
+    if (item.supplier) foot.push(item.supplier);
+    if (item.leadTime) foot.push(item.leadTime);
+
+    var thumb = item.imageUrl
+      ? '<img class="mk-thumb" src="' + escapeHtml(item.imageUrl) + '" alt="" loading="lazy" />'
+      : '<span class="mk-thumb mk-thumb--empty" aria-hidden="true">' +
+        (item.type === 'digital' ? '⤓' : '▣') + '</span>';
+
+    var sizeRow = '';
+    if (mkNeedsSize(item)) {
+      var current = mkState().sizes[item.sku] || '';
+      sizeRow = '<div class="mk-size-row">' +
+        '<label class="mk-size-label" for="mk-size-' + escapeHtml(item.sku) + '">Size</label>' +
+        '<input class="mk-size-input" id="mk-size-' + escapeHtml(item.sku) + '" ' +
+        'data-size-for="' + escapeHtml(item.sku) + '" value="' + escapeHtml(current) + '" ' +
+        'placeholder="e.g. 2×L, 1×XL" />' +
+        '</div>';
     }
 
-    // Sized items get a header row plus one stepper per size -- a single
-    // quantity on a garment isn't actionable for whoever places the order.
-    var sizeRows = item.sizes.map(function (sz) {
-      var szQty = (mkState().selection[item.id] || {})[sz] || 0;
-      return '<div class="mk-size-row">' +
-        '<span class="mk-size-label">' + escapeHtml(sz) + '</span>' +
-        mkStepperHtml(item.id, sz, szQty) +
-        '</div>';
-    }).join('');
-
-    return '<div class="mk-sized">' +
-      '<div class="mk-item' + (qty ? ' has-qty' : '') + '" data-item="' + item.id + '">' +
-        text +
-        '<span class="mk-item-sub">' + (qty ? qty + ' total' : 'by size') + '</span>' +
+    return '<div class="mk-item' + (qty ? ' has-qty' : '') + '" data-sku="' + escapeHtml(item.sku) + '">' +
+      thumb +
+      '<div class="mk-item-text">' +
+        '<div class="mk-item-name">' + escapeHtml(item.name) +
+          (item.type === 'digital' ? '<span class="mk-tag">Digital</span>' : '') +
+        '</div>' +
+        '<div class="mk-item-sub">' + escapeHtml(meta.join(' · ')) + '</div>' +
+        (item.description ? '<div class="mk-item-desc">' + escapeHtml(item.description) + '</div>' : '') +
+        (foot.length ? '<div class="mk-item-id">' + escapeHtml(foot.join(' · ')) + '</div>' : '') +
+        sizeRow +
       '</div>' +
-      '<div class="mk-size-grid">' + sizeRows + '</div>' +
+      mkStepperHtml(item.sku, qty) +
       '</div>';
+  }
+
+  // Categories open by default while the catalogue is small enough to scroll.
+  // The old tracker catalogue was 31 items in a tree and had to start
+  // collapsed; twenty image-led cards are a browsable board, and hiding them
+  // behind a tap each is the one thing that would make this worse than the
+  // page it replaces. Past the threshold it reverts to collapsed-first, which
+  // is what a catalogue of a hundred stickers would want.
+  var MK_OPEN_BY_DEFAULT_MAX = 24;
+
+  function mkCatDefaultOpen() {
+    return (window.LM_MARKETING.state.items || []).length <= MK_OPEN_BY_DEFAULT_MAX;
+  }
+
+  // undefined = never touched (use the default), true/false = the rep said so.
+  function mkCatOpen(name) {
+    var explicit = mkState().openCats[name];
+    return explicit === undefined ? mkCatDefaultOpen() : explicit;
   }
 
   function renderMarketingCatalog() {
     var mk = mkState();
     var host = document.getElementById('mk-catalog');
+    var store = window.LM_MARKETING.state;
+    var hint = document.getElementById('mk-catalog-hint');
+
+    if (!store.loadedAt) return; // openMarketingForm() owns the loading state
+
+    hint.textContent = 'Tap a category, then set quantities. ' +
+      store.items.length + ' item' + (store.items.length === 1 ? '' : 's') + ' across ' +
+      window.LM_MARKETING.byCategory().length + ' categories.' +
+      (store.fromCache ? ' Showing the copy saved on this phone.' : '');
+
     // A search or a brand filter force-opens every category that still has a
     // match. Leaving them collapsed would show a rep who typed "sticker" a
     // list of category headers and no stickers.
     var forceOpen = !!mk.query || mk.brand !== 'All';
     var anyShown = false;
-    var lastSection = null;
 
-    // Emitted once per top-level bucket, the first time one of its groups
-    // survives the filter -- so "Point-of-Sales" can't head an empty run.
-    function sectionHeadHtml(cat) {
-      if (cat.section === lastSection) return '';
-      lastSection = cat.section;
-      return '<div class="mk-section">' + escapeHtml(cat.section) + '</div>';
-    }
-
-    var html = (window.LM_MARKETING_CATEGORIES || []).map(function (cat) {
-      // Leaf-less branches used to render here as "Coming soon". They are no
-      // longer in the catalog at all, so a category with no items is now just
-      // a category whose every item was filtered out -- fall through and let
-      // the `!items.length` check below drop it.
-      var items = cat.items.filter(function (item) { return mkItemMatches(item, cat, mk); });
+    var html = window.LM_MARKETING.byCategory().map(function (group) {
+      var items = group.items.filter(function (item) { return mkItemMatches(item, mk); });
       if (!items.length) return '';
       anyShown = true;
-      var head = sectionHeadHtml(cat);
-      var qty = mkCategoryQty(cat);
-      // A category holding a quantity stays open, so a rep scrolling an
-      // 18-group tree can always see what they've already put in it without
-      // re-tapping. (A search that excludes the category still hides it --
-      // the filter runs above. Nothing is lost by that: the summary panel
-      // below lists every picked line, and submit reads from state, not
-      // from what happens to be on screen.)
-      var open = forceOpen || !!mk.openCats[cat.id] || qty > 0;
-      return head +
-        '<div class="mk-cat' + (qty ? ' has-qty' : '') + '" data-cat="' + cat.id + '">' +
-        '<button type="button" class="mk-cat-head" data-toggle-cat="' + cat.id + '">' +
-          '<span>' + escapeHtml(cat.name) +
-            '<span class="mk-cat-blurb">' + escapeHtml(cat.blurb) + '</span>' +
-          '</span>' +
+      var qty = mkCategoryQty(group);
+      // A category holding a quantity stays open, so a rep can always see
+      // what he has already put in it without re-tapping.
+      var open = forceOpen || mkCatOpen(group.name) || qty > 0;
+      return '<div class="mk-cat' + (qty ? ' has-qty' : '') + '" data-cat="' + escapeHtml(group.name) + '">' +
+        '<button type="button" class="mk-cat-head" data-toggle-cat="' + escapeHtml(group.name) + '">' +
+          '<span>' + escapeHtml(group.name) + '</span>' +
           '<span class="mk-cat-meta">' +
             (qty ? '<span class="mk-cat-badge">' + qty + '</span>' : '') +
             '<span class="mk-cat-count">' + items.length + '</span>' +
             '<span class="mk-cat-caret">' + (open ? '▾' : '▸') + '</span>' +
           '</span>' +
         '</button>' +
-        (open ? '<div class="mk-cat-body">' + items.map(function (item) { return mkItemHtml(item, cat); }).join('') + '</div>' : '') +
+        (open ? '<div class="mk-cat-body">' + items.map(mkItemHtml).join('') + '</div>' : '') +
         '</div>';
     }).join('');
 
-    host.innerHTML = anyShown ? html : '<div class="empty-note">No materials match that search. Try fewer words, or describe what you need under Custom Request below.</div>';
+    if (anyShown) {
+      host.innerHTML = html;
+    } else if (store.items.length) {
+      host.innerHTML = '<div class="empty-note">No materials match that search. Try fewer words, or describe what you need under Custom Request below.</div>';
+    } else {
+      host.innerHTML = '<div class="empty-note">The catalogue is empty. Describe what you need under Custom Request below.</div>';
+    }
   }
 
   document.getElementById('mk-search').addEventListener('input', function (e) {
@@ -2436,12 +2473,23 @@
     renderMarketingCatalog();
   });
 
+  // Typed sizes are read off the input rather than re-rendered, for the same
+  // reason quantities are patched in place below: a re-render mid-keystroke
+  // would take the caret with it.
+  document.getElementById('mk-catalog').addEventListener('input', function (e) {
+    var sizeInput = e.target.closest('[data-size-for]');
+    if (!sizeInput) return;
+    mkState().sizes[sizeInput.getAttribute('data-size-for')] = sizeInput.value;
+  });
+
   document.getElementById('mk-catalog').addEventListener('click', function (e) {
     var catBtn = e.target.closest('[data-toggle-cat]');
     if (catBtn) {
-      var catId = catBtn.getAttribute('data-toggle-cat');
-      var mk = mkState();
-      mk.openCats[catId] = !mk.openCats[catId];
+      var catName = catBtn.getAttribute('data-toggle-cat');
+      // Flips what is actually on screen, which is not the same as flipping
+      // the stored flag: an untouched category is open by default, so a first
+      // tap on it has to record `false`, not `true`.
+      mkState().openCats[catName] = !mkCatOpen(catName);
       renderMarketingCatalog();
       return;
     }
@@ -2449,34 +2497,25 @@
     var stepBtn = e.target.closest('button[data-step]');
     if (!stepBtn) return;
     var stepper = stepBtn.closest('.qty-stepper');
-    var itemId = stepper.getAttribute('data-item');
-    var sizeKey = stepper.getAttribute('data-size');
+    var sku = stepper.getAttribute('data-sku');
     var mkS = mkState();
-    if (!mkS.selection[itemId]) mkS.selection[itemId] = {};
-    var current = mkS.selection[itemId][sizeKey] || 0;
-    var next = Math.max(0, current + parseInt(stepBtn.getAttribute('data-step'), 10));
-    if (next === 0) delete mkS.selection[itemId][sizeKey];
-    else mkS.selection[itemId][sizeKey] = next;
-    if (!Object.keys(mkS.selection[itemId]).length) delete mkS.selection[itemId];
+    var next = Math.max(0, (mkS.selection[sku] || 0) + parseInt(stepBtn.getAttribute('data-step'), 10));
+    if (next === 0) delete mkS.selection[sku];
+    else mkS.selection[sku] = next;
 
     // Patched in place rather than re-rendered: a full re-render on every tap
-    // would collapse the rep's scroll position back to the top of a 78-item
-    // list mid-way through setting quantities.
+    // would collapse the rep's scroll position back to the top of the list
+    // mid-way through setting quantities.
     stepper.querySelector('.qty-val').textContent = next;
-    var itemTotal = mkItemQty(itemId);
-    var itemRow = document.querySelector('.mk-item[data-item="' + itemId + '"]');
-    if (itemRow) {
-      itemRow.classList.toggle('has-qty', itemTotal > 0);
-      var sizedTotal = itemRow.querySelector('.mk-item-sub:last-child');
-      if (sizedTotal && itemRow.parentElement.classList.contains('mk-sized')) {
-        sizedTotal.textContent = itemTotal ? itemTotal + ' total' : 'by size';
-      }
-    }
-    var cat = mkIndex[itemId] && mkIndex[itemId].category;
-    if (cat) {
-      var catEl = document.querySelector('.mk-cat[data-cat="' + cat.id + '"]');
-      var catQty = mkCategoryQty(cat);
+    var itemRow = document.querySelector('.mk-item[data-sku="' + sku + '"]');
+    if (itemRow) itemRow.classList.toggle('has-qty', next > 0);
+
+    var item = window.LM_MARKETING.bySku(sku);
+    if (item) {
+      var catEl = document.querySelector('.mk-cat[data-cat="' + item.category.replace(/"/g, '\\"') + '"]');
       if (catEl) {
+        var group = { items: window.LM_MARKETING.state.items.filter(function (i) { return i.category === item.category; }) };
+        var catQty = mkCategoryQty(group);
         catEl.classList.toggle('has-qty', catQty > 0);
         var meta = catEl.querySelector('.mk-cat-meta');
         var badge = meta.querySelector('.mk-cat-badge');
@@ -2491,45 +2530,35 @@
     renderMarketingSummary();
   });
 
+  // The wire format: sku and qty, plus a size when the rep typed one. The
+  // server resolves the name, brand and unit off the live catalogue rather
+  // than trusting these, so a stale cached copy cannot write a discontinued
+  // item's old name into the permanent record of what was ordered.
   function collectMarketingLines() {
     var mk = mkState();
-    var lines = [];
-    (window.LM_MARKETING_CATEGORIES || []).forEach(function (cat) {
-      cat.items.forEach(function (item) {
-        var sizes = mk.selection[item.id];
-        if (!sizes) return;
-        var keys = item.sizes ? item.sizes : [MK_NO_SIZE];
-        keys.forEach(function (sizeKey) {
-          var qty = sizes[sizeKey];
-          if (!qty) return;
-          lines.push({
-            itemId: item.id,
-            category: mkCategoryPath(cat),
-            brand: item.brand,
-            item: item.name,
-            size: sizeKey,
-            qty: qty,
-            unit: item.unit || 'ea'
-          });
-        });
-      });
+    return Object.keys(mk.selection).map(function (sku) {
+      var size = (mk.sizes[sku] || '').trim();
+      return { sku: sku, qty: mk.selection[sku], size: size || null };
     });
-    return lines;
   }
 
   function renderMarketingSummary() {
+    var mk = mkState();
     var lines = collectMarketingLines();
     var box = document.getElementById('mk-summary');
     if (!lines.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
     var units = lines.reduce(function (sum, l) { return sum + l.qty; }, 0);
     box.innerHTML =
       lines.map(function (l) {
-        return '<div class="oline"><span>' + escapeHtml(l.item) +
-          (l.size ? ' — ' + escapeHtml(l.size) : '') + ' <small style="color:var(--silver-dim);">' + escapeHtml(l.brand) + '</small></span>' +
-          '<span>' + l.qty + ' ' + escapeHtml(l.unit) + '</span></div>';
+        var item = window.LM_MARKETING.bySku(l.sku) || { name: l.sku, brand: '', unit: 'ea' };
+        return '<div class="oline"><span>' + escapeHtml(item.name) +
+          (l.size ? ' — ' + escapeHtml(l.size) : '') +
+          ' <small style="color:var(--silver-dim);">' + escapeHtml(item.brand) + '</small></span>' +
+          '<span>' + l.qty + ' ' + escapeHtml(item.unit || 'ea') + '</span></div>';
       }).join('') +
       '<div class="oline"><strong>' + lines.length + ' line' + (lines.length === 1 ? '' : 's') + '</strong><strong>' + units + ' units</strong></div>';
     box.style.display = 'block';
+    void mk;
   }
 
   // ---- Attachments ----
@@ -2654,38 +2683,49 @@
       }
     };
 
-    if (!apiConfigured()) {
-      setTimeout(function () { finish(true, 'Request captured (demo mode — connect the sheet in config.js)'); }, 500);
+    var token = mkToken();
+    if (!token) {
+      // No token means this phone has never reached the API since sign-in.
+      // Saying so is better than a 401 the rep cannot act on.
+      finish(false, 'Sign out and back in to reconnect, then resubmit.');
       return;
     }
 
     readMarketingAttachments()
       .then(function (attachments) {
-        return apiPost({
-          action: 'marketingOrder',
-          rep: state.rep,
-          email: email,
-          purpose: purpose,
-          neededBy: neededBy,
-          requestDate: new Date().toISOString().slice(0, 10),
-          account: mk.account ? mk.account.establishmentName : '',
-          accountRegion: mk.account ? (mk.account.region || '') : '',
-          eventName: document.getElementById('mk-event-name').value.trim(),
-          shipAddress: document.getElementById('mk-ship-address').value.trim(),
-          customRequest: customRequest,
-          size: document.getElementById('mk-size').value.trim(),
-          otherDetails: document.getElementById('mk-other').value.trim(),
-          lines: lines,
-          attachments: attachments
+        return fetch(MARKETING_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+          body: JSON.stringify({
+            email: email,
+            purpose: purpose,
+            neededBy: neededBy,
+            account: mk.account ? mk.account.establishmentName : '',
+            accountRegion: mk.account ? (mk.account.region || '') : '',
+            eventName: document.getElementById('mk-event-name').value.trim(),
+            shipAddress: document.getElementById('mk-ship-address').value.trim(),
+            customRequest: customRequest,
+            size: document.getElementById('mk-size').value.trim(),
+            otherDetails: document.getElementById('mk-other').value.trim(),
+            lines: lines,
+            attachments: attachments
+          })
         });
       })
+      .then(function (r) { return r.json().catch(function () { return { ok: false, error: 'The server sent something unreadable.' }; }); })
       .then(function (res) {
         if (!res.ok) { finish(false, res.error || 'Request failed to submit'); return; }
-        var what = lines.length ? lines.length + ' line item(s)' : 'Custom request';
-        finish(true, what + ' sent to marketing' + (res.requestNumber ? ' — ' + res.requestNumber : ''));
+        var what = res.lines ? res.lines + ' line item(s)' : 'Custom request';
+        var msg = what + ' sent to marketing' + (res.requestNumber ? ' — ' + res.requestNumber : '');
+        // Told, not swallowed: a rep who attached a mock-up that did not make
+        // it needs to know before he assumes marketing has seen it.
+        if (res.attachmentsDropped) {
+          msg += ' (' + res.attachmentsDropped + ' attachment(s) could not be uploaded)';
+        }
+        finish(true, msg);
       })
       .catch(function (err) {
-        finish(false, err && err.message === 'NOT_SIGNED_IN' ? friendlyApiError(err) : (err.message || 'Request failed to submit'));
+        finish(false, (err && err.message) || 'Request failed to submit. Check your signal and try again.');
       });
   });
 

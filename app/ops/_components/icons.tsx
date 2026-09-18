@@ -14,6 +14,9 @@ export const NAV_ICON_PATHS: Record<string, string> = {
   inventory: "M4 8l8-4 8 4v9l-8 4-8-4zM4 8l8 4 8-4M12 12v9",
   // A map pin: the prospecting screen is a map before it is anything else.
   prospects: "M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Zm0-8.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z",
+  // A megaphone: marketing materials are the things a rep takes out to say
+  // something with, and a box would have collided with inventory's crate.
+  marketing: "M4 9v6h3l8 4V5L7 9zM4 9H3v6h1M18 9a4 4 0 0 1 0 6",
   documents: "M7 3h7l5 5v13H7zM14 3v5h5",
   billing: "M3 6h18v12H3zM3 10h18M7 15h4",
   automations: "M12 3v3M12 18v3M3 12h3M18 12h3M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z",

@@ -557,6 +557,12 @@
   background: var(--surface-2); border: 1px solid var(--line-strong);
   border-radius: var(--r-sm); color: var(--ink); font: inherit; padding: 5px 8px;
 }
+/* A labelled field: caption above, control below, filling its grid cell.
+   Used by the marketing catalogue editor, which is the first screen in the
+   hub to be a form rather than a table. */
+.fldwrap { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.fldwrap .fld { width: 100%; }
+
 .daybar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
 .daybar .d { font-family: var(--font-display); font-size: 20px; font-weight: 600; }
 

@@ -20,13 +20,17 @@ export const metadata = { title: "Leopard Mark — Ops" };
 export default async function OpsLayout({ children }: LayoutProps<"/ops">) {
   const user = await requireOpsUser();
 
-  const [openOrders, needsSetup, deadJobs, failedInvoices, chips] = await Promise.all([
+  const [openOrders, needsSetup, deadJobs, failedInvoices, pendingMarketing, chips] = await Promise.all([
     db.order.count({
       where: { status: { notIn: ["cancelled", "rejected", "expired", "draft"] }, scheduledFor: null, deliveredAt: null, deliveryDate: null, NOT: { invoice: { is: { stripeInvoiceId: { startsWith: "sheet:" } } } } },
     }),
     db.account.count({ where: { stripeCustomerId: null } }),
     db.jobRun.count({ where: { status: "dead" } }),
     db.invoice.count({ where: { status: "local_error" } }),
+    // Pending marketing requests are a queue someone has to work, so the rail
+    // carries the number the same way it carries open orders. Archived and
+    // deleted are excluded: a request nobody is waiting on is not a badge.
+    db.marketingRequest.count({ where: { status: "pending", archivedAt: null, deletedAt: null } }),
     healthChips(),
   ]);
 
@@ -36,6 +40,7 @@ export default async function OpsLayout({ children }: LayoutProps<"/ops">) {
     { href: "/ops/accounts", key: "accounts", label: "Accounts", count: needsSetup },
     { href: "/ops/deliveries", key: "deliveries", label: "Deliveries" },
     { href: "/ops/prospects", key: "prospects", label: "Prospecting" },
+    { href: "/ops/marketing", key: "marketing", label: "Marketing", count: pendingMarketing, hot: pendingMarketing > 0 },
     { href: "/ops/inventory", key: "inventory", label: "Inventory" },
     { href: "/ops/documents", key: "documents", label: "Documents" },
     { href: "/ops/billing", key: "billing", label: "Billing", count: failedInvoices, hot: failedInvoices > 0 },

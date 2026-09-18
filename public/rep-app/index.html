@@ -188,7 +188,9 @@
        Needed By / Size WxH / Description / Any Other Details / Logo and
        Supporting Graphics), with the item pick-list added in the middle --
        theirs is a creative-request form with no catalog, ours has to be able
-       to order real stock. Submit lives in the sticky footer rather than
+       to order real stock. The item list itself is fetched from
+       /api/marketing/catalog rather than bundled -- see
+       assets/js/marketing-materials.js. Submit lives in the sticky footer rather than
        inline like theirs, matching how the beer order screen already
        submits so reps get one consistent gesture. -->
   <section id="screen-marketing" class="screen">
@@ -197,7 +199,7 @@
 
     <div class="form-note">
       <div class="form-note-title">Note:</div>
-      <p>Everything listed comes straight from the Marketing Materials tracker. Not every item is in stock yet — marketing will confirm timing on anything that still has to be produced.</p>
+      <p>Everything listed is what marketing currently stocks, with the supplier and lead time it carries. Not every item is on the shelf — marketing confirms timing on anything that still has to be produced.</p>
       <p>If you need something that isn't listed, or in a custom size, describe it under <strong>Custom Request</strong>. If you need it in less than a week, say so under <strong>Any Other Details</strong> so we can confirm the date is possible.</p>
     </div>
 
@@ -248,9 +250,9 @@
 
     <div class="form-card">
       <div class="form-card-title">Materials</div>
-      <div class="field-hint" id="mk-catalog-hint">Tap a category, then set quantities.</div>
+      <div class="field-hint" id="mk-catalog-hint">Loading the catalogue…</div>
       <div class="field">
-        <input id="mk-search" placeholder="Search all materials" />
+        <input id="mk-search" placeholder="Search by name, SKU, brand or supplier" />
       </div>
       <div class="chip-row" id="mk-brand-filter"></div>
       <div id="mk-catalog"></div>

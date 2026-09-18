@@ -1,116 +1,55 @@
-// Marketing materials catalog for the rep app's "Order Marketing Materials"
-// flow.
+// The marketing catalogue, fetched rather than bundled.
 //
-// SCOPE: three categories -- Barware, Drinkware, Ephemera and Paper -- per
-// Jack 2026-09-03. This replaces the four-bucket merchandising tree
-// (Merchandise / Packaging / Point-of-Sales / Trade Support) that was
-// supplied earlier the same day: reps order the same handful of things, and
-// an 18-group accordion made them hunt for it. Everything below is a single
-// `section` ("Merchandise") so the catalog renders as one flat run of three
-// groups rather than a tree.
+// WHAT THIS USED TO BE: 31 items transcribed from the Marketing Materials &
+// Merch Master Tracker, compiled into this file as a literal. Every correction
+// -- a changed supplier, a discontinued sticker, a new sell sheet -- was a
+// deploy, so in practice nobody made them, and reps were ordering things that
+// had not existed for months.
 //
-// Posters (LM-032 / LM-006 / LM-007) moved here from Point-of-Sales >
-// Indistinct rather than being recreated -- same tracker rows, same brands,
-// new home under Ephemera and Paper.
+// WHAT IT IS NOW: a thin store over /api/marketing/catalog, which reads the
+// catalogue ops maintains at ops.tlmbg.co/marketing/catalog. Edits reach the
+// field on the next load.
 //
-// NOT ORDERABLE FROM THE REP APP any more, having lost their category:
-//   Promotional Products  Pens, Token, Keychains, Medal
-//   Toys and Games        Dominoes Set, Playing Cards
-//   Apparel               Polo, Sweater, T-Shirt, Sweatshirt, Lanyards
-//   Point-of-Sales        Print Standee, Neon Sign, Tin Tacker, A-Frames,
-//                         Pennant String, Table Tents, Patio Umbrellas
-//   Trade Support         Sales Sheet
-// Every one still exists in the Master Tracker
-// (docs.google.com/spreadsheets/d/1SCFBf5h9OUUqVGrwOJCy83PNxNkU7bRyHFrF7nm5CMM)
-// and ops can still order them -- they just have nowhere to hang here.
-// Restoring any of them is a category object with a non-empty `items`.
+// THE SHAPE is the Field Supply Board's, field for field:
 //
-// BRANDS: brand assignments are NOT invented. Every leaf keeps the brand(s)
-// the Master Tracker already records for it, which is why the genuinely
-// shared physical items (bar mats, blades, napkin holders, pitchers, stadium
-// cups) stay a single Multi-Brand row instead of being split three ways.
+//   { id, sku, name, brand, category, type, description,
+//     specs, unit, supplier, leadTime, imageUrl }
 //
-// NEW IDS: LM-108..110 (Print, Infographic) have no tracker row yet. They
-// continue the tracker's own sequence past LM-107 and follow how Print,
-// Standee was numbered -- one row per brand. THESE NUMBERS NEED RESERVING IN
-// THE TRACKER so a future row can't collide with them, and the artwork
-// itself does not exist yet: the leaf is orderable here before ops has
-// something to fulfil it with.
+// -- so a rep reads the same words in the app that marketing reads on the
+// board. The old tracker's `LM-054` ids are gone; `sku` ("CNT-POS-COAST4") is
+// what a request now references, and what a purchase order reconciles against.
 //
-// Deliberately NOT copied from the tracker: Status, Qty, Vendor, Priority.
-// Those change constantly and the tracker owns them -- duplicating them into
-// a bundled JS file would just guarantee the rep app shows stale
-// availability. Reps see the full range and ops fields what isn't in stock.
-//
-// `id` is the tracker's row ID and is what gets written to the Marketing
-// Orders tab, so a request always reconciles back to a tracker row.
-// `sizes`, when present, means the item is ordered per size (one quantity
-// line each) rather than as a single quantity. Nothing in the current three
-// categories is size-ordered -- the renderer still supports it, and the
-// apparel that used it can come back without a code change.
+// OFFLINE. A rep with no signal must still be able to see what he could order
+// and stage a request, so the last good catalogue is cached in localStorage
+// and served immediately on open, with a background refresh behind it. The
+// artwork is under /marketing/ in this app's own origin and is precached by
+// the service worker for the same reason -- an <img> that 404s in a cellar is
+// worse than no image.
 (function () {
-  var LM = 'Leopard Mark';
-  var CN = 'Cantinesca';
-  var SG = 'Sunlight Groove';
-  var MB = 'Multi-Brand';
+  var CACHE_KEY = 'lm_marketing_catalog_v1';
+  var API = '/api/marketing/catalog';
 
-  window.LM_MARKETING_CATEGORIES = [
-    {
-      id: 'barware',
-      section: 'Merchandise',
-      name: 'Barware',
-      blurb: 'Behind-the-bar service kit.',
-      items: [
-        { id: 'LM-054', name: 'Ice Buckets', brand: CN },
-        { id: 'LM-015', name: 'Keg Jacket', brand: LM },
-        { id: 'LM-013', name: 'Keg Jacket', brand: CN },
-        { id: 'LM-014', name: 'Keg Jacket', brand: SG },
-        { id: 'LM-043', name: 'Napkin Holder', brand: MB },
-        { id: 'LM-051', name: 'Pitcher, Plastic (4 Pint)', brand: MB },
-        { id: 'LM-042', name: 'Bar Blades', brand: MB },
-        { id: 'LM-041', name: 'Bar Mats', brand: MB },
-        { id: 'LM-044', name: 'Coasters', brand: CN },
-        { id: 'LM-045', name: 'Coasters', brand: SG }
-      ]
-    },
-    {
-      id: 'drinkware',
-      section: 'Merchandise',
-      name: 'Drinkware',
-      blurb: 'Glassware and cups.',
-      items: [
-        { id: 'LM-047', name: 'Glass, Pint', brand: CN },
-        { id: 'LM-046', name: 'Glass, Pint', brand: SG },
-        { id: 'LM-049', name: 'Glass, Premium Branded', brand: CN },
-        { id: 'LM-048', name: 'Glass, Premium Branded', brand: SG },
-        { id: 'LM-053', name: 'Cup, Disposable', brand: MB, note: 'Plastic stadium cup' }
-      ]
-    },
-    {
-      id: 'ephemera-and-paper',
-      section: 'Merchandise',
-      name: 'Ephemera and Paper',
-      blurb: 'Stickers, posters and printed collateral.',
-      items: [
-        { id: 'LM-017', name: 'Adhesive Label, Sticker, Circle', brand: CN },
-        { id: 'LM-019', name: 'Adhesive Label, Sticker, Logo', brand: LM, note: 'Shield' },
-        { id: 'LM-016', name: 'Adhesive Label, Sticker, Logo', brand: CN },
-        { id: 'LM-022', name: 'Adhesive Label, Sticker, Logo', brand: SG },
-        { id: 'LM-018', name: 'Adhesive Label, Roll Label', brand: CN },
-        { id: 'LM-032', name: 'Print, Poster (11x17)', brand: MB },
-        { id: 'LM-006', name: 'Print, Poster (11x17)', brand: CN },
-        { id: 'LM-007', name: 'Print, Poster (11x17)', brand: SG },
-        { id: 'LM-108', name: 'Print, Infographic', brand: LM },
-        { id: 'LM-109', name: 'Print, Infographic', brand: CN },
-        { id: 'LM-110', name: 'Print, Infographic', brand: SG }
-      ]
-    }
+  // Mirrors MARKETING_CATEGORIES in lib/marketing/catalog.ts. Held here as a
+  // fallback ordering only: the server sends the authoritative list with every
+  // response, and this is what groups the cached copy if that response has
+  // never arrived on this phone.
+  var FALLBACK_CATEGORIES = [
+    'Sell Sheets',
+    'Apparel & Accessories',
+    'Banners & Signage',
+    'Table & Event Displays',
+    'Draft & On-Premise',
+    'Logos & Brand Marks',
+    'Photography',
+    'Sales Decks',
+    'Templates',
+    'Other'
   ];
 
-  // Mirrors the tracker's Activity Type dropdown so a request's purpose
-  // reconciles against the same vocabulary the marketing calendar uses,
-  // plus the two reasons a rep orders that aren't campaign activities.
-  window.LM_MARKETING_PURPOSES = [
+  // Carried over verbatim from the old LM_MARKETING_PURPOSES so a request
+  // still reconciles against the marketing calendar's Activity Type
+  // vocabulary. The server sends these too; this is the offline fallback.
+  var FALLBACK_PURPOSES = [
     'Account Visit',
     'Launch',
     'Sampling',
@@ -124,5 +63,115 @@
     'Other'
   ];
 
-  window.LM_MARKETING_BRANDS = [LM, CN, SG, MB];
+  var store = {
+    items: [],
+    categories: FALLBACK_CATEGORIES.slice(),
+    brands: [],
+    purposes: FALLBACK_PURPOSES.slice(),
+    // null until something has been loaded from anywhere; the form uses this
+    // to tell "empty catalogue" apart from "not loaded yet".
+    loadedAt: null,
+    // true when what is on screen came out of localStorage rather than the
+    // network, so the form can say so rather than implying it is current.
+    fromCache: false
+  };
+
+  function readCache() {
+    try {
+      var raw = localStorage.getItem(CACHE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function writeCache(payload) {
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+    } catch (e) {
+      // A full quota is not worth failing a load over -- the catalogue still
+      // works for this session, it just will not survive a cold start.
+    }
+  }
+
+  function adopt(payload, fromCache) {
+    if (!payload || !Array.isArray(payload.items)) return false;
+    store.items = payload.items;
+    store.categories = payload.categories && payload.categories.length ? payload.categories : FALLBACK_CATEGORIES.slice();
+    store.brands = payload.brands || [];
+    store.purposes = payload.purposes && payload.purposes.length ? payload.purposes : FALLBACK_PURPOSES.slice();
+    store.loadedAt = payload.cachedAt || Date.now();
+    store.fromCache = !!fromCache;
+    return true;
+  }
+
+  /**
+   * Load the catalogue. Resolves as soon as there is something to render --
+   * from cache if there is one -- and refreshes from the network behind it.
+   *
+   * `onUpdate` fires only when the network copy differs from what was already
+   * adopted, so a rep whose catalogue has not changed does not watch the list
+   * flicker every time he opens the form.
+   */
+  function load(token, onUpdate) {
+    var cached = readCache();
+    var hadCache = adopt(cached, true);
+
+    var network = fetch(API, {
+      headers: token ? { Authorization: 'Bearer ' + token } : {},
+      cache: 'no-store'
+    })
+      .then(function (r) {
+        if (!r.ok) throw new Error('catalog ' + r.status);
+        return r.json();
+      })
+      .then(function (res) {
+        if (!res || !res.ok) throw new Error((res && res.error) || 'catalog unavailable');
+        var changed = !cached || cached.version !== res.version;
+        res.cachedAt = Date.now();
+        adopt(res, false);
+        writeCache(res);
+        if (changed && typeof onUpdate === 'function') onUpdate(store);
+        return store;
+      })
+      .catch(function (err) {
+        // Offline with a cache is a normal state in this app, not an error.
+        // Offline without one is the caller's problem to report.
+        if (hadCache) return store;
+        throw err;
+      });
+
+    return hadCache ? Promise.resolve(store) : network;
+  }
+
+  function byCategory() {
+    var order = {};
+    store.categories.forEach(function (c, i) { order[c] = i; });
+    var groups = {};
+    store.items.forEach(function (item) {
+      if (!groups[item.category]) groups[item.category] = [];
+      groups[item.category].push(item);
+    });
+    return Object.keys(groups)
+      .sort(function (a, b) {
+        var ra = order[a] === undefined ? 999 : order[a];
+        var rb = order[b] === undefined ? 999 : order[b];
+        return ra - rb || a.localeCompare(b);
+      })
+      .map(function (name) { return { name: name, items: groups[name] }; });
+  }
+
+  function bySku(sku) {
+    for (var i = 0; i < store.items.length; i++) {
+      if (store.items[i].sku === sku) return store.items[i];
+    }
+    return null;
+  }
+
+  window.LM_MARKETING = {
+    load: load,
+    state: store,
+    byCategory: byCategory,
+    bySku: bySku
+  };
 })();

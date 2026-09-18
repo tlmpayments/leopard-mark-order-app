@@ -1285,3 +1285,235 @@ enum ProspectVisitStatus {
 
   @@map("prospect_visit_status")
 }
+
+// ---------- Marketing materials ----------
+// The rep app's "Order Marketing Materials" flow, replatformed off Apps
+// Script. What used to be a bundled JS file of 31 tracker rows
+// (assets/js/marketing-materials.js) and a write to the Marketing Orders sheet
+// tab is now a catalogue ops can edit without a deploy and a request with a
+// lifecycle someone can actually work.
+//
+// The shape is deliberately the Field Supply Board's, field for field, so the
+// two stay one system: a rep sees the same sku, specs, supplier and lead time
+// the board shows, and a request moves through the same five statuses.
+
+/// Physical stock ships; digital is a link marketing emails back. The rep app
+/// shows a box icon for one and a download icon for the other, and a digital
+/// line never asks for a shipping address.
+enum MarketingItemType {
+  physical
+  digital
+
+  @@map("marketing_item_type")
+}
+
+/// The Field Supply Board's five. `pending` is where every request starts;
+/// `cancelled` is the rep withdrawing his own, `declined` is marketing
+/// refusing it, and the two are kept apart because the follow-up differs.
+enum MarketingRequestStatus {
+  pending
+  approved
+  fulfilled
+  declined
+  cancelled
+
+  @@map("marketing_request_status")
+}
+
+/// One orderable thing. Retiring is `active = false` rather than a delete:
+/// requests reference the item they were placed against, and a fulfilled
+/// request whose item vanished is a row nobody can explain a year later.
+model MarketingItem {
+  id          String            @id @default(cuid())
+  /// Stable, human-typed, and what a purchase order references —
+  /// "CNT-POS-AFRAME". Unique so two people cannot coin the same code for
+  /// different things.
+  sku         String            @unique
+  name        String
+  /// Free vocabulary rather than an enum: marketing adds a brand the week it
+  /// signs one, and a migration is the wrong gate for that. Seeded with
+  /// Cantinesca, Sunlight Groove and The Leopard Mark.
+  brand       String
+  /// One of MARKETING_CATEGORIES in lib/marketing/catalog.ts. Same reasoning
+  /// as brand -- the list is the app's, not the database's.
+  category    String
+  type        MarketingItemType
+  description String            @default("")
+  /// Dimensions, sizes, case pricing -- whatever the sheet prints under the
+  /// name. One free-text line, not parsed, because "8.5 × 11 in · ½ BBL
+  /// $192.00" is one fact to a rep even though it is three to a schema.
+  specs       String            @default("")
+  /// What one of it is: "each", "pack of 250", "case of 24", "digital
+  /// download". Shown next to the quantity so a rep ordering 4 knows whether
+  /// that is 4 coasters or 1,000.
+  unit        String            @default("each")
+  supplier    String            @default("")
+  leadTime    String            @default("") @map("lead_time")
+  /// Vercel Blob. Null while an item has no artwork yet -- the rep app falls
+  /// back to the type icon rather than a broken frame.
+  imageUrl    String?           @map("image_url")
+  active      Boolean           @default(true)
+  /// Hand-ordered within a category so marketing can put the sell sheet
+  /// first. Ties break on name.
+  sortOrder   Int               @default(0) @map("sort_order")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  lines MarketingRequestLine[]
+
+  @@index([active, category])
+  @@index([brand])
+  @@map("marketing_items")
+}
+
+/// Per-month counter behind MR-YYMM-NNNN. Its own series rather than a row in
+/// `bol_sequences`: that table numbers paperwork against a shipping location,
+/// and borrowing it would mean a marketing request and a bill of lading
+/// competing for the same counter. Minted with the same ON CONFLICT ... DO
+/// UPDATE ... RETURNING trick (lib/bol/sequence.ts), inside the transaction
+/// that writes the request, so a crash cannot leave a gap.
+model MarketingSequence {
+  yymm String @id
+  last Int    @default(0)
+
+  @@map("marketing_sequences")
+}
+
+/// What a rep asked for, once. Archiving and deleting are both soft
+/// (`archivedAt`, `deletedAt`) because the Field Supply Board offers restore
+/// on each, and a restore that cannot find the row is a button that lies.
+model MarketingRequest {
+  id            String                 @id @default(cuid())
+  /// "MR-2609-0001". Generated per month so the sequence stays short enough
+  /// to read down a Slack thread. See lib/marketing/requests.ts.
+  requestNumber String                 @unique @map("request_number")
+  status        MarketingRequestStatus @default(pending)
+
+  /// The rep as his PIN login names him, matching ProspectVisit.repName and
+  /// for the same reason: the rep app has no stable key of its own.
+  repName String  @map("rep_name")
+  /// Where marketing replies. Optional -- the rep app has always let a rep
+  /// submit without one and Slack is the real channel.
+  email   String?
+
+  /// Mirrors the tracker's Activity Type dropdown: "Account Visit", "Launch",
+  /// "Sampling"... Free text rather than an enum for the same reason as
+  /// brand: marketing owns that vocabulary.
+  purpose  String
+  neededBy DateTime @map("needed_by")
+
+  /// Ship-to. An account when the rep picked one from his book, a bare event
+  /// name when he did not, and neither when it ships to him.
+  accountId   String? @map("account_id")
+  accountName String? @map("account_name")
+  region      String?
+  eventName   String? @map("event_name")
+  shipAddress String? @map("ship_address")
+
+  /// The escape hatch: what the rep needs when nothing in the catalogue is
+  /// it. A request may carry only this and no lines at all.
+  customRequest String? @map("custom_request")
+  size          String?
+  otherDetails  String? @map("other_details")
+
+  /// Where this landed in Slack, so every later status change replies in the
+  /// same thread instead of starting a new conversation -- the same contract
+  /// Order keeps with lib/slack.ts.
+  slackChannel String? @map("slack_channel")
+  slackTs      String? @map("slack_ts")
+
+  /// Who moved it out of pending, and when. Null while it is still pending.
+  decidedBy String?   @map("decided_by")
+  decidedAt DateTime? @map("decided_at")
+  /// Marketing's reason, shown to the rep. Required in the UI for a decline;
+  /// optional on an approval.
+  decisionNote String? @map("decision_note")
+
+  archivedAt DateTime? @map("archived_at")
+  deletedAt  DateTime? @map("deleted_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  lines       MarketingRequestLine[]
+  events      MarketingRequestEvent[]
+  attachments MarketingRequestAttachment[]
+
+  @@index([status, createdAt])
+  @@index([repName])
+  @@index([archivedAt])
+  @@index([deletedAt])
+  @@map("marketing_requests")
+}
+
+/// One line of a request. The item's name, sku, brand and unit are copied in
+/// rather than joined at read time: a request is a record of what was asked
+/// for on the day, and renaming "Coasters" to "Coaster, 4in" two months later
+/// must not rewrite history.
+model MarketingRequestLine {
+  id        String @id @default(cuid())
+  requestId String @map("request_id")
+  /// Null when the line is for an item that has since been hard-deleted, or
+  /// for a custom line that never had a catalogue row.
+  itemId    String? @map("item_id")
+
+  sku   String
+  name  String
+  brand String
+  unit  String @default("each")
+  qty   Int
+  /// Set only for size-ordered items (apparel). One line per size, so a polo
+  /// request is three rows rather than one row with a parsed string.
+  size  String?
+
+  request MarketingRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  item    MarketingItem?   @relation(fields: [itemId], references: [id], onDelete: SetNull)
+
+  @@index([requestId])
+  @@index([itemId])
+  @@map("marketing_request_lines")
+}
+
+/// A file the rep attached — the "Logo and Supporting Graphics" field the
+/// request form has always had. Stored in Vercel Blob like delivery photos
+/// (lib/deliveryPhotos.ts) rather than as base64 in a column: these are logo
+/// artwork and PDFs, and a 5MB text column per request would make every
+/// request-log query drag them along.
+///
+/// Carried over rather than dropped in the Apps Script cutover. The old flow
+/// posted them as base64 to Code.gs, which put them in Drive; losing that
+/// would mean a rep who attaches a mock-up watches it vanish.
+model MarketingRequestAttachment {
+  id        String   @id @default(cuid())
+  requestId String   @map("request_id")
+  filename  String
+  mimeType  String   @map("mime_type")
+  bytes     Int
+  url       String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  request MarketingRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId])
+  @@map("marketing_request_attachments")
+}
+
+/// The audit trail. Every status change, who made it and what they said --
+/// the request log's detail view reads this, and it is the only record of a
+/// decision that was later reversed.
+model MarketingRequestEvent {
+  id        String                  @id @default(cuid())
+  requestId String                  @map("request_id")
+  status    MarketingRequestStatus?
+  /// "submitted", "approved", "declined", "fulfilled", "cancelled",
+  /// "archived", "restored", "note". Wider than `status` because archiving is
+  /// an event that does not change the status.
+  action    String
+  actor     String
+  note      String?
+  createdAt DateTime                @default(now()) @map("created_at")
+
+  request MarketingRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([requestId, createdAt])
+  @@map("marketing_request_events")
+}
