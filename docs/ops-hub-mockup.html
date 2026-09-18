@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0"><title>Leopard Mark Ops Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* ============================================================
+   Leopard Mark Ops Hub — interactive UI spec (dark-first, brand navy)
+   Tokens mirror public/rep-app/assets/css/app.css + the prototype hub.
+   Brand faces (Bowery Lane / Tomato Grotesk / Bogart) are licensed and
+   not shipped here; Barlow Condensed / Barlow / IBM Plex Mono stand in.
+   ============================================================ */
+:root{
+  color-scheme: dark;
+  --navy-950:#050b18; --navy-900:#0a1730; --navy-800:#10203f; --navy-700:#182d4e; --navy-600:#223c63; --navy-500:#2f4f7f;
+  --canvas:var(--navy-950); --surface:var(--navy-900); --surface-2:var(--navy-800); --surface-3:var(--navy-700);
+  --line:rgba(185,196,214,.14); --line-strong:rgba(185,196,214,.28);
+  --ink:#f4f6fa; --ink-2:#b9c4d6; --ink-3:#7c8aa3; --ink-4:#55627a;
+  --accent:#3987e5; --accent-ink:#8fbdf5; --accent-soft:rgba(57,135,229,.16);
+  --good:#199e70; --warn:#c98500; --serious:#d95926; --critical:#d55181;
+  --good-soft:rgba(25,158,112,.16); --warn-soft:rgba(201,133,0,.16); --serious-soft:rgba(217,89,38,.16); --critical-soft:rgba(213,81,129,.16);
+  /* stage ramp: sequential blue → white (progress), not status */
+  --st1:#192f70; --st2:#24428f; --st3:#315095; --st4:#4f6bb5; --st5:#7d86cd; --st6:#a7afe5; --st7:#dbe3f6;
+  --font-display:'Barlow Condensed','Bowery Lane',system-ui,sans-serif;
+  --font-body:'Barlow','Tomato Grotesk',system-ui,sans-serif;
+  --font-mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,monospace;
+  --r:10px; --r-sm:6px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--canvas);color:var(--ink);font-family:var(--font-body);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+body{min-height:100vh}
+a{color:var(--accent-ink);text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+button:focus-visible,a:focus-visible,input:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.num{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:.93em}
+.mono{font-family:var(--font-mono)}
+h1,h2,h3,h4{margin:0;font-family:var(--font-display);font-weight:600;letter-spacing:.005em;text-wrap:balance}
+h1{font-size:30px;line-height:1.05}
+h2{font-size:20px;line-height:1.15}
+h3{font-size:16px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-2);font-weight:600}
+.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--ink-3);font-weight:600}
+.muted{color:var(--ink-3)}
+.small{font-size:12px}
+
+/* ---------- shell ---------- */
+.shell{display:grid;grid-template-columns:232px 1fr;min-height:100vh}
+.rail{background:var(--surface);border-right:1px solid var(--line);padding:18px 14px;display:flex;flex-direction:column;gap:6px;position:sticky;top:0;height:100vh}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 8px 16px;border-bottom:1px solid var(--line);margin-bottom:8px}
+.crest{width:34px;height:34px;border-radius:8px;background:linear-gradient(160deg,#f4f6fa,#b9c4d6);display:grid;place-items:center;color:var(--navy-900);font-family:var(--font-display);font-weight:700;font-size:15px;letter-spacing:.04em}
+.brand .wm{font-family:var(--font-display);font-weight:700;font-size:17px;line-height:1;letter-spacing:.02em}
+.brand .wm small{display:block;font-family:var(--font-body);font-weight:500;font-size:11px;color:var(--ink-3);letter-spacing:.14em;text-transform:uppercase;margin-top:3px}
+.nav a{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--r-sm);color:var(--ink-2);font-weight:500}
+.nav a .ic{width:18px;height:18px;flex:none;opacity:.8}
+.nav a:hover{background:var(--surface-2);color:var(--ink)}
+.nav a.on{background:var(--accent-soft);color:var(--ink)}
+.nav a.on .ic{opacity:1;color:var(--accent-ink)}
+.nav a .cnt{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--ink-3);background:var(--surface-3);padding:1px 7px;border-radius:999px}
+.nav a .cnt.hot{color:#fff;background:var(--serious)}
+.nav .sep{height:1px;background:var(--line);margin:8px 6px}
+.rail .foot{margin-top:auto;padding:10px 8px;border-top:1px solid var(--line);font-size:12px;color:var(--ink-3)}
+.rail .foot b{color:var(--ink-2);font-weight:500}
+.main{min-width:0}
+.topbar{display:flex;align-items:center;gap:14px;padding:12px 28px;border-bottom:1px solid var(--line);background:var(--canvas);position:sticky;top:0;z-index:5}
+.search{flex:1;max-width:520px;display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:7px 10px;color:var(--ink-3)}
+.search input{flex:1;background:none;border:0;color:var(--ink);font:inherit;outline:none}
+.search kbd{font-family:var(--font-mono);font-size:11px;border:1px solid var(--line-strong);border-radius:4px;padding:0 5px;color:var(--ink-3)}
+.health{display:flex;gap:6px;margin-left:auto}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:999px;border:1px solid var(--line);background:var(--surface);font-size:12px;color:var(--ink-2);white-space:nowrap}
+.chip .dot{width:7px;height:7px;border-radius:50%;background:var(--good)}
+.chip.warn .dot{background:var(--warn)} .chip.bad .dot{background:var(--serious)}
+.chip .t{color:var(--ink-3);font-family:var(--font-mono);font-size:11px}
+.avatar{width:30px;height:30px;border-radius:50%;background:var(--surface-3);display:grid;place-items:center;font-size:12px;font-weight:600;color:var(--ink-2);border:1px solid var(--line)}
+.page{padding:22px 28px 60px;max-width:1440px}
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px}
+.page-head p{margin:4px 0 0;color:var(--ink-3)}
+.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:var(--r-sm);border:1px solid var(--line-strong);background:var(--surface-2);color:var(--ink);font-weight:500;font-size:13px;white-space:nowrap}
+.btn:hover{background:var(--surface-3)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.ghost{background:transparent;border-color:transparent;color:var(--ink-2)}
+.btn.ghost:hover{background:var(--surface-2)}
+.btn.sm{padding:4px 9px;font-size:12px}
+.btn.danger{border-color:rgba(217,89,38,.5);color:#ffb59a}
+.seg{display:inline-flex;border:1px solid var(--line-strong);border-radius:var(--r-sm);overflow:hidden}
+.seg button{padding:6px 12px;font-size:13px;color:var(--ink-2)}
+.seg button.on{background:var(--surface-3);color:var(--ink)}
+
+/* ---------- panels ---------- */
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:1fr 1fr} .g3{grid-template-columns:repeat(3,1fr)} .g5{grid-template-columns:repeat(5,1fr)}
+.g-attn{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr)}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;min-width:0}
+.panel.flush{padding:0;overflow:hidden}
+.panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+.panel.flush .panel-head{padding:14px 18px 0}
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3);font-weight:600;padding:10px 12px;border-bottom:1px solid var(--line)}
+.tbl td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tr.row:hover td{background:var(--surface-2);cursor:pointer}
+.tbl td.r,.tbl th.r{text-align:right}
+.tblwrap{overflow-x:auto}
+
+/* ---------- stage & status ---------- */
+.stage{display:inline-flex;align-items:center;gap:6px;padding:3px 9px 3px 6px;border-radius:999px;font-size:12px;font-weight:500;color:var(--ink);border:1px solid var(--line);background:var(--surface-2);white-space:nowrap}
+.stage i{width:8px;height:8px;border-radius:2px;flex:none}
+.s1 i{background:var(--st1)} .s2 i{background:var(--st2)} .s3 i{background:var(--st3)} .s4 i{background:var(--st4)} .s5 i{background:var(--st5)} .s6 i{background:var(--st6)} .s7 i{background:var(--st7)}
+.stage.blocked{border-color:rgba(217,89,38,.5);background:var(--serious-soft);color:#ffc7b0}
+.stage.blocked i{background:var(--serious);border-radius:50%}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;letter-spacing:.02em}
+.pill.good{background:var(--good-soft);color:#7fe0bd} .pill.warn{background:var(--warn-soft);color:#f3c46a} .pill.serious{background:var(--serious-soft);color:#ffb59a} .pill.critical{background:var(--critical-soft);color:#ffa7c6} .pill.neutral{background:var(--surface-3);color:var(--ink-2)}
+.region{font-family:var(--font-mono);font-size:11px;padding:1px 6px;border-radius:4px;border:1px solid var(--line-strong);color:var(--ink-2)}
+
+/* ---------- attention queue ---------- */
+.attn{display:flex;flex-direction:column;gap:8px}
+.attn .item{display:grid;grid-template-columns:4px 1fr auto;gap:14px;align-items:center;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:10px 12px 10px 0;overflow:hidden}
+.attn .item .bar{height:100%;min-height:44px;background:var(--warn)}
+.attn .item.serious .bar{background:var(--serious)} .attn .item.critical .bar{background:var(--critical)} .attn .item.info .bar{background:var(--accent)}
+.attn .item .t{font-weight:500}
+.attn .item .m{color:var(--ink-3);font-size:12px;margin-top:2px;display:flex;gap:10px;flex-wrap:wrap}
+.owner{display:inline-flex;align-items:center;gap:5px}
+.owner .avatar{width:18px;height:18px;font-size:9px}
+
+/* ---------- pipeline strip ---------- */
+.pipe{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.pipe .col{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:10px 12px;cursor:pointer;position:relative;overflow:hidden}
+.pipe .col:hover{border-color:var(--line-strong)}
+.pipe .col .k{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3);font-weight:600;display:flex;align-items:center;gap:6px}
+.pipe .col .k i{width:8px;height:8px;border-radius:2px}
+.pipe .col .n{font-family:var(--font-display);font-size:30px;line-height:1;margin-top:8px;font-weight:600}
+.pipe .col .v{font-family:var(--font-mono);font-size:11px;color:var(--ink-3);margin-top:4px}
+.pipe .col .blk{margin-top:8px;display:inline-flex}
+
+/* ---------- KPI ---------- */
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px}
+.kpi .l{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3);font-weight:600}
+.kpi .v{font-family:var(--font-display);font-size:30px;font-weight:600;line-height:1.1;margin-top:6px;font-variant-numeric:tabular-nums}
+.kpi .d{font-size:12px;color:var(--ink-3);margin-top:2px}
+.kpi .d b{color:#7fe0bd;font-weight:500} .kpi .d b.down{color:#ffb59a}
+.kpi svg{display:block;width:100%;height:36px;margin-top:8px}
+
+/* ---------- feed ---------- */
+.feed{display:flex;flex-direction:column}
+.feed .ev{display:grid;grid-template-columns:26px 1fr auto;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px;align-items:start}
+.feed .ev:last-child{border-bottom:0}
+.feed .who{width:24px;height:24px;border-radius:6px;display:grid;place-items:center;font-size:10px;font-weight:700;letter-spacing:.04em;background:var(--surface-3);color:var(--ink-2)}
+.feed .who.sys{background:var(--accent-soft);color:var(--accent-ink)} .feed .who.rep{background:var(--surface-3)} .feed .who.ops{background:rgba(219,227,246,.14);color:var(--ink)} .feed .who.cus{background:var(--good-soft);color:#7fe0bd} .feed .who.ai{background:var(--critical-soft);color:#ffa7c6}
+.feed .when{font-family:var(--font-mono);font-size:11px;color:var(--ink-4);white-space:nowrap}
+
+/* ---------- board ---------- */
+.board{display:grid;grid-template-columns:repeat(7,minmax(190px,1fr));gap:10px;overflow-x:auto;padding-bottom:6px}
+.bcol{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px;min-height:320px;display:flex;flex-direction:column;gap:8px}
+.bcol .bh{display:flex;align-items:center;justify-content:space-between;padding:2px 4px 8px;border-bottom:1px solid var(--line);font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);font-weight:600}
+.bcol .bh i{width:8px;height:8px;border-radius:2px;margin-right:6px;display:inline-block;vertical-align:middle}
+.card{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:10px 10px 10px 12px;cursor:pointer;position:relative}
+.card:hover{border-color:var(--line-strong)}
+.card.blocked{border-left:3px solid var(--serious)}
+.card .a{font-weight:600;display:flex;justify-content:space-between;gap:6px;align-items:baseline}
+.card .li{color:var(--ink-2);font-size:12px;margin-top:3px}
+.card .f{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:11px;color:var(--ink-3)}
+.card .f .num{color:var(--ink)}
+
+/* ---------- drawer ---------- */
+.scrim{position:fixed;inset:0;background:rgba(5,11,24,.55);z-index:20;opacity:0;pointer-events:none;transition:opacity .2s}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(760px,96vw);background:var(--surface);border-left:1px solid var(--line-strong);z-index:21;transform:translateX(102%);transition:transform .25s cubic-bezier(.2,.8,.2,1);overflow-y:auto;box-shadow:-30px 0 60px rgba(0,0,0,.4)}
+body.open .scrim{opacity:1;pointer-events:auto} body.open .drawer{transform:none}
+@media (prefers-reduced-motion:reduce){.drawer,.scrim{transition:none}}
+.dhead{padding:20px 24px 14px;border-bottom:1px solid var(--line);display:flex;gap:16px;align-items:flex-start;position:sticky;top:0;background:var(--surface);z-index:1}
+.dhead .x{margin-left:auto}
+.dbody{padding:20px 24px 40px;display:grid;gap:18px}
+.tl{display:grid;gap:0}
+.tl .n{display:grid;grid-template-columns:22px 1fr;gap:14px;position:relative;padding-bottom:16px}
+.tl .n::before{content:"";position:absolute;left:10px;top:22px;bottom:0;width:2px;background:var(--line)}
+.tl .n:last-child::before{display:none}
+.tl .dot{width:22px;height:22px;border-radius:50%;border:2px solid var(--st5);background:var(--surface);display:grid;place-items:center;font-family:var(--font-mono);font-size:10px;color:var(--ink-2)}
+.tl .done .dot{background:var(--st6);border-color:var(--st6);color:var(--navy-900);font-weight:600}
+.tl .now .dot{border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
+.tl .future .dot{border-style:dashed;border-color:var(--line-strong);color:var(--ink-4)}
+.tl .future .t,.tl .future .m{color:var(--ink-4)}
+.tl .t{font-weight:600;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.tl .t .when{font-family:var(--font-mono);font-size:11px;color:var(--ink-3);font-weight:400}
+.tl .m{font-size:12px;color:var(--ink-2);margin-top:3px}
+.tl .art{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.tag{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:4px;background:var(--surface-2);border:1px solid var(--line);font-size:11px;color:var(--ink-2);font-family:var(--font-mono)}
+.tag.link{color:var(--accent-ink);border-color:rgba(57,135,229,.35)}
+.kv{display:grid;grid-template-columns:140px 1fr;gap:6px 12px;font-size:13px}
+.kv dt{color:var(--ink-3)} .kv dd{margin:0}
+.blockbar{display:flex;gap:12px;align-items:center;padding:10px 12px;border-radius:var(--r-sm);background:var(--serious-soft);border:1px solid rgba(217,89,38,.45);color:#ffc7b0;font-size:13px}
+.blockbar .btn{margin-left:auto}
+
+/* ---------- week view ---------- */
+.week{display:grid;grid-template-columns:220px repeat(5,1fr);gap:8px}
+.week .day{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px;min-height:260px}
+.week .day .dh{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:8px}
+.week .day .dh b{font-family:var(--font-display);font-size:18px;font-weight:600}
+.week .day .dh .num{color:var(--ink-3);font-size:11px}
+.week .day.off{background:transparent;border-style:dashed}
+.week .tray{background:var(--surface-2)}
+.ship{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:8px 10px;margin-bottom:6px;font-size:12px}
+.ship b{display:block;font-weight:600;font-size:13px}
+.ship .m{color:var(--ink-3);margin-top:2px;display:flex;justify-content:space-between}
+
+/* ---------- inventory matrix ---------- */
+.matrix td.q{text-align:right;font-family:var(--font-mono)}
+.matrix td.low{color:#f3c46a} .matrix td.out{color:#ffb59a}
+.matrix th.wh{color:var(--accent-ink)}
+.bar-h{height:6px;border-radius:3px;background:var(--surface-3);overflow:hidden}
+.bar-h i{display:block;height:100%;background:var(--st5)}
+
+/* ---------- checklist ---------- */
+.ck{display:flex;gap:2px}
+.ck i{width:14px;height:6px;border-radius:2px;background:var(--surface-3)}
+.ck i.y{background:var(--good)} .ck i.n{background:var(--serious)}
+
+/* ---------- rule cards ---------- */
+.rule{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;display:grid;grid-template-columns:1fr auto;gap:8px 14px}
+.rule h4{font-family:var(--font-body);font-weight:600;font-size:14px}
+.rule .m{color:var(--ink-3);font-size:12px;margin-top:2px}
+.rule .runs{grid-column:1/-1;display:flex;align-items:center;gap:10px;font-size:11px;color:var(--ink-3);margin-top:4px}
+.rule .runs .spark{display:flex;gap:2px;align-items:flex-end;height:18px}
+.rule .runs .spark i{width:5px;background:var(--good);border-radius:1px;opacity:.8}
+.rule .runs .spark i.f{background:var(--serious)}
+.tog{width:38px;height:22px;border-radius:999px;background:var(--surface-3);border:1px solid var(--line-strong);position:relative;flex:none}
+.tog::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--ink-3);transition:transform .15s}
+.tog.on{background:var(--good);border-color:var(--good)} .tog.on::after{background:#fff;transform:translateX(16px)}
+
+/* ---------- toast ---------- */
+.toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);background:var(--surface-3);border:1px solid var(--line-strong);border-radius:var(--r-sm);padding:10px 14px;font-size:13px;opacity:0;transition:.25s;z-index:40;box-shadow:0 10px 30px rgba(0,0,0,.4);display:flex;gap:10px;align-items:center}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast .dot{width:8px;height:8px;border-radius:50%;background:var(--good)}
+
+/* ---------- spec notes (design-intent callouts, not product UI) ---------- */
+.spec{border:1px dashed rgba(143,189,245,.45);border-radius:var(--r-sm);padding:10px 12px;font-size:12px;color:var(--accent-ink);background:rgba(57,135,229,.06)}
+.spec b{color:var(--ink);font-weight:600}
+.states{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.state{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);padding:14px;min-height:120px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:6px;color:var(--ink-3);font-size:12px}
+.skel{height:10px;border-radius:5px;background:linear-gradient(90deg,var(--surface-3),var(--navy-600),var(--surface-3));background-size:200% 100%;animation:sh 1.4s infinite;width:70%}
+.skel.s{width:45%}
+@keyframes sh{to{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.skel{animation:none}}
+
+@media (max-width:1100px){.g5{grid-template-columns:repeat(2,1fr)} .g-attn{grid-template-columns:1fr} .g3{grid-template-columns:1fr} .week{grid-template-columns:1fr;} .states{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:820px){.shell{grid-template-columns:1fr} .rail{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center} .rail .foot,.nav .sep{display:none} .nav{display:flex;flex-wrap:wrap;gap:2px} .health{display:none} .page{padding:16px} .pipe{grid-template-columns:repeat(4,1fr)}}
+</style>
+
+<div class="shell">
+  <aside class="rail">
+    <div class="brand"><div class="crest">LM</div><div class="wm">Leopard Mark<small>Ops</small></div></div>
+    <nav class="nav" id="nav"></nav>
+    <div class="foot">Signed in as <b>Jack Begley</b> · admin<br><span class="mono small">ops.tlmbg.co</span></div>
+  </aside>
+  <div class="main">
+    <div class="topbar">
+      <div class="search"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input placeholder="Search accounts, orders, INV #, BOL #, lot #…" aria-label="Search"><kbd>/</kbd></div>
+      <div class="health">
+        <span class="chip" title="DB↔Sheet sync"><span class="dot"></span>Sheet sync <span class="t">12s</span></span>
+        <span class="chip"><span class="dot"></span>Stripe <span class="t">2m</span></span>
+        <span class="chip"><span class="dot"></span>Slack <span class="t">now</span></span>
+        <span class="chip warn"><span class="dot"></span>Jobs <span class="t">1 retrying</span></span>
+      </div>
+      <div class="avatar">JB</div>
+    </div>
+    <main class="page" id="view"></main>
+  </div>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-label="Order detail"></aside>
+<div class="toast" id="toast"><span class="dot"></span><span id="toastmsg"></span></div>
+
+<script>
+/* ---------------- sample data (fictional accounts; real SKUs, regions, staff roles) ---------------- */
+const STAGES = [
+  {k:'account_setup', n:'Account set up', s:'s1'},
+  {k:'new_order',     n:'New order',      s:'s2'},
+  {k:'needs_sched',   n:'Needs scheduling', s:'s3'},
+  {k:'scheduled',     n:'Delivery scheduled', s:'s4'},
+  {k:'delivered',     n:'Delivered · BOL', s:'s5'},
+  {k:'invoiced',      n:'Invoiced',       s:'s6'},
+  {k:'paid',          n:'Paid',           s:'s7'},
+];
+const SI = Object.fromEntries(STAGES.map((s,i)=>[s.k,i]));
+const money = n => '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const money0 = n => '$'+Math.round(n).toLocaleString('en-US');
+
+const ORDERS = [
+ {id:'01J6Z…K9', inv:'INV26281', acct:'Mission Ferment Bar', region:'BA', rep:'Jack B.', ch:'rep_app', stage:'new_order', age:'2h', lines:[['CNT1AKSB01','Cantinesca ⅙ bbl',3,96],['SGB1AC1224','Sunlight Groove BA · case 12oz×24',2,36.25]], wh:'WH-SF', first:true, billing:'ap@missionferment.example'},
+ {id:'01J6Z…M2', inv:'INV26282', acct:'Echo Park Cantina', region:'LA', rep:'Dany', ch:'sms', stage:'new_order', age:'40m', lines:[['CNT1AKHB01','Cantinesca ½ bbl',2,192]], wh:'WH-WIL', billing:'owner@echoparkcantina.example'},
+ {id:'01J6Z…A4', inv:'INV26279', acct:'Bay Bridge Bottle Shop', region:'BA', rep:'Jack B.', ch:'portal', stage:'needs_sched', age:'1d', lines:[['SGB1AC1224','Sunlight Groove BA · case 12oz×24',10,36.25],['CNT1AC1224','Cantinesca · case 12oz×24',6,31.70]], wh:'WH-BEN', proposed:'Thu Sep 4', billing:'orders@baybridgebottles.example'},
+ {id:'01J6Z…Q7', inv:'INV26280', acct:'Sunset Taproom', region:'BA', rep:'Jack B.', ch:'rep_app', stage:'needs_sched', age:'3d', lines:[['GSP1AKSB01','Giro Splendido ⅙ bbl',4,115]], wh:'WH-SF', blocked:'License expired 08/28 — renewal not on file', billing:'gm@sunsettaproom.example'},
+ {id:'01J6Z…R1', inv:'INV26277', acct:'Whittier Lager House', region:'LA', rep:'Jack B.', ch:'rep_app', stage:'scheduled', age:'2d', lines:[['CNT1AKSB01','Cantinesca ⅙ bbl',1,96]], wh:'WH-WIL', sched:'Wed Sep 3 · 10–12', carrier:'Self (Dany)', billing:'lsm@whittierlager.example', empties:1},
+ {id:'01J6Z…T8', inv:'INV26278', acct:'Silver Lake Social', region:'LA', rep:'Dany', ch:'portal', stage:'scheduled', age:'1d', lines:[['SGS1AKHB01','Sunlight Groove SoCal ½ bbl',2,205],['CNT1AKHB01','Cantinesca ½ bbl',1,192]], wh:'WH-WIL', sched:'Wed Sep 3 · 13–15', carrier:'Self (Dany)', billing:'bar@silverlakesocial.example'},
+ {id:'01J6Z…V3', inv:'INV26275', acct:'Hopscotch Tavern', region:'BA', rep:'Jack B.', ch:'rep_app', stage:'delivered', age:'5h', lines:[['CNT1AKHB01','Cantinesca ½ bbl',2,192],['CNT1AKSB01','Cantinesca ⅙ bbl',2,96]], wh:'WH-BEN', bol:'BOL-WH-BEN-260902-001', delivered:'Sep 2 · 09:41', blocked:'Stripe: no billing email on file', billing:''},
+ {id:'01J6Z…W5', inv:'INV26274', acct:'Fog Line Kitchen', region:'BA', rep:'Jack B.', ch:'sms', stage:'invoiced', age:'2d', lines:[['SGB1AKSB01','Sunlight Groove BA ⅙ bbl',3,99.5]], wh:'WH-SF', bol:'BOL-WH-SF-260831-002', due:'Sep 30', billing:'accounts@foglinekitchen.example'},
+ {id:'01J6Z…X9', inv:'INV26273', acct:'Marigold Mercado', region:'LA', rep:'Dany', ch:'rep_app', stage:'invoiced', age:'6d', lines:[['CNT1AC1224','Cantinesca · case 12oz×24',12,31.70]], wh:'WH-WIL', bol:'BOL-WH-WIL-260827-001', due:'Sep 26', billing:'ar@marigoldmercado.example'},
+ {id:'01J6Z…Y2', inv:'INV26270', acct:'Alameda Rowing Club', region:'BA', rep:'Jack B.', ch:'portal', stage:'paid', age:'1d', lines:[['GSP1AKHB01','Giro Splendido ½ bbl',1,205],['GSP1AKSB01','Giro Splendido ⅙ bbl',2,115]], wh:'WH-BEN', bol:'BOL-WH-BEN-260822-003', paid:'Sep 1 · ACH pi_3Q…8f', billing:'treasurer@alamedarowing.example'},
+ {id:'01J6Z…Z6', inv:'INV26268', acct:'Highland Park Records', region:'LA', rep:'Dany', ch:'rep_app', stage:'paid', age:'4d', lines:[['CNT1AKSB01','Cantinesca ⅙ bbl',2,96]], wh:'WH-WIL', bol:'BOL-WH-WIL-260820-002', paid:'Aug 29 · ACH pi_3Q…c1', billing:'shop@hprecords.example'},
+];
+const ACCOUNTS_SETUP = [
+ {acct:'North Beach Deli & Taps', region:'BA', rep:'Jack B.', ck:[1,1,1,0,1,0,1,0,0], missing:'billing email, payment method', age:'3h'},
+ {acct:'Culver City Cellar', region:'LA', rep:'Dany', ck:[1,0,1,1,1,1,1,0,0], missing:'license verification', age:'1d'},
+];
+const totalOf = o => o.lines.reduce((s,l)=>s+l[2]*l[3],0);
+const kegsOf = o => o.lines.filter(l=>/K[HS]B/.test(l[0])).reduce((s,l)=>s+l[2],0);
+
+/* ---------------- router ---------------- */
+const NAV = [
+ ['home','Command Center','M3 12 12 4l9 8M5 10v10h14V10'],
+ ['orders','Orders','M4 5h16M4 12h16M4 19h10', ()=>ORDERS.filter(o=>o.stage!=='paid').length],
+ ['accounts','Accounts','M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0', ()=>2],
+ ['deliveries','Deliveries','M3 7h11v9H3zM14 10h4l3 3v3h-7zM6 19a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm12 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z'],
+ ['inventory','Inventory','M4 8l8-4 8 4v9l-8 4-8-4zM4 8l8 4 8-4M12 12v9', ()=>1],
+ ['documents','Documents','M7 3h7l5 5v13H7zM14 3v5h5'],
+ ['billing','Billing','M3 6h18v12H3zM3 10h18M7 15h4', ()=>2],
+ ['automations','Automations','M12 3v3M12 18v3M3 12h3M18 12h3M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z', ()=>1],
+ ['settings','Settings','M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm7-3 2 1-1 3-2 0-1 2 0 2-3 1-1-2h-2l-1 2-3-1 0-2-1-2-2 0-1-3 2-1v-2l-2-1 1-3 2 0 1-2 0-2 3-1 1 2h2l1-2 3 1 0 2 1 2 2 0 1 3-2 1z'],
+ ['states','UI states (spec)','M4 4h16v16H4zM4 12h16M12 4v16'],
+];
+function renderNav(){
+  const cur = location.hash.replace('#','')||'home';
+  document.getElementById('nav').innerHTML = NAV.map(([k,n,d,cnt],i)=>{
+    const sep = k==='states' ? '<div class="sep"></div>' : '';
+    const c = cnt ? `<span class="cnt ${k==='orders'||k==='billing'?'':''}${k==='inventory'||k==='automations'?' hot':''}">${cnt()}</span>` : '';
+    return sep+`<a href="#${k}" class="${cur===k?'on':''}"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"><path d="${d}"/></svg>${n}${c}</a>`;
+  }).join('');
+}
+const VIEWS = {};
+function route(){ renderNav(); const k=location.hash.replace('#','')||'home'; const [name,arg]=k.split('/'); document.getElementById('view').innerHTML=(VIEWS[name]||VIEWS.home)(arg); window.scrollTo(0,0); }
+window.addEventListener('hashchange',route);
+
+/* ---------------- helpers ---------------- */
+const stageChip = o => o.blocked ? `<span class="stage blocked" title="${o.blocked}"><i></i>Blocked · ${STAGES[SI[o.stage]].n}</span>` : `<span class="stage ${STAGES[SI[o.stage]].s}"><i></i>${STAGES[SI[o.stage]].n}</span>`;
+const linesSummary = o => o.lines.map(l=>`${l[2]}× ${l[1].replace(/Sunlight Groove (BA|SoCal)/,'SG$1').replace('Cantinesca','CNT').replace('Giro Splendido','GSP').replace(' · case 12oz×24',' case')}`).join(' · ');
+const owner = (n) => `<span class="owner"><span class="avatar">${n.split(' ').map(w=>w[0]).join('').slice(0,2)}</span>${n}</span>`;
+function spark(vals,w=200,h=36,fill=true){const max=Math.max(...vals),min=Math.min(...vals);const pts=vals.map((v,i)=>[i*(w/(vals.length-1)),h-4-((v-min)/(max-min||1))*(h-10)]);const d=pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');const last=pts[pts.length-1];return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${fill?`<path d="${d} L${w} ${h} L0 ${h}Z" fill="rgba(57,135,229,.14)"/>`:''}<path d="${d}" fill="none" stroke="#3987e5" stroke-width="2" vector-effect="non-scaling-stroke"/><circle cx="${last[0]}" cy="${last[1]}" r="3" fill="#8fbdf5"/></svg>`;}
+function toast(msg){const t=document.getElementById('toast');document.getElementById('toastmsg').textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),3600);}
+
+/* ---------------- Command Center ---------------- */
+VIEWS.home = () => {
+  const counts = STAGES.map(s=>ORDERS.filter(o=>o.stage===s.k));
+  const acctCol = ACCOUNTS_SETUP;
+  const attn = [
+    {sev:'serious', t:'Sunset Taproom — license expired 08/28, order INV26280 is blocked at scheduling', m:['Compliance gate','3 days','Jack B.'], a:'Review license', id:'01J6Z…Q7'},
+    {sev:'serious', t:'Hopscotch Tavern — delivered this morning, invoice can’t send: no billing email on file', m:['Stripe · issue_invoice retry 2/5','5 hours','Ops'], a:'Add email & send', id:'01J6Z…V3'},
+    {sev:'warn', t:'WH-SF is short on Giro Splendido ⅙ bbl — 4 needed Thu, 2 available', m:['Stock check','since Sep 1','Warehouse'], a:'Transfer from WH-BEN'},
+    {sev:'warn', t:'Unknown number (+1 213 ••• 0412) texted “same as last time” — no account match', m:['SMS · not processed','40 min','Dany'], a:'Match to account'},
+    {sev:'info', t:'Sheet edit conflict: Sales row 341 “Price (ea)” changed in Sheet (DB-owned field)', m:['Sheet sync','last night','Ops'], a:'Resolve'},
+    {sev:'info', t:'North Beach Deli & Taps — new account from rep app, setup 5/9; payment setup link not yet sent', m:['Account setup','3 hours','Jack B.'], a:'Send setup link'},
+  ];
+  const today = ORDERS.filter(o=>o.stage==='scheduled');
+  const feed = [
+    ['sys','Marked <b>INV26275 Hopscotch Tavern</b> delivered → minted <span class="mono">BOL-WH-BEN-260902-001</span>, wrote 2 DELIVERY events, +4 kegs custody','09:41'],
+    ['sys','Invoice job for INV26275 failed: no billing email. Retry in 5m · <a href="#orders">open</a>','09:41'],
+    ['rep','<b>Jack B.</b> placed INV26281 for Mission Ferment Bar · <span class="pill good">first order</span> · Slack #orders-ba','08:12'],
+    ['sys','Proposed delivery slot Thu Sep 4 for INV26279 (route BA-Thu, cutoff met)','07:30'],
+    ['cus','<b>Fog Line Kitchen</b> opened hosted invoice INV26274 (Stripe)','Sep 1'],
+    ['sys','Stripe <span class="mono">invoice.paid</span> → INV26270 Alameda Rowing Club · Sheet “Invoice Status” = Paid','Sep 1'],
+    ['ai','Parsed SMS from Echo Park Cantina: “2 halves of cantinesca” → 2× CNT1AKHB01 (confidence .94) · awaiting confirm','Sep 1'],
+    ['ops','<b>Dany</b> resolved sync conflict on Sales row 338 — Sheet wins (Lot #)','Aug 31'],
+  ];
+  return `
+  <div class="page-head"><div><div class="eyebrow">Wednesday, Sep 2 · 09:58 PT</div><h1>Command Center</h1><p>6 things need a person. 14 orders are moving on their own.</p></div>
+  <div class="actions"><button class="btn" onclick="toast('Print batch: 2 delivery receipts for Wed Sep 3 (LA)')">Print today’s receipts</button><a class="btn primary" href="#orders">New order</a></div></div>
+
+  <section class="panel" style="margin-bottom:16px">
+    <div class="panel-head"><h3>Pipeline · last 30 days</h3><span class="small muted">Click a stage to filter the board</span></div>
+    <div class="pipe">
+      <a class="col" href="#accounts"><div class="k"><i style="background:var(--st1)"></i>① Account set up</div><div class="n">${acctCol.length}</div><div class="v">awaiting first order</div></a>
+      ${STAGES.slice(1).map((s,i)=>{const os=counts[i+1];const v=os.reduce((a,o)=>a+totalOf(o),0);const b=os.filter(o=>o.blocked).length;return `<a class="col" href="#orders/${s.k}"><div class="k"><i style="background:var(--${s.s.replace('s','st')})"></i>${['②','③','④','⑤','⑥','⑦'][i]} ${s.n}</div><div class="n">${os.length}</div><div class="v">${money0(v)}</div>${b?`<span class="pill serious blk">${b} blocked</span>`:'<span class="blk" style="height:20px"></span>'}</a>`}).join('')}
+    </div>
+  </section>
+
+  <div class="grid g-attn" style="margin-bottom:16px">
+    <section class="panel">
+      <div class="panel-head"><h3>Needs attention</h3><span class="small muted">ranked by consequence · each has one owner and one action</span></div>
+      <div class="attn">${attn.map(a=>`<div class="item ${a.sev}"><div class="bar"></div><div><div class="t">${a.t}</div><div class="m">${a.m.slice(0,2).map(x=>`<span>${x}</span>`).join('')}${owner(a.m[2])}</div></div><button class="btn sm" onclick="${a.id?`openOrder('${a.id}')`:`toast('${a.a}')`}">${a.a}</button></div>`).join('')}</div>
+    </section>
+    <div class="grid" style="align-content:start">
+      <section class="panel">
+        <div class="panel-head"><h3>Today · Wed Sep 3 deliveries</h3><span class="region">LA</span></div>
+        ${today.map(o=>`<div class="ship" style="cursor:pointer" onclick="openOrder('${o.id}')"><b>${o.acct} <span class="muted small mono">${o.inv}</span></b><div class="m"><span>${linesSummary(o)}</span><span class="num">${o.sched.split('·')[1]}</span></div><div class="m"><span>${o.wh} · ${o.carrier}</span><span>${kegsOf(o)} kegs · ${o.empties?o.empties+' empty pickup':'no empties'}</span></div></div>`).join('')}
+        <div class="actions" style="margin-top:8px"><button class="btn sm" onclick="toast('Delivery receipts for Wed Sep 3 rendered (2 pages)')">Print 2 receipts</button><a class="btn sm ghost" href="#deliveries">Open week</a></div>
+        <p class="small muted" style="margin:10px 0 0">Invoices going out today: none scheduled — invoices send when a delivery is marked complete. Expected payments: INV26273 due Sep 26.</p>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><h3>Automation health · 7d</h3><a class="small" href="#automations">All rules</a></div>
+        ${[['Sheet sync (both ways)',100,'12s ago'],['Stripe customer + setup link',100,'3h ago'],['Slot proposal',100,'07:30'],['Invoice on delivery',80,'retrying · 1'],['Slack notifications',100,'08:12'],['Nightly reconcile',100,'02:00']].map(([n,p,t])=>`<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px"><span style="flex:1">${n}</span><span class="small muted mono">${t}</span><span class="pill ${p===100?'good':'warn'}">${p}%</span></div>`).join('')}
+      </section>
+    </div>
+  </div>
+
+  <div class="grid g5" style="margin-bottom:16px">
+    ${[['Orders this week',7,'<b>+2</b> vs last week',[3,5,4,6,5,7,7]],['Invoiced MTD',money0(1128),'2 invoices open',[600,600,900,1128,1128,1128,1128]],['Collected MTD',money0(627),'<b>56%</b> of invoiced',[0,0,435,435,627,627,627]],['Confirm → delivered','2.4 d','<b class="down">+0.3 d</b> vs Aug',[2.1,2.0,2.3,2.2,2.6,2.5,2.4]],['Kegs out in trade',41,'$1,435 deposit exposure',[30,33,35,38,37,40,41]]].map(([l,v,d,s])=>`<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div><div class="d">${d}</div>${spark(s)}</div>`).join('')}
+  </div>
+
+  <section class="panel">
+    <div class="panel-head"><h3>Live activity</h3><div class="seg"><button class="on">All</button><button>System</button><button>People</button><button>Customer</button><button>AI</button></div></div>
+    <div class="feed">${feed.map(([w,t,when])=>`<div class="ev"><span class="who ${w}">${{sys:'SYS',rep:'JB',ops:'D',cus:'CU',ai:'AI'}[w]}</span><div>${t}</div><span class="when">${when}</span></div>`).join('')}</div>
+  </section>`;
+};
+
+/* ---------------- Orders board / table ---------------- */
+let boardMode='board';
+VIEWS.orders = (filter) => {
+  const list = filter ? ORDERS.filter(o=>o.stage===filter) : ORDERS;
+  const board = `<div class="board">${STAGES.slice(1).map(s=>{const os=ORDERS.filter(o=>o.stage===s.k);return `<div class="bcol"><div class="bh"><span><i style="background:var(--${s.s.replace('s','st')})"></i>${s.n}</span><span class="num">${os.length}</span></div>${os.map(o=>`<div class="card ${o.blocked?'blocked':''}" onclick="openOrder('${o.id}')"><div class="a"><span>${o.acct}</span><span class="region">${o.region}</span></div><div class="li">${linesSummary(o)}</div>${o.blocked?`<div class="small" style="color:#ffb59a;margin-top:4px">⚠ ${o.blocked}</div>`:''}<div class="f"><span>${o.rep} · ${ {rep_app:'rep app',portal:'portal',sms:'SMS'}[o.ch]} · ${o.age}</span><span class="num">${money0(totalOf(o))}</span></div></div>`).join('')||'<div class="small muted" style="padding:10px 4px">Nothing here</div>'}</div>`}).join('')}</div>`;
+  const table = `<div class="panel flush"><div class="tblwrap"><table class="tbl"><thead><tr><th>Invoice #</th><th>Account</th><th>Region</th><th>Lines</th><th class="r">Total</th><th>Stage</th><th>Rep · channel</th><th>In stage</th></tr></thead><tbody>${list.map(o=>`<tr class="row" onclick="openOrder('${o.id}')"><td class="mono">${o.inv}</td><td><b>${o.acct}</b></td><td><span class="region">${o.region}</span></td><td class="small">${linesSummary(o)}</td><td class="r num">${money(totalOf(o))}</td><td>${stageChip(o)}</td><td class="small">${o.rep} · ${o.ch}</td><td class="small mono">${o.age}</td></tr>`).join('')}</tbody></table></div></div>`;
+  return `<div class="page-head"><div><div class="eyebrow">Orders</div><h1>${filter?STAGES[SI[filter]].n:'All open orders'}</h1><p>Drag a card from “Needs scheduling” into “Delivery scheduled” to book it. Every move writes an order event.</p></div>
+  <div class="actions"><div class="seg"><button class="${boardMode==='board'?'on':''}" onclick="boardMode='board';route()">Board</button><button class="${boardMode==='table'?'on':''}" onclick="boardMode='table';route()">Table</button></div>
+  <button class="btn">Filters</button><button class="btn" onclick="toast('3 orders scheduled onto BA-Thu route')">Bulk schedule</button><button class="btn primary">New order</button></div></div>
+  ${filter?`<p style="margin:-6px 0 14px"><a href="#orders">← all stages</a></p>`:''}
+  ${boardMode==='board'&&!filter?board:table}
+  <div class="spec" style="margin-top:16px"><b>Spec.</b> Cards show: account, region badge, compressed line summary (“2× CNT ½bbl”), first‑order pill, blocked stripe with reason, rep · channel · time‑in‑stage, total. Saved filters: region, rep, stage, blocked, channel, date range. Drag ③→④ opens the schedule dialog pre‑filled from <span class="mono">RouteSchedule</span>.</div>`;
+};
+
+/* ---------------- Order detail drawer ---------------- */
+function openOrder(id){
+  const o = ORDERS.find(x=>x.id===id); if(!o) return;
+  const i = SI[o.stage]; const total=totalOf(o); const kegs=kegsOf(o); const dep=kegs*35; const ret=(o.empties||0)*35;
+  const node = (n,idx,t,m,art)=>{const cls= idx<i?'done':idx===i?'now':'future'; return `<div class="n ${cls}"><div class="dot">${idx<i?'✓':idx+1}</div><div><div class="t">${t}${cls!=='future'?`<span class="when">${n}</span>`:''}</div><div class="m">${m}</div>${art&&cls!=='future'?`<div class="art">${art}</div>`:''}</div></div>`};
+  const tl = [
+    node('Aug 14 · 11:02',0,'Account set up','Created from rep app by '+o.rep+'. Stripe customer created; ACH setup link sent to '+(o.billing||'— no billing email —')+'.','<span class="tag link">cus_Q8…</span><span class="tag">Sheet · Customer Accounts r112</span>'),
+    node(o.stage==='new_order'?'today · '+o.age+' ago':'Aug 30 · 08:12',1,'New order · '+({rep_app:'rep app',portal:'customer portal',sms:'SMS (confirmed by customer)'}[o.ch]),`${o.lines.length} line${o.lines.length>1?'s':''}, ${money(total)}. Synced to Sales tab; Slack posted to #orders-${o.region.toLowerCase()}. Stock check passed at ${o.wh}.`,`<span class="tag link">Sales rows 344–${343+o.lines.length}</span><span class="tag link">Slack thread</span><span class="tag">Order ID ${o.id}</span>`),
+    node('Aug 30 · 08:12',2,'Needs scheduling',o.proposed?`Proposed <b>${o.proposed}</b> from route ${o.region}-Thu (cutoff met). Waiting for ops to accept.`:'System proposes the next route day for the region that respects the account’s delivery window.', o.proposed?'<span class="tag">auto_propose_slot</span>':''),
+    node('Aug 31 · 16:00',3,'Delivery scheduled',o.sched?`${o.sched} from ${o.wh} · ${o.carrier}. Delivery Date written to Sheet. Receipt pre‑rendered and added to the day’s print batch.`:'Ops accepts or edits the slot. Delivery (Invoice) Date is written to the Sheet; a Delivery Receipt is pre‑rendered.', o.sched?'<span class="tag link">Delivery Receipt PDF</span>':''),
+    node(o.delivered||'—',4,'Delivered · BOL issued',o.bol?`Marked delivered by ${o.carrier||'warehouse'}. BOL <span class="mono">${o.bol}</span> minted; ${o.lines.length} DELIVERY events written; keg custody +${kegs}${o.empties?`, −${o.empties} returned`:''}.`:'Warehouse/rep taps “Mark delivered” with lot #s and empties. Real sequential BOL # is minted, ledger and keg custody update, Sheet gets BOL #, Lot #, empties.', o.bol?`<span class="tag link">${o.bol}</span><span class="tag">Ledger ×${o.lines.length}</span>`:''),
+    node('—',5,'Invoiced',o.stage==='invoiced'||o.stage==='paid'?`Stripe invoice sent to <b>${o.billing}</b>. Net 30 from delivery → due ${o.due||'Sep 30'}. ${kegs?`Includes ${kegs}× Keg Deposit (${money(dep)})${o.empties?` and ${o.empties}× Keg Deposit Returned (−${money(ret)})`:''}.`:''}`:`Sends automatically when delivered${o.billing?` — to ${o.billing}`:' — <b style="color:#ffb59a">blocked: no billing email</b>'}. Net 30 from delivery, tax exempt, our INV # in custom fields.`,(o.stage==='invoiced'||o.stage==='paid')?`<span class="tag link">Stripe ${o.inv}</span><span class="tag link">PDF</span>`:''),
+    node(o.paid?o.paid.split('·')[0]:'—',6,'Paid',o.paid?`ACH settled · ${o.paid.split('·')[1]}. Sheet “Invoice Status” = Paid, ACH REF written.`:'Stripe webhook invoice.paid flips this and updates the Sheet. Overdue >7 days posts to Slack.', o.paid?'<span class="tag link">pi_3Q…</span>':''),
+  ].join('');
+  document.getElementById('drawer').innerHTML = `
+  <div class="dhead"><div><div class="eyebrow">Order · ${ {rep_app:'Rep app',portal:'Customer portal',sms:'SMS'}[o.ch]} · <span class="mono">${o.id}</span></div><h2 style="margin-top:4px">${o.acct} <span class="muted mono" style="font-size:15px;font-family:var(--font-mono)">${o.inv}</span></h2><div class="actions" style="margin-top:8px">${stageChip(o)}<span class="region">${o.region}</span><span class="small muted">${o.rep} · ${o.wh}</span></div></div>
+  <div class="x"><button class="btn ghost" onclick="closeDrawer()" aria-label="Close">✕</button></div></div>
+  <div class="dbody">
+    ${o.blocked?`<div class="blockbar"><b>Blocked</b> ${o.blocked}<button class="btn sm" onclick="toast('${o.blocked.startsWith('Stripe')?'Billing email saved · invoice sent to ap@hopscotchtavern.example':'License review opened'}')">${o.blocked.startsWith('Stripe')?'Add billing email & send':'Review license'}</button></div>`:''}
+    <div class="actions">
+      ${i<=2?`<button class="btn primary" onclick="toast('Scheduled ${o.proposed||'Thu Sep 4'} · Delivery Date written to Sheet')">Schedule${o.proposed?' '+o.proposed:''}</button>`:''}
+      ${i===3?`<button class="btn primary" onclick="markDelivered('${o.id}')">Mark delivered</button><button class="btn">Print receipt</button><button class="btn">Reschedule</button>`:''}
+      ${i===4&&!o.blocked?`<button class="btn primary">Issue invoice now</button>`:''}
+      ${i===5?`<button class="btn">Resend invoice</button><button class="btn">Record manual payment</button>`:''}
+      <button class="btn">Reply in Slack</button>${i<4?`<button class="btn danger">Cancel order</button>`:''}
+    </div>
+    <section><h3 style="margin-bottom:10px">Pipeline</h3><div class="tl">${tl}</div></section>
+    <section class="panel flush"><div class="panel-head"><h3>Lines</h3><span class="small muted">prices snapshotted at confirmation</span></div><div class="tblwrap"><table class="tbl"><thead><tr><th>Item</th><th>Item #</th><th>Lot #</th><th class="r">Qty</th><th class="r">Unit</th><th class="r">Total</th></tr></thead><tbody>
+      ${o.lines.map(l=>`<tr><td>${l[1]}</td><td class="mono small">${l[0]}</td><td class="mono small muted">${o.bol?'L26'+l[0].slice(0,3)+'08':'—'}</td><td class="r num">${l[2]}</td><td class="r num">${money(l[3])}</td><td class="r num">${money(l[2]*l[3])}</td></tr>`).join('')}
+      ${kegs?`<tr><td class="muted">Keg Deposit</td><td class="muted">—</td><td></td><td class="r num">${kegs}</td><td class="r num">$35.00</td><td class="r num">${money(dep)}</td></tr>`:''}
+      ${o.empties?`<tr><td class="muted">Keg Deposit Returned</td><td class="muted">—</td><td></td><td class="r num">${o.empties}</td><td class="r num">−$35.00</td><td class="r num">−${money(ret)}</td></tr>`:''}
+      <tr><td colspan="5" class="r muted">Tax: Exempt (0.0000%) · <b style="color:var(--ink)">Invoice total</b></td><td class="r num" style="font-weight:600">${money(total+dep-ret)}</td></tr></tbody></table></div></section>
+    <div class="grid g2">
+      <section class="panel"><h3 style="margin-bottom:10px">Shipment</h3><dl class="kv"><dt>From</dt><dd>${o.wh} · ${ {'WH-SF':'San Francisco','WH-BEN':'Benicia','WH-WIL':'Wilmington'}[o.wh]}</dd><dt>Scheduled</dt><dd>${o.sched||o.proposed||'—'}</dd><dt>Carrier</dt><dd>${o.carrier||'—'}</dd><dt>Weight</dt><dd class="num">${o.lines.reduce((s,l)=>s+l[2]*(/KHB/.test(l[0])?160:/KSB/.test(l[0])?58:22),0)} lb · ${o.lines.reduce((s,l)=>s+l[2],0)} handling units</dd><dt>BOL #</dt><dd class="mono">${o.bol||'minted at delivery'}</dd><dt>Empties</dt><dd>${o.empties?o.empties+' expected':'none expected'}</dd></dl></section>
+      <section class="panel"><h3 style="margin-bottom:10px">Billing</h3><dl class="kv"><dt>Billing email</dt><dd>${o.billing||'<span style="color:#ffb59a">missing</span>'}</dd><dt>Terms</dt><dd>Net 30 from delivery</dd><dt>Collection</dt><dd>${o.stage==='paid'?'charge_automatically (ACH on file)':'send_invoice · ACH / card'}</dd><dt>Due</dt><dd>${o.due||'—'}</dd><dt>Stripe</dt><dd class="mono">${o.stage==='invoiced'||o.stage==='paid'?'in_1Q…'+o.inv.slice(-3):'—'}</dd><dt>Paid</dt><dd>${o.paid||'—'}</dd></dl></section>
+    </div>
+    <section class="panel"><div class="panel-head"><h3>Sheet sync</h3><span class="pill good">in sync · 12s</span></div><dl class="kv"><dt>DB → Sheet</dt><dd>Sales rows 344–${343+o.lines.length} · last write ${o.delivered||'Aug 30 08:12'}</dd><dt>Sheet → DB</dt><dd>No ops edits since</dd><dt>Ownership</dt><dd class="small muted">DB owns content, delivery date, BOL #, lot #, invoice status. Sheet owns Notes, tap handles.</dd></dl></section>
+    <section class="panel"><div class="panel-head"><h3>Audit trail</h3><span class="small muted">append‑only order_events</span></div><div class="feed small">${['order.confirmed · rep','order.sheet_synced · system','order.slack_posted · system','order.stock_checked · system → ok','order.slot_proposed · system'].map((e,k)=>`<div class="ev"><span class="who sys">${k+1}</span><span class="mono">${e}</span><span class="when">Aug 30 08:1${k}</span></div>`).join('')}</div></section>
+  </div>`;
+  document.body.classList.add('open');
+}
+function closeDrawer(){document.body.classList.remove('open')}
+document.getElementById('scrim').onclick=closeDrawer;
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDrawer(); if(e.key==='/'&&document.activeElement.tagName!=='INPUT'){e.preventDefault();document.querySelector('.search input').focus();}});
+function markDelivered(id){
+  const o=ORDERS.find(x=>x.id===id); o.stage='delivered'; o.bol='BOL-'+o.wh+'-260903-00'+(1+ORDERS.filter(x=>x.bol&&x.bol.includes(o.wh)).length); o.delivered='Sep 3 · '+new Date().toTimeString().slice(0,5); o.age='now';
+  toast(`Delivered · minted ${o.bol} · ${o.lines.length} ledger events · custody +${kegsOf(o)}`); openOrder(id); route();
+  setTimeout(()=>{o.stage='invoiced'; o.due='Oct 3'; o.age='now'; toast(`Invoice ${o.inv} sent to ${o.billing} · Net 30 from delivery · due Oct 3`); openOrder(id); route();},1800);
+}
+
+/* ---------------- Accounts ---------------- */
+VIEWS.accounts = () => {
+  const CK=['License #','License verified','Region → warehouse','Billing email','Terms','Payment method','Stripe customer','ACH on file','First order'];
+  const rows = [...ACCOUNTS_SETUP.map(a=>({...a,kegs:0,open:0})),
+    {acct:'Hopscotch Tavern',region:'BA',rep:'Jack B.',ck:[1,1,1,0,1,1,1,0,1],kegs:6,open:1,exp:'$210'},
+    {acct:'Whittier Lager House',region:'LA',rep:'Jack B.',ck:[1,1,1,1,1,1,1,1,1],kegs:1,open:1,exp:'$35'},
+    {acct:'Sunset Taproom',region:'BA',rep:'Jack B.',ck:[1,0,1,1,1,1,1,1,1],kegs:3,open:1,exp:'$105',lic:'expired'},
+    {acct:'Alameda Rowing Club',region:'BA',rep:'Jack B.',ck:[1,1,1,1,1,1,1,1,1],kegs:3,open:0,exp:'$105'},
+    {acct:'Marigold Mercado',region:'LA',rep:'Dany',ck:[1,1,1,1,1,1,1,1,1],kegs:0,open:1,exp:'—'}];
+  return `<div class="page-head"><div><div class="eyebrow">Accounts · 109</div><h1>Accounts</h1><p>Setup checklist is what gates stage ① → ②. Green segments are done; red need someone.</p></div>
+  <div class="actions"><div class="seg"><button class="on">Needs setup</button><button>Pending approval</button><button>License ≤60d</button><button>Holding kegs</button><button>All</button></div><button class="btn primary" onclick="toast('Add account form (same fields as the rep app)')">Add account</button></div></div>
+  <div class="panel flush"><div class="tblwrap"><table class="tbl"><thead><tr><th>Account</th><th>Region</th><th>Rep</th><th>Setup</th><th>Missing</th><th class="r">Kegs out</th><th class="r">Deposit exposure</th><th class="r">Open orders</th><th></th></tr></thead><tbody>
+  ${rows.map(a=>`<tr class="row" onclick="toast('Account detail: contacts, custody, pricing, invoices, Stripe link')"><td><b>${a.acct}</b>${a.lic?' <span class="pill serious">license expired</span>':''}</td><td><span class="region">${a.region}</span></td><td>${a.rep}</td><td><div class="ck" title="${CK.map((c,k)=>c+': '+(a.ck[k]?'done':'missing')).join('\n')}">${a.ck.map(v=>`<i class="${v?'y':'n'}"></i>`).join('')}</div><div class="small muted mono" style="margin-top:3px">${a.ck.filter(Boolean).length}/9</div></td><td class="small" style="color:${a.missing?'#f3c46a':'var(--ink-3)'}">${a.missing||(a.lic?'license renewal':'—')}</td><td class="r num">${a.kegs}</td><td class="r num">${a.exp||'—'}</td><td class="r num">${a.open}</td><td class="r">${a.ck[3]?'':`<button class="btn sm" onclick="event.stopPropagation();toast('Payment setup link emailed')">Send setup link</button>`}</td></tr>`).join('')}
+  </tbody></table></div></div>
+  <div class="grid g2" style="margin-top:16px">
+    <div class="spec"><b>Account detail (drawer).</b> Contacts with authorized‑SMS flag · delivery info & window · per‑account pricing · <b>keg custody</b> by SKU with deposit exposure and last return date · orders with stage chips · invoices with aging · Stripe customer link · “Send payment setup link” (this is all of ach.tlmbg.co) · approve/reject for portal signups.</div>
+    <div class="spec"><b>Checklist order</b> = the nine facts the first invoice needs. Billing email comes from Customer Accounts “Billing Contact Email”, falling back to the ordering contact. A missing email never blocks the order — it blocks the <i>invoice</i>, visibly, at stage ⑤.</div>
+  </div>`;
+};
+
+/* ---------------- Deliveries ---------------- */
+VIEWS.deliveries = () => {
+  const days=[['Mon','Sep 1',[],true],['Tue','Sep 2',[]],['Wed','Sep 3',ORDERS.filter(o=>o.stage==='scheduled')],['Thu','Sep 4',ORDERS.filter(o=>o.proposed)],['Fri','Sep 5',[]]];
+  const tray = ORDERS.filter(o=>o.stage==='new_order'||(o.stage==='needs_sched'&&!o.proposed));
+  return `<div class="page-head"><div><div class="eyebrow">Deliveries · week of Sep 1</div><h1>Deliveries</h1><p>Route days come from <span class="mono">RouteSchedule</span>. Drag from the tray onto a day; the day header shows stock sufficiency and load.</p></div>
+  <div class="actions"><div class="seg"><button class="on">All regions</button><button>BA</button><button>LA</button></div><button class="btn">‹ Prev</button><button class="btn">Next ›</button><button class="btn primary" onclick="toast('Rendered 3 delivery receipts for Wed Sep 3')">Print batch</button></div></div>
+  <div class="week">
+    <div class="day tray"><div class="dh"><b>Unscheduled</b><span class="num">${tray.length}</span></div>${tray.map(o=>`<div class="ship" style="cursor:grab" onclick="openOrder('${o.id}')"><b>${o.acct}</b><div class="m"><span>${linesSummary(o)}</span></div><div class="m"><span class="region">${o.region}</span><span class="muted">${o.wh}${o.blocked?' · <span style="color:#ffb59a">blocked</span>':''}</span></div></div>`).join('')}</div>
+    ${days.map(([d,dt,os,off])=>`<div class="day ${off?'off':''}"><div class="dh"><b>${d} <span class="muted" style="font-size:13px;font-family:var(--font-body)">${dt}</span></b><span class="num">${os.length? os.reduce((s,o)=>s+o.lines.reduce((a,l)=>a+l[2],0),0)+' HU':off?'holiday':'no route'}</span></div>
+      ${d==='Wed'?'<div class="small" style="margin-bottom:6px"><span class="pill good">WH-WIL stock ok</span></div>':''}${d==='Thu'?'<div class="small" style="margin-bottom:6px"><span class="pill warn">WH-SF short GSP ⅙ ×2</span></div>':''}
+      ${os.map(o=>`<div class="ship" style="cursor:pointer;${o.proposed?'border-style:dashed':''}" onclick="openOrder('${o.id}')"><b>${o.acct}</b><div class="m"><span>${linesSummary(o)}</span></div><div class="m"><span>${o.wh} · ${o.carrier||'proposed'}</span><span class="num">${o.sched?o.sched.split('·')[1]:'accept?'}</span></div></div>`).join('')}
+    </div>`).join('')}
+  </div>
+  <div class="spec" style="margin-top:16px"><b>Mark delivered</b> lives here and in the rep app: date/time (default now), lot # per line (dropdown from recent brews), actual qty, empties picked up by keg size, optional signature. Submitting mints the BOL #, writes ledger + custody, updates the Sheet, and enqueues the invoice.</div>`;
+};
+
+/* ---------------- Inventory ---------------- */
+VIEWS.inventory = () => {
+  const skus=[['CNT1AKHB01','Cantinesca','½ bbl',[14,9,6,'—'],10],['CNT1AKSB01','Cantinesca','⅙ bbl',[22,18,11,'—'],10],['CNT1AC1224','Cantinesca','case 12oz×24',[40,26,58,'—'],20],['SGB1AKHB01','Sunlight Groove BA','½ bbl',[8,12,'—','—'],10],['SGB1AKSB01','Sunlight Groove BA','⅙ bbl',[6,4,'—','—'],10],['SGB1AC1224','Sunlight Groove BA','case 12oz×24',[31,17,'—','—'],20],['SGS1AKHB01','Sunlight Groove SoCal','½ bbl',['—','—',9,'—'],10],['GSP1AKHB01','Giro Splendido','½ bbl',[5,3,2,'—'],6],['GSP1AKSB01','Giro Splendido','⅙ bbl',[7,2,0,'—'],6]];
+  const whs=['WH-BEN Benicia','WH-SF San Francisco','WH-WIL Wilmington','WH-WIN Windsor'];
+  return `<div class="page-head"><div><div class="eyebrow">Inventory · event‑sourced</div><h1>Stock</h1><p>Netted from the ledger on read. “Available for delivery” counts warehouses only, minus units reserved by scheduled orders.</p></div>
+  <div class="actions"><div class="seg"><button class="on">Stock</button><button>Ledger</button><button>Brews</button><button>Facilities</button><button>Keg custody</button></div><button class="btn" onclick="toast('Log movement: BREW · INCOMING · TRANSFER · RETURN · SAMPLE · DESTRUCTION · LOSS')">Log movement</button><button class="btn primary" onclick="toast('Transfer WH-BEN → WH-SF: 2× GSP1AKSB01 · BOL minted on save')">New transfer</button></div></div>
+  <div class="panel flush"><div class="tblwrap"><table class="tbl matrix"><thead><tr><th>SKU</th><th>Product</th><th>Format</th>${whs.map(w=>`<th class="r wh">${w}</th>`).join('')}<th class="r">Available</th><th class="r">Reserved</th><th>vs threshold</th></tr></thead><tbody>
+  ${skus.map(s=>{const av=s[3].filter(x=>x!=='—').reduce((a,b)=>a+b,0);const res=ORDERS.filter(o=>o.stage==='scheduled'||o.stage==='needs_sched').reduce((a,o)=>a+o.lines.filter(l=>l[0]===s[0]).reduce((x,l)=>x+l[2],0),0);const pct=Math.min(100,av/(s[4]*3)*100);return `<tr class="row"><td class="mono small">${s[0]}</td><td><b>${s[1]}</b></td><td>${s[2]}</td>${s[3].map(q=>`<td class="q ${q===0?'out':q!=='—'&&q<s[4]?'low':''}">${q}</td>`).join('')}<td class="r num" style="font-weight:600">${av-res}</td><td class="r num muted">${res}</td><td style="min-width:140px"><div class="bar-h"><i style="width:${pct}%;${av<s[4]?'background:var(--warn)':''}"></i></div><div class="small muted mono" style="margin-top:2px">threshold ${s[4]}</div></td></tr>`}).join('')}
+  </tbody></table></div></div>
+  <div class="grid g3" style="margin-top:16px">
+    <section class="panel"><div class="panel-head"><h3>Reorder alerts</h3><span class="pill warn">1</span></div><div class="ship"><b>GSP1AKSB01 · WH-SF</b><div class="m"><span>2 on hand, 4 reserved Thu</span><span style="color:#f3c46a">short 2</span></div></div><button class="btn sm" onclick="toast('Transfer drafted WH-BEN → WH-SF')">Draft transfer from WH-BEN (7)</button></section>
+    <section class="panel"><div class="panel-head"><h3>Keg custody</h3><span class="small muted">in trade</span></div><div class="kpi" style="border:0;padding:0"><div class="v">41 <span class="muted" style="font-size:16px;font-family:var(--font-body)">kegs</span></div><div class="d">$1,435 deposit exposure · 3 accounts >60 days</div></div><p class="small muted" style="margin:8px 0 0">Balance per account = Σ(delivered − returned). Fills the v1 gap in the Inventory README.</p></section>
+    <section class="panel"><div class="panel-head"><h3>Ledger · latest</h3><a class="small" href="#inventory">All events</a></div><div class="feed small">${[['DELIVERY','CNT1AKHB01 ×2 · WH-BEN → Hopscotch Tavern','09:41'],['DELIVERY','CNT1AKSB01 ×2 · WH-BEN → Hopscotch Tavern','09:41'],['RETURN','CNT1AKSB01 ×1 · Whittier Lager House → WH-WIL','Sep 1'],['TRANSFER','SGB1AC1224 ×20 · BRW-RICH → WH-BEN · BOL-BRW-RICH-260830-001','Aug 30'],['BREW','GSP1AKHB01 ×12 · BRW-RICH','Aug 28']].map(([t,d,w])=>`<div class="ev"><span class="who ${t==='DELIVERY'?'sys':t==='RETURN'?'cus':'ops'}" style="font-size:8px">${t.slice(0,3)}</span><span class="mono">${d}</span><span class="when">${w}</span></div>`).join('')}</div></section>
+  </div>`;
+};
+
+/* ---------------- Documents ---------------- */
+VIEWS.documents = () => `<div class="page-head"><div><div class="eyebrow">Documents · bol.tlmbg.co</div><h1>Bill of Lading Maker</h1><p>One renderer for both paths. Paperwork‑only never touches stock; attaching to a shipment uses the real BOL number.</p></div>
+  <div class="actions"><div class="seg"><button class="on">Paperwork only</button><button>Attach to shipment</button></div><button class="btn">Previously generated · 128</button></div></div>
+  <div class="grid g2">
+    <section class="panel"><h3 style="margin-bottom:12px">Delivery Receipt</h3>
+      <dl class="kv"><dt>Document #</dt><dd class="mono">DR-260902-0031 <span class="small muted">editable · paperwork numbering</span></dd><dt>Date</dt><dd>Sep 2, 2026</dd><dt>Ship to</dt><dd>Hopscotch Tavern · 1180 Grant Ave, San Francisco CA 94133 · Lic 5423xx</dd><dt>Delivery window</dt><dd>Tue/Thu 9–12</dd><dt>Products</dt><dd class="small">2× CNT1AKHB01 lot L26CNT08 · 2× CNT1AKSB01 lot L26CNT08 · 1× CNT‑TAPHANDLE</dd><dt>Weight</dt><dd class="num">436 lb · 5 handling units</dd></dl>
+      <div class="actions" style="margin-top:14px"><button class="btn primary" onclick="toast('Delivery Receipt DR-260902-0031 rendered · saved to Previously generated · no stock change')">Generate &amp; print</button><button class="btn">Add to batch (3 queued)</button><button class="btn ghost">Switch to Freight / Straight BOL</button></div>
+    </section>
+    <section class="panel"><div class="panel-head"><h3>Attach to shipment</h3><span class="pill neutral">warehouse · ops</span></div>
+      <p class="small muted" style="margin:0 0 10px">Pick a planned shipment. The document gets the real <span class="mono">BOL-&lt;Location&gt;-&lt;yymmdd&gt;-&lt;seq&gt;</span> number, and printing offers “Mark delivered now”.</p>
+      ${ORDERS.filter(o=>o.stage==='scheduled').map(o=>`<div class="ship" style="cursor:pointer" onclick="openOrder('${o.id}')"><b>${o.acct} · ${o.inv}</b><div class="m"><span>${linesSummary(o)}</span><span class="num">${o.sched}</span></div></div>`).join('')}
+      <div class="spec" style="margin-top:12px"><b>Roles.</b> <span class="mono">docs_only</span> users (PIN login at bol.tlmbg.co) see only this page in Paperwork‑only mode. The batch queue (≤100) and Previously‑generated log (edit / regenerate) carry over unchanged from the current BOL Maker.</div>
+    </section>
+  </div>`;
+
+/* ---------------- Billing ---------------- */
+VIEWS.billing = () => {
+  const inv=[['INV26275','Hopscotch Tavern','local_error','—','—','send_invoice',672,'no billing email · retry 2/5'],['INV26274','Fog Line Kitchen','open','Sep 30',-28,'send_invoice',403.5,''],['INV26273','Marigold Mercado','open','Sep 26',-24,'send_invoice',380.4,'viewed Sep 1'],['INV26270','Alameda Rowing Club','paid','Sep 1',0,'charge_automatically',540,'ACH pi_3Q…8f'],['INV26268','Highland Park Records','paid','Aug 29',0,'charge_automatically',262,'ACH pi_3Q…c1'],['INV26261','Sunset Taproom','open','Aug 26',7,'send_invoice',495,'overdue · reminder sent by Stripe']];
+  const st={open:'neutral',paid:'good',local_error:'serious'};
+  return `<div class="page-head"><div><div class="eyebrow">Billing · Stripe is the ledger</div><h1>Invoices</h1><p>Stripe holds payment truth; this is the cockpit. Off‑Stripe checks/EFTs are recorded as out‑of‑band payments so Stripe stays honest.</p></div>
+  <div class="actions"><div class="seg"><button class="on">All</button><button>Failed</button><button>Open</button><button>Overdue</button><button>Paid</button></div><button class="btn">Payment setup links</button><button class="btn primary" onclick="toast('Retrying 1 failed invoice job')">Retry failed (1)</button></div></div>
+  <div class="grid g5" style="margin-bottom:16px">${[['Open','$1,278.90','3 invoices'],['Overdue','$495.00','1 · 7 days'],['Paid MTD','$802.00','2 invoices'],['Failed to send','1','needs billing email'],['ACH on file','62%','of active accounts']].map(([l,v,d])=>`<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div><div class="d">${d}</div></div>`).join('')}</div>
+  <div class="panel flush"><div class="tblwrap"><table class="tbl"><thead><tr><th>Invoice #</th><th>Account</th><th>Status</th><th>Due</th><th class="r">Days</th><th>Collection</th><th class="r">Amount</th><th>Note</th><th></th></tr></thead><tbody>
+  ${inv.map(r=>`<tr class="row"><td class="mono">${r[0]}</td><td><b>${r[1]}</b></td><td><span class="pill ${st[r[2]]}">${r[2]}</span></td><td>${r[3]}</td><td class="r num ${r[4]>0?'':'muted'}" style="${r[4]>0?'color:#ffb59a':''}">${r[4]===0?'—':r[4]>0?'+'+r[4]:r[4]}</td><td class="small mono">${r[5]}</td><td class="r num">${money(r[6])}</td><td class="small muted">${r[7]}</td><td class="r">${r[2]==='local_error'?'<button class="btn sm" onclick="event.stopPropagation();toast(\'Billing email saved · invoice sent\')">Fix &amp; send</button>':r[2]==='open'?'<button class="btn sm ghost">Hosted link ↗</button>':''}</td></tr>`).join('')}
+  </tbody></table></div></div>
+  <div class="spec" style="margin-top:16px"><b>Invoice composition (matches INV26277).</b> Line per order line (Item · Item # · UPC · Qty · Unit · Total) → <b>Keg Deposit</b> +$35/keg → <b>Keg Deposit Returned</b> −$35/empty → Tax: Exempt (0.0000%) → footer with the § 25509 / § 25509.1 sentences and “orders@theleopardmark.com”. Custom fields: PO Date, Delivery Date, Sales Rep, License #, our INV #. Due = delivery + terms.</div>`;
+};
+
+/* ---------------- Automations ---------------- */
+VIEWS.automations = () => {
+  const rules=[['Create Stripe customer on new account','account.created → ensureStripeCustomer',1,[1,1,1,1,1,1,1]],['Send ACH setup link','Stripe customer without payment method → email link to billing email (max 1 / 7 days)',1,[1,1,1,1,1,1,1]],['Sheet sync — orders','order.confirmed → Sales tab within seconds; Sheet edits → DB by ownership rule',1,[1,1,1,1,1,1,1]],['Slack — new order / first order','Per‑region channel (#orders‑ba, #orders‑la); thread kept for later replies',1,[1,1,1,1,1,1,1]],['Stock check on confirm','Lines vs available at inventorySource; blocks when short',1,[1,1,1,1,1,1,1]],['Propose delivery slot','Next route day for region, honoring cutoff and account window',1,[1,1,1,1,1,1,1]],['Auto‑schedule · BA','Accept proposals without a human',0,[]],['Auto‑schedule · LA','Accept proposals without a human',0,[]],['Invoice on delivery','shipment.delivered → Stripe invoice to billing email; Net 30 from delivery',1,[1,1,1,1,1,0,1]],['Tomorrow’s deliveries digest','16:00 PT per region · print‑batch link',1,[1,1,1,1,1,1,1]],['Reorder alerts','SKU × warehouse below threshold → #inventory',1,[1,1,1,1,1,1,1]],['Keg custody nudge','Weekly · accounts holding kegs >60 days → rep DM',0,[]],['Nightly Sheet reconcile','02:00 · full diff per tab · conflicts to attention queue',1,[1,1,1,1,1,1,1]]];
+  return `<div class="page-head"><div><div class="eyebrow">Automations</div><h1>Rules &amp; jobs</h1><p>If ops can’t see it here, it doesn’t run. Every run is a row; failures retry with backoff, then land in the dead‑letter queue.</p></div>
+  <div class="actions"><button class="btn" onclick="toast('Reconcile started · 12 tabs')">Run reconcile now</button><button class="btn">Dead‑letter queue (0)</button></div></div>
+  <div class="grid g2" style="margin-bottom:16px">${rules.map(([n,m,on,runs])=>`<div class="rule"><div><h4>${n}</h4><div class="m">${m}</div></div><button class="tog ${on?'on':''}" aria-label="toggle" onclick="this.classList.toggle('on');toast('${n} '+(this.classList.contains('on')?'enabled':'disabled')+' · logged as ops action')"></button><div class="runs">${runs.length?`<span class="spark">${runs.map(r=>`<i class="${r?'':'f'}" style="height:${r?14:8}px"></i>`).join('')}</span><span>7d · ${Math.round(runs.filter(Boolean).length/runs.length*100)}% ok</span>`:'<span>off</span>'}<span style="margin-left:auto"><a href="#automations">runs ↗</a></span></div></div>`).join('')}</div>
+  <div class="grid g3">
+    <section class="panel"><div class="panel-head"><h3>Sheet sync monitor</h3><span class="pill good">healthy</span></div><dl class="kv"><dt>Pending DB→Sheet</dt><dd class="num">0</dd><dt>Last webhook</dt><dd>12s ago · Sales r344 Notes</dd><dt>Conflicts (7d)</dt><dd>1 · Sales “Price (ea)” r341</dd><dt>Tabs mirrored</dt><dd class="small">Sales · Customer Accounts · Inventory Ledger · BOLs · SKU Master · Location Details · Commodities · BOL Maker Log · Reps</dd></dl></section>
+    <section class="panel"><div class="panel-head"><h3>Stripe webhooks</h3><span class="pill good">healthy</span></div><dl class="kv"><dt>Last event</dt><dd class="mono">evt_1Q…9d · invoice.sent</dd><dt>Processed 24h</dt><dd class="num">14</dd><dt>Duplicates ignored</dt><dd class="num">2</dd><dt>Signature failures</dt><dd class="num">0</dd></dl></section>
+    <section class="panel"><div class="panel-head"><h3>Job runner</h3><span class="pill warn">1 retrying</span></div><dl class="kv"><dt>Queued</dt><dd class="num">3</dd><dt>Running</dt><dd class="num">0</dd><dt>Retrying</dt><dd><span class="mono">issue_invoice:01J6Z…V3</span> · attempt 2/5 · next 09:51</dd><dt>Dead</dt><dd class="num">0</dd></dl></section>
+  </div>`;
+};
+
+/* ---------------- Settings ---------------- */
+VIEWS.settings = () => `<div class="page-head"><div><div class="eyebrow">Settings</div><h1>Settings</h1><p>Users &amp; roles, location scoping, SKUs, route schedule, Slack channels, Sheet tab mapping, cutover flags.</p></div></div>
+  <div class="grid g3">
+    <section class="panel"><h3 style="margin-bottom:10px">Users &amp; roles</h3>${[['Jack Begley','admin','all locations'],['Dany','ops · rep','LA · WH-WIL'],['Juan Carlos','ops','breweries'],['Warehouse — Benicia','warehouse','WH-BEN'],['Daniel','docs_only','—']].map(u=>`<div style="display:flex;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px"><span class="avatar" style="width:24px;height:24px;font-size:10px">${u[0].split(' ').map(w=>w[0]).join('').slice(0,2)}</span><span style="flex:1">${u[0]}</span><span class="pill neutral">${u[1]}</span><span class="small muted">${u[2]}</span></div>`).join('')}</section>
+    <section class="panel"><h3 style="margin-bottom:10px">Route schedule</h3><table class="tbl"><thead><tr><th>Region</th><th>Warehouse</th><th>Days</th><th>Cutoff</th></tr></thead><tbody><tr><td><span class="region">BA</span></td><td>WH-SF · WH-BEN</td><td>Tue · Thu</td><td class="num">14:00 prior day</td></tr><tr><td><span class="region">LA</span></td><td>WH-WIL</td><td>Wed · Fri</td><td class="num">14:00 prior day</td></tr></tbody></table><p class="small muted" style="margin:10px 0 0">Seeded from the answers to §12 of the build prompt — do not guess.</p></section>
+    <section class="panel"><h3 style="margin-bottom:10px">Cutover flags</h3>${[['Rep app → Postgres API',0],['Inventory tabs mirrored from DB',1],['bol.tlmbg.co → /docs',1],['ach.tlmbg.co → /ops/billing',1],['Retire legacy Apps Script order path',0]].map(f=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px"><span>${f[0]}</span><span class="tog ${f[1]?'on':''}"></span></div>`).join('')}</section>
+  </div>`;
+
+/* ---------------- UI states (spec panel) ---------------- */
+VIEWS.states = () => `<div class="page-head"><div><div class="eyebrow">Spec</div><h1>UI states &amp; tokens</h1><p>Every list and panel ships these four states. Tokens below are the ones to reuse from <span class="mono">public/rep-app/assets/css/app.css</span>.</p></div></div>
+  <div class="states" style="margin-bottom:16px">
+    <div class="state"><div class="skel"></div><div class="skel s"></div><div class="skel"></div><span>Loading · skeleton, never a spinner in tables</span></div>
+    <div class="state"><b style="color:var(--ink)">Nothing needs you.</b><span>14 orders are moving on their own.</span><span class="small">Empty · say what “empty” means here</span></div>
+    <div class="state"><span class="pill serious">Couldn’t reach the Sheet</span><span>Orders saved; Sheet mirror will retry in 30s.</span><button class="btn sm">Retry now</button></div>
+    <div class="state"><span class="pill neutral">warehouse role</span><span>You can mark deliveries and log movements at WH-BEN. Ask an admin for more.</span></div>
+  </div>
+  <div class="grid g2">
+    <section class="panel"><h3 style="margin-bottom:10px">Stage ramp (progress, sequential)</h3><div style="display:flex;gap:6px;flex-wrap:wrap">${STAGES.map((s,i)=>`<span class="stage ${s.s}"><i></i>${i+1} ${s.n}</span>`).join('')}<span class="stage blocked"><i></i>Blocked overlay</span></div><p class="small muted" style="margin:10px 0 0">Stages are progress, so they use one blue→white ramp. Blocked is a status overlay in <span class="mono">--serious</span> and is never a column.</p></section>
+    <section class="panel"><h3 style="margin-bottom:10px">Status (reserved)</h3><div style="display:flex;gap:6px;flex-wrap:wrap"><span class="pill good">good · in sync · paid</span><span class="pill warn">warning · retrying · low stock</span><span class="pill serious">serious · blocked · failed</span><span class="pill critical">critical · compliance</span><span class="pill neutral">neutral</span></div><p class="small muted" style="margin:10px 0 0">Always icon/label + color, never color alone. Accent <span class="mono">#3987e5</span> is for interaction, not status. Series palette for charts: #3987e5 · #d95926 · #199e70 · #c98500 · #d55181 (validated on #0d1b33).</p></section>
+  </div>`;
+
+route();
+</script>
+</body></html>

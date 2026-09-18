@@ -7,6 +7,7 @@
 // for the exact request/response shape; `app/api/sheet-sync/webhook/route.ts`
 // is this file's counterpart for the Sheet -> DB direction.
 import { db } from "@/lib/db";
+import { SHEET_MIRRORABLE_STATUSES, mayMirrorToSheet } from "@/lib/sheetColumns";
 import type { Prisma } from "@/app/generated/prisma/client";
 
 // ---------- Pure payload builder ----------
@@ -68,6 +69,12 @@ export interface SyncOrderBody {
   notes: string;
   invoiceStatus: string;
   lines: SyncOrderLineInput[];
+  // Whether this is the account's first order ever -- computed here, not on
+  // the Apps Script side, since Postgres (not the Sheet) is what has the
+  // account's order history now. Apps Script uses this to decide between
+  // the ":tada: FIRST ORDER" and ":beer: NEW ORDER" Slack message variants,
+  // matching what handleOrder's rep-app path has always done.
+  isFirstOrder: boolean;
 }
 
 export type SyncOrderPayload = SyncOrderBody & { secret: string };
@@ -84,6 +91,7 @@ export function buildSyncOrderPayload(
   lines: SyncOrderLineInput[],
   account: SyncOrderAccountInput,
   rep: SyncOrderRepInput | null,
+  isFirstOrder: boolean,
 ): SyncOrderBody {
   return {
     action: "syncOrder",
@@ -105,6 +113,7 @@ export function buildSyncOrderPayload(
       price: line.price,
       lineTotal: line.lineTotal,
     })),
+    isFirstOrder,
   };
 }
 
@@ -114,6 +123,13 @@ export interface SyncOrderResult {
   ok: boolean;
   alreadySynced?: boolean;
   error?: string;
+  // Present only on a fresh (non-replayed) successful sync -- Apps Script
+  // posts the order notification via Slack's chat.postMessage (not an
+  // Incoming Webhook, which can't return this) and echoes back where it
+  // landed. Lets the rep app's confirmation screen deep-link straight to
+  // that message's thread.
+  slackChannel?: string;
+  slackTs?: string;
 }
 
 async function recordSyncLog(
@@ -159,6 +175,18 @@ export async function syncOrderToSheet(orderId: string): Promise<SyncOrderResult
     return { ok: false, error: `Order not found: ${orderId}` };
   }
 
+  // The compliance gate, enforced here rather than at each call site. A draft
+  // or pending_confirmation order is not yet a binding order (§1.1 -- the
+  // customer's confirmation is the moment of contract formation), and writing
+  // it into the Sales tab would put a non-order onto the sheet the business
+  // invoices from. Refuse rather than mirror, whoever asked.
+  if (!mayMirrorToSheet(order.status)) {
+    return {
+      ok: false,
+      error: `Order ${orderId} is ${order.status}; only ${SHEET_MIRRORABLE_STATUSES.join("/")} orders mirror to the Sheet`,
+    };
+  }
+
   const lines: SyncOrderLineInput[] = order.lines.map((line) => ({
     productName: line.product.productName,
     packagingFormat: `${line.product.formatLabel} (${line.product.formatDetail})`,
@@ -179,6 +207,15 @@ export async function syncOrderToSheet(orderId: string): Promise<SyncOrderResult
 
   const rep = order.salesRep ?? order.account.salesRep ?? null;
 
+  // "First order for this account" for the Slack message's :tada: variant --
+  // computed here because Postgres (not the Sheet) is the account's order
+  // history now. Any other order for this account, in any status, counts;
+  // this only needs to answer "has this account ordered before," not "how
+  // many confirmed orders."
+  const priorOrderCount = await db.order.count({
+    where: { accountId: order.accountId, id: { not: order.id } },
+  });
+
   const body = buildSyncOrderPayload(
     {
       id: order.id,
@@ -196,6 +233,7 @@ export async function syncOrderToSheet(orderId: string): Promise<SyncOrderResult
       paymentMethod: order.account.paymentMethod,
     },
     rep ? { name: rep.name } : null,
+    priorOrderCount === 0,
   );
 
   const url = process.env.APPS_SCRIPT_URL;
@@ -215,6 +253,8 @@ export async function syncOrderToSheet(orderId: string): Promise<SyncOrderResult
     alreadySynced?: boolean;
     rowsAppended?: number;
     lineRows?: number[];
+    slackChannel?: string;
+    slackTs?: string;
     error?: string;
   };
   try {
@@ -283,5 +323,5 @@ export async function syncOrderToSheet(orderId: string): Promise<SyncOrderResult
     ...lineUpdates.filter((u): u is NonNullable<typeof u> => u !== null),
   ]);
 
-  return { ok: true, alreadySynced: false };
+  return { ok: true, alreadySynced: false, slackChannel: parsed.slackChannel, slackTs: parsed.slackTs };
 }

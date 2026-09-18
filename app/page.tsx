@@ -1,42 +1,15 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { useEffect, useState } from "react";
-
-// Reps who already installed the old static rep PWA have a home-screen icon
-// whose start_url is frozen to this origin's root. Once this Next.js app
-// takes over "/", their icon would otherwise 404 or land on the customer
-// portal instead of the rep app. `lm_rep` is the exact localStorage key the
-// legacy app.js has always used for session persistence — if it's set, this
-// browser has used the rep app before, so send it straight to the app's new
-// home instead of showing the portal. See plan: "Repo layout & the rep
-// app's installed-PWA risk."
+// The root belongs to the rep app. proxy.ts already redirects "/" to
+// /rep-app before routing reaches this file (see its step 1b), so this is
+// the backstop: without it, a future change to the proxy's matcher would
+// turn the root into a 404 rather than falling through to something safe.
+//
+// What used to be here: a client-side "Customer Ordering — coming soon."
+// placeholder that only forwarded reps whose browser already carried the
+// legacy `lm_rep` localStorage key. A rep arriving fresh, or on a new
+// phone, got the placeholder and no way through -- which is exactly why
+// it's gone.
 export default function RootPage() {
-  const [checked, setChecked] = useState(false);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      if (window.localStorage.getItem("lm_rep")) {
-        window.location.replace("/rep-app/");
-        return;
-      }
-    } catch {
-      // localStorage unavailable (private mode, etc.) — fall through to portal.
-    }
-    setChecked(true);
-  }, []);
-
-  if (!checked) return null;
-
-  return (
-    <main className="auth-screen">
-      <img
-        className="brand-logo"
-        src="/rep-app/assets/icons/brand/logo-alt.svg"
-        alt="The Leopard Mark Brewing Co."
-      />
-      <div className="brand-sub">Customer Ordering</div>
-      <p className="admin-note">Coming soon.</p>
-    </main>
-  );
+  redirect("/rep-app");
 }

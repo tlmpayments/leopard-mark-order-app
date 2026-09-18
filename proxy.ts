@@ -1,17 +1,216 @@
+import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import type { UserRole } from "@/app/generated/prisma/enums";
 
 // Next.js 16 renamed middleware.ts -> proxy.ts (same signature, same
 // execution model — just the file/function name changed). NextAuth's
 // `auth()` wrapper still works as a default export here since Proxy's
 // function contract is unchanged from Middleware's.
+//
+// This file does two jobs:
+//   1. Host routing (§2 rule 1) — six hostnames, one Next.js app.
+//   2. Role gating for the internal surfaces.
+
+/**
+ * Hostname -> path prefix. One deployment serves all these domains; the old
+ * Vercel projects stay deployed and only their DNS moves, last, after
+ * acceptance (§2 rule 1), so a rewrite that goes wrong is a DNS revert rather
+ * than a redeploy.
+ *
+ * `orders.tlmbg.co` is deliberately absent, but no longer for the old reason
+ * (it used to be waiting on the Phase R cutover). It now claims the root via
+ * the redirect in step 1b instead of a rewrite -- see there for why a rewrite
+ * would break every rep who has the PWA installed. Never break the rep app
+ * (§13).
+ */
+const HOST_REWRITES: ReadonlyArray<[hostname: string, prefix: string]> = [
+  ["ops.tlmbg.co", "/ops"],
+  ["inventory.tlmbg.co", "/ops/inventory"],
+  ["bol.tlmbg.co", "/docs"],
+  ["ach.tlmbg.co", "/ops/billing/setup-links"],
+  // The driver's surface. One hostname he can type from the cab, or keep on
+  // his home screen, that lands on today's route and nothing else.
+  ["delivery.tlmbg.co", "/delivery"],
+];
+
+/** Paths that must never be host-rewritten, whatever the hostname. */
+const PASSTHROUGH = ["/api", "/_next", "/rep-app", "/admin", "/customer", "/docs", "/ops", "/delivery", "/unlock", "/favicon"];
+
+/**
+ * The hub's unlock screen. Exempt from the host rewrites above so that every
+ * internal hostname can show it and then send the operator back to the page
+ * they asked for on that same hostname.
+ */
+const UNLOCK = "/unlock";
+
+const HUB_ROLES: readonly UserRole[] = ["admin", "ops", "warehouse"];
+/** Mirrors lib/ops/roles.ts's DELIVERY_ROLES; the proxy cannot import it without
+ *  pulling Prisma into the edge bundle. */
+const DELIVERY_ROLES: readonly UserRole[] = ["admin", "ops", "warehouse", "driver"];
+
 export default auth((req) => {
   const { pathname } = req.nextUrl;
-  const isLoginPage = pathname === "/admin/login";
-  if (pathname.startsWith("/admin") && !isLoginPage && !req.auth) {
-    return Response.redirect(new URL("/admin/login", req.nextUrl));
+  const host = req.headers.get("host")?.split(":")[0]?.toLowerCase() ?? "";
+  const role = req.auth?.role as UserRole | undefined;
+
+  // ---- 1. Host routing ----------------------------------------------------
+  // Resolved first but APPLIED last (step 3), so the gates below see the path
+  // that will actually be served. Returning the rewrite here -- which is what
+  // this did until the hub got a PIN -- meant ops.tlmbg.co/ was never role-
+  // gated by the proxy at all: the request left before the checks ran, and
+  // only the /ops layout's own `requireOpsUser` stood between a stranger and
+  // the hub. That was true of every bare internal hostname.
+  const rewrite = HOST_REWRITES.find(([h]) => h === host);
+  const hostRewritten = Boolean(rewrite) && !PASSTHROUGH.some((p) => pathname.startsWith(p));
+  // The bare host lands on the surface's root; deeper paths are appended, so
+  // ops.tlmbg.co/orders/123 reaches /ops/orders/123 and links inside the app
+  // keep working whichever hostname the operator arrived on.
+  const path =
+    hostRewritten && rewrite ? (pathname === "/" ? rewrite[1] : `${rewrite[1]}${pathname}`) : pathname;
+
+  // ---- 1b. The rep app owns the root --------------------------------------
+  // orders.tlmbg.co is the one place sales reps go, and the rep app is the
+  // only thing there, so the bare root sends them into it. What used to
+  // answer here -- the "Customer Ordering -- coming soon" placeholder in
+  // app/page.tsx -- is gone.
+  //
+  // A redirect, not a rewrite, and that distinction matters: the PWA's
+  // <base href>, its manifest scope and its service worker scope are all
+  // pinned to /rep-app/. Serving its HTML from / would leave the service
+  // worker registered out of scope and quietly break offline use for every
+  // rep who already has the app installed. Sending them to /rep-app keeps
+  // all three aligned with the URL their home-screen icon already uses.
+  //
+  // Runs after the host rewrites above on purpose: ops, inventory, bol and
+  // ach each claim their own root and have to keep it.
+  if (pathname === "/" && !hostRewritten) {
+    return Response.redirect(new URL("/rep-app", req.nextUrl));
+  }
+
+  // ---- 2. Role gating -----------------------------------------------------
+  // /admin used to be gated on "has any session at all", which was equivalent
+  // to admin-only because the Credentials provider refused everyone else. It
+  // no longer does (five roles share one PIN login), so the role is checked
+  // here explicitly. Without this line, widening the login would have widened
+  // /admin with it.
+  const isAdminLoginPage = path === "/admin/login";
+  if (path.startsWith("/admin") && !isAdminLoginPage) {
+    if (!req.auth) return Response.redirect(new URL("/admin/login", req.nextUrl));
+    if (role !== "admin") {
+      // Send them where they can actually go, in one hop. Bouncing everyone to
+      // /ops and letting the next rule bounce docs_only onward to /docs worked,
+      // but a user watching two redirects go by reasonably concludes something
+      // is broken.
+      return Response.redirect(new URL(landingFor(role), req.nextUrl));
+    }
+  }
+
+  // The Ops Hub: admin, ops and warehouse. Anyone with no session at all gets
+  // the shared-PIN unlock screen (lib/ops/hubPin.ts); a session that exists but
+  // holds the wrong role does not -- a `docs_only` user (the "Daniel" case in
+  // §2 rule 6) exists precisely so someone can print paperwork with a PIN and
+  // reach nothing else, so they are sent to /docs rather than bounced to a
+  // login they have already passed.
+  if (path.startsWith("/ops")) {
+    if (!req.auth) return Response.redirect(unlockUrl(req.nextUrl, path));
+    if (!role || !HUB_ROLES.includes(role)) {
+      return Response.redirect(new URL(landingFor(role), req.nextUrl));
+    }
+  }
+
+  // The driver surface. Its own login page rather than /admin/login: a driver
+  // signing in on a phone at 6am should not land on a screen headed "Admin
+  // Sign In" that redirects him into the hub he cannot open. Everything under
+  // /delivery re-checks ownership of the route server-side -- holding a driver
+  // session is not authority over someone else's stops.
+  //
+  // Deliberately NOT the hub's shared PIN either. The hub's four digits are a
+  // considered trade for a handful of staff at desks; a driver's stop list
+  // carries an account's address and phone number and can mark stock
+  // delivered, and it is attributable to him by name. He types his own PIN
+  // once, or taps his own link.
+  // The public paths under /delivery:
+  //   - the sign-in page;
+  //   - /delivery/k/<token>, which IS the credential and so has to be
+  //     reachable signed-out -- that is the whole point of it;
+  //   - the manifest and the service worker, which the browser fetches before
+  //     any session exists. Gating those does not protect anything (they carry
+  //     no customer data, only the app's name and icons) and quietly breaks
+  //     installability: the browser gets a redirect to an HTML login page where
+  //     it expected JSON, and silently declines to offer the install.
+  const isDeliveryPublic =
+    path === "/delivery/login" ||
+    path === "/delivery/manifest.webmanifest" ||
+    path === "/delivery/sw.js" ||
+    path.startsWith("/delivery/k/");
+  if (path.startsWith("/delivery") && !isDeliveryPublic) {
+    if (!req.auth) return Response.redirect(new URL("/delivery/login", req.nextUrl));
+    if (!role || !DELIVERY_ROLES.includes(role)) {
+      return Response.redirect(new URL(landingFor(role), req.nextUrl));
+    }
+  }
+
+  // /docs needs a session but no particular role -- that is the whole point of
+  // docs_only. Server-side, lib/ops/session.ts still refuses it any ledger
+  // write, which is the check that actually matters.
+  if (path.startsWith("/docs") && !req.auth) {
+    return Response.redirect(unlockUrl(req.nextUrl, path));
+  }
+
+  // Same pattern as /admin above -- /customer/login and /customer/signup
+  // are the two public pages (a prospective customer has no session at all
+  // yet), everything else under /customer needs one. A session alone isn't
+  // enough, though: an admin/rep logged in via Credentials has no
+  // contactId (that's only ever set by auth.ts's jwt callback for the
+  // "resend" provider), so a rep's own session must not be treated as a
+  // valid customer login here.
+  const isPublicCustomerPage = path === "/customer/login" || path === "/customer/signup";
+  if (path.startsWith("/customer") && !isPublicCustomerPage && !req.auth?.contactId) {
+    return Response.redirect(new URL("/customer/login", req.nextUrl));
+  }
+
+  // ---- 3. Apply the host rewrite ------------------------------------------
+  // A rewrite, not a redirect: the operator stays on ops.tlmbg.co instead of
+  // watching the address bar jump to ops.tlmbg.co/ops. It also means the old
+  // bookmarks keep the hostname they were saved with, which is what makes the
+  // DNS cutover reversible without breaking anyone's saved links.
+  if (hostRewritten) {
+    const url = req.nextUrl.clone();
+    url.pathname = path;
+    return NextResponse.rewrite(url);
   }
 });
 
+/**
+ * The unlock screen, remembering where the visitor was headed so that typing
+ * the PIN resumes that page rather than dumping everyone on the hub's root.
+ */
+function unlockUrl(base: URL, pathname: string): URL {
+  const url = new URL(UNLOCK, base);
+  url.searchParams.set("next", pathname);
+  return url;
+}
+
+/**
+ * The surface a role belongs on. `docs_only` and `rep` get the paperwork maker;
+ * everyone who can open the hub gets the hub.
+ */
+function landingFor(role: UserRole | undefined): string {
+  if (role === "driver") return "/delivery";
+  if (role && HUB_ROLES.includes(role)) return "/ops";
+  return "/docs";
+}
+
 export const config = {
-  matcher: ["/admin/:path*"],
+  // Broadened from /admin + /customer: the proxy now also does host routing,
+  // so it has to see the root path and the new surfaces. Static assets and
+  // /rep-app are excluded so the live PWA's request path is untouched.
+  matcher: [
+    "/",
+    "/admin/:path*",
+    "/customer/:path*",
+    "/ops/:path*",
+    "/docs/:path*",
+    "/delivery/:path*",
+  ],
 };

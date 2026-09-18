@@ -1,0 +1,301 @@
+/* ============================================================================
+   delivery.tlmbg.co — the driver's surface.
+
+   Same design language as the rep ordering app (public/rep-app/assets/css/
+   app.css): a warm light ground, foam-white cards, navy ink, and the solid
+   offset "ledge" shadow that compresses when a control is pressed. Two people
+   at this company use two of these apps; they should not look like they came
+   from two companies.
+
+   What is NOT borrowed is the sizing. This is still a phone held in one hand,
+   in a truck, in daylight, sometimes with gloves on: nothing under 15px
+   carries meaning, every control clears 48px, and there are no hover states
+   because there is no cursor.
+   ============================================================================ */
+
+@font-face {
+  font-family: "Bowery Lane";
+  src: url("/rep-app/assets/fonts/BoweryLane-Medium.woff") format("woff");
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Tomato Grotesk";
+  src: url("/rep-app/assets/fonts/TomatoGrotesk-Regular.woff") format("woff");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Tomato Grotesk";
+  src: url("/rep-app/assets/fonts/TomatoGrotesk-Medium.woff") format("woff");
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Bogart";
+  src: url("/rep-app/assets/fonts/Bogart-Semibold.woff") format("woff");
+  font-weight: 600;
+  font-display: swap;
+}
+
+.dv {
+  color-scheme: light;
+
+  /* The rep app's palette, verbatim. */
+  --ink: #102f44;
+  --muted: #697a86;
+  --cream: #fff8ec;
+  --foam: #fffdf8;
+  --line: #e8d8bd;
+  --ground: #d7d8d4;
+
+  --navy: #263b78;
+  --navy-deep: #182852;
+  --coral: #ed633f;
+  --coral-deep: #c74c30;
+  --lager: #efb11d;
+  --lager-deep: #c78708;
+  --good: #16866f;
+  --good-deep: #14584a;
+  --mint: #bcebd5;
+  --sand-deep: #e2d3b9;
+
+  --r: 20px;
+  --r-sm: 14px;
+  --font-body: "Tomato Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Bowery Lane", var(--font-body);
+  --font-serif: "Bogart", Georgia, serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  min-height: 100dvh;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.45;
+  -webkit-text-size-adjust: 100%;
+  background:
+    radial-gradient(circle at 100% 0, rgba(38, 59, 120, 0.12), transparent 31rem),
+    radial-gradient(circle at 0 100%, rgba(83, 89, 88, 0.1), transparent 29rem),
+    var(--ground);
+}
+
+.dv * { box-sizing: border-box; }
+.dv a { color: inherit; text-decoration: none; }
+.dv h1, .dv h2, .dv h3 { font-family: var(--font-display); font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+.dv .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.dv .muted { color: var(--muted); }
+.dv .sm { font-size: 14px; }
+
+.dv-shell { max-width: 560px; margin: 0 auto; padding: 0 18px 40px; }
+
+.dv-top {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 18px 2px 16px; margin-bottom: 20px;
+  border-bottom: 1px solid rgba(207, 191, 166, 0.6);
+}
+.dv-top .id { font-family: var(--font-display); font-size: 24px; letter-spacing: -0.02em; }
+.dv-top .id small {
+  display: block; margin-top: 2px;
+  font-family: var(--font-body); font-size: 11px; font-weight: 600;
+  letter-spacing: 0.11em; text-transform: uppercase; color: var(--muted);
+}
+
+/* ---------- controls ----------
+   The ledge shadow is the rep app's signature: a solid offset below the
+   control plus a soft ambient one, collapsing on :active so the thing
+   physically goes down under a thumb. */
+.dv-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; min-height: 52px; padding: 14px 18px;
+  border: 1px solid var(--line); border-radius: 18px;
+  background: linear-gradient(135deg, var(--foam), #fff4de);
+  color: var(--ink); font: inherit; font-weight: 600; font-size: 16px; text-align: center;
+  box-shadow: 0 7px 0 var(--sand-deep), 0 12px 24px rgba(92, 57, 14, 0.07);
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+.dv-btn:active { transform: translateY(4px); box-shadow: 0 3px 0 var(--sand-deep), 0 7px 14px rgba(92, 57, 14, 0.06); }
+
+.dv-btn.primary {
+  background: var(--navy); border-color: var(--navy); color: var(--foam);
+  box-shadow: 0 8px 0 var(--navy-deep), 0 16px 26px rgba(38, 59, 120, 0.2);
+}
+.dv-btn.primary:active { transform: translateY(4px); box-shadow: 0 4px 0 var(--navy-deep), 0 9px 16px rgba(38, 59, 120, 0.18); }
+
+/* The one affirmative action in the app. Green, and bigger than everything. */
+.dv-btn.go {
+  min-height: 64px; font-size: 19px;
+  background: var(--good); border-color: var(--good); color: var(--foam);
+  box-shadow: 0 9px 0 var(--good-deep), 0 17px 27px rgba(20, 88, 74, 0.18);
+}
+.dv-btn.go:active { transform: translateY(5px); box-shadow: 0 4px 0 var(--good-deep), 0 8px 15px rgba(20, 88, 74, 0.16); }
+
+.dv-btn.quiet {
+  background: rgba(255, 255, 255, 0.72); border-color: var(--line); color: var(--ink);
+  box-shadow: 0 4px 14px rgba(89, 59, 20, 0.06);
+}
+.dv-btn.quiet:active { transform: translateY(2px); }
+
+.dv-btn.danger {
+  background: transparent; border-color: rgba(237, 99, 63, 0.5); color: var(--coral-deep);
+  box-shadow: none;
+}
+.dv-btn.danger:active { transform: translateY(2px); }
+
+.dv-btn:disabled { opacity: 0.5; box-shadow: none; transform: none; }
+.dv-btn.inline { width: auto; min-height: 44px; padding: 10px 15px; border-radius: 999px; font-size: 14px; }
+
+.dv-row { display: flex; gap: 12px; }
+.dv-row > * { flex: 1; }
+
+/* ---------- the route ---------- */
+.dv-route { margin-bottom: 28px; }
+.dv-route-head {
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(207, 191, 166, 0.78);
+  border-radius: 25px; padding: 20px; margin-bottom: 16px;
+  box-shadow: 0 12px 30px rgba(90, 57, 15, 0.08);
+}
+.dv-route-head h2 { font-family: var(--font-serif); font-size: 26px; line-height: 1.05; }
+.dv-route-head .meta { color: var(--muted); font-size: 14px; margin-top: 6px; }
+.dv-route-head .note {
+  margin-top: 14px; padding: 12px 14px; border-radius: var(--r-sm);
+  background: rgba(239, 177, 29, 0.16); border: 1px solid rgba(213, 150, 9, 0.35);
+  color: #7a5406; font-size: 14px;
+}
+
+.dv-prog { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+.dv-prog .bar { flex: 1; height: 10px; border-radius: 5px; background: rgba(16, 47, 68, 0.1); overflow: hidden; }
+.dv-prog .bar i { display: block; height: 100%; background: var(--good); border-radius: 5px; }
+.dv-prog .n { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--muted); }
+
+.dv-stops { display: flex; flex-direction: column; gap: 14px; }
+.dv-stop {
+  display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 14px; align-items: center;
+  min-height: 82px; padding: 16px 16px 16px 14px;
+  background: var(--foam); border: 1px solid #d8c6a6; border-radius: var(--r);
+  box-shadow: 0 8px 0 var(--sand-deep), 0 15px 24px rgba(89, 57, 15, 0.08);
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+.dv-stop:active { transform: translateY(4px); box-shadow: 0 3px 0 var(--sand-deep), 0 8px 15px rgba(89, 57, 15, 0.07); }
+.dv-stop.done { background: #f4fbf7; border-color: rgba(22, 134, 111, 0.35); box-shadow: 0 8px 0 #cfe7dd, 0 15px 24px rgba(20, 88, 74, 0.1); }
+.dv-stop.failed { border-color: rgba(237, 99, 63, 0.45); box-shadow: 0 8px 0 #f0cfc3, 0 15px 24px rgba(193, 67, 34, 0.1); }
+
+.dv-stop .seq {
+  width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--navy); color: var(--foam);
+  font-family: var(--font-mono); font-size: 16px; font-weight: 600;
+}
+.dv-stop.done .seq { background: var(--good); }
+.dv-stop.failed .seq { background: var(--coral); }
+/* Both are spans inside the stop's <a>, so they need to be told to stack --
+   left inline they render as "Zeitgeist6 units". */
+.dv-stop .name { display: block; font-weight: 600; font-size: 18px; line-height: 1.25; }
+.dv-stop .sub { display: block; color: var(--muted); font-size: 14px; margin-top: 3px; }
+.dv-stop .chev { color: #b4a184; font-size: 24px; }
+
+/* Stop zero: the warehouse. Navy while it is the thing to do, and it keeps a
+   row in the list afterwards so the day still reads as "loaded, then four
+   drops" rather than starting mid-story. */
+.dv-stop.pickup.now {
+  background: var(--navy); border-color: var(--navy-deep); color: var(--foam);
+  box-shadow: 0 8px 0 var(--navy-deep), 0 16px 26px rgba(38, 59, 120, 0.2);
+}
+.dv-stop.pickup.now .seq { background: rgba(255, 253, 248, 0.19); color: var(--foam); }
+.dv-stop.pickup.now .sub { color: rgba(255, 253, 248, 0.78); }
+.dv-stop.pickup.done { opacity: 0.72; }
+.dv-stop.pickup:active { transform: none; }
+
+/* ---------- one stop ---------- */
+.dv-card {
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(207, 191, 166, 0.78);
+  border-radius: var(--r); padding: 18px; margin-bottom: 16px;
+  box-shadow: 0 12px 30px rgba(90, 57, 15, 0.08);
+}
+.dv-card h3 {
+  font-family: var(--font-body); font-size: 13px; font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 12px;
+}
+.dv-addr { font-size: 19px; font-weight: 600; line-height: 1.35; }
+.dv-instr {
+  margin-top: 14px; padding: 13px 14px; border-radius: var(--r-sm);
+  background: rgba(239, 177, 29, 0.16); border: 1px solid rgba(213, 150, 9, 0.35);
+  color: #7a5406; font-size: 15px;
+}
+
+.dv-line {
+  display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 14px; align-items: center;
+  padding: 14px 0; border-bottom: 1px solid rgba(207, 191, 166, 0.55);
+}
+.dv-line:last-of-type { border-bottom: 0; padding-bottom: 0; }
+.dv-line .what { font-weight: 600; font-size: 17px; }
+.dv-line .fmt { color: var(--muted); font-size: 14px; margin-top: 2px; }
+.dv-line .lot { margin-top: 10px; }
+
+.dv-in {
+  width: 100%; min-height: 52px; padding: 12px 14px;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--foam); color: var(--ink); font: inherit; font-size: 17px;
+  box-shadow: inset 0 1px 2px rgba(92, 57, 14, 0.04);
+}
+.dv-in.num { text-align: center; font-family: var(--font-mono); font-weight: 600; }
+.dv-in::placeholder { color: #a8b2bb; }
+.dv-in:focus-visible { outline: 2px solid var(--coral); outline-offset: 1px; border-color: var(--coral); }
+.dv-lab { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+
+.dv-pill {
+  display: inline-flex; align-items: center; padding: 6px 13px; border-radius: 999px;
+  font-size: 14px; font-weight: 600;
+}
+.dv-pill.good { background: var(--mint); color: var(--good-deep); }
+.dv-pill.warn { background: rgba(239, 177, 29, 0.24); color: #7a5406; }
+.dv-pill.bad { background: rgba(237, 99, 63, 0.16); color: var(--coral-deep); }
+
+.dv-empty {
+  text-align: center; padding: 52px 22px; color: var(--muted);
+  background: rgba(255, 255, 255, 0.6); border: 1px dashed #c9b795; border-radius: 25px;
+}
+.dv-empty b { display: block; font-family: var(--font-serif); font-size: 24px; color: var(--ink); margin-bottom: 8px; }
+
+/* ---------- proof of delivery ----------
+   Square thumbnails, big enough to tell apart at a glance in daylight; the
+   point is confirming a shot exists and is not of the driver's boot, not
+   examining it. The full photo is an ops-screen concern. */
+.dv-shots {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px; margin-bottom: 14px;
+}
+.dv-shot { position: relative; margin: 0; aspect-ratio: 1; }
+.dv-shot img {
+  width: 100%; height: 100%; object-fit: cover;
+  border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--cream);
+  box-shadow: 0 4px 12px rgba(89, 57, 15, 0.1);
+}
+/* 34px, offset into the corner: reachable by a thumb but not on the path to
+   the shutter button, so a mis-tap deletes nothing. */
+.dv-shot button {
+  position: absolute; top: -7px; right: -7px;
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 1px solid var(--line); background: var(--foam);
+  color: var(--ink); font-size: 15px; line-height: 1; display: grid; place-items: center;
+  box-shadow: 0 3px 8px rgba(89, 57, 15, 0.16);
+}
+.dv-shot button:disabled { opacity: 0.45; }
+
+/* ---------- sign in ---------- */
+.dv-login { max-width: 400px; margin: 0 auto; padding: 56px 18px; text-align: center; }
+.dv-login img { width: min(275px, 80%); margin: 0 auto 14px; display: block; }
+.dv-login .kicker {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.11em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 30px;
+}
+.dv-login form { display: flex; flex-direction: column; gap: 16px; text-align: left; }
+.dv-login .err { color: var(--coral-deep); font-size: 14px; min-height: 20px; text-align: center; }
+
+/* A stop's own action bar sticks to the bottom of the viewport: the driver's
+   thumb is already there, and on a long order the button would otherwise be
+   below three screens of line items. */
+.dv-sticky {
+  position: sticky; bottom: 0; padding: 14px 0 max(14px, env(safe-area-inset-bottom));
+  background: linear-gradient(to top, var(--ground) 62%, rgba(215, 216, 212, 0));
+}

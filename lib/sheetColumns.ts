@@ -110,3 +110,26 @@ export const SHEET_OWNED_ORDER_FIELD: Partial<
 // order, not per line). Flip this to a per-line design only if ops
 // experience shows orders routinely need distinct lot numbers per line.
 export const LOT_NUMBER_COLUMN: SheetOwnedColumn = "Lot #";
+
+/**
+ * The contract-gate statuses a DB -> Sheet mirror is allowed to run for.
+ *
+ * §1.1 of docs/CLAUDE-CODE-BUILD-PROMPT.md: "nothing downstream (invoicing,
+ * Sheet write, fulfillment) may trigger before `confirmed`". Until now that was
+ * guaranteed by there being no automatic caller at all, which
+ * __tests__/confirmation-gate-adjacency.test.ts enforced by grepping the source
+ * tree. Now that the Ops Platform's job runner does mirror orders, the
+ * guarantee moves to the choke-point itself: syncOrderToSheet refuses an order
+ * that has not passed the gate, so no future caller can bypass it either by
+ * accident or by being written before someone reads the test.
+ */
+export const SHEET_MIRRORABLE_STATUSES = ["confirmed", "scheduled", "fulfilled"] as const;
+
+export type SheetMirrorableStatus = (typeof SHEET_MIRRORABLE_STATUSES)[number];
+
+const MIRRORABLE: ReadonlySet<string> = new Set(SHEET_MIRRORABLE_STATUSES);
+
+/** Has this order passed the confirmation gate that makes it real? */
+export function mayMirrorToSheet(status: string): boolean {
+  return MIRRORABLE.has(status);
+}
