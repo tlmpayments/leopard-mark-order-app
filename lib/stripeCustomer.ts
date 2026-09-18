@@ -1,3 +1,4 @@
+import { assertCustomerEmailsEnabled, assertStripeMigrationEnabled } from "@/lib/billing/pilot";
 // Stripe account linking (Phase 9 of
 // /Users/jackbegley/.claude/plans/greedy-snuggling-clarke.md). One shared
 // path for creating a Stripe Customer, called from both hook points --
@@ -12,6 +13,7 @@ import { sendEmail, appBaseUrl } from "@/lib/email";
 import { resolveBillingEmail } from "@/lib/ops/checklist";
 
 export async function ensureStripeCustomer(accountId: string): Promise<string> {
+  assertStripeMigrationEnabled();
   const account = await db.account.findUniqueOrThrow({
     where: { id: accountId },
     include: { contacts: { orderBy: { createdAt: "asc" } } },
@@ -64,6 +66,7 @@ export async function ensureStripeCustomer(accountId: string): Promise<string> {
 export async function sendPaymentSetupLink(
   accountId: string,
 ): Promise<{ sent: boolean; email: string | null; reason?: "no_billing_email" }> {
+  assertCustomerEmailsEnabled();
   // Oldest-first, matching /ops/accounts/[id] and ensureStripeCustomer: with
   // more than one emailed contact, "the ordering contact" has to resolve to
   // the same row in the screen that previews the recipient and the code that

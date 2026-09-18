@@ -26,6 +26,7 @@ import { mintBolNumber } from "@/lib/bol/sequence";
 import { appendOrderEvent } from "@/lib/orderEvents";
 import { enqueue } from "@/lib/jobs/queue";
 import { atPacificHour, pacificDayRange, pacificParts, scheduleOrder } from "@/lib/scheduling";
+import { readPreview, routeSignature } from "@/lib/routePlanning";
 import { deliveryRegionFor } from "@/lib/deliveryRegion";
 import type { OrderEventActor, RouteStatus } from "@/app/generated/prisma/enums";
 
@@ -198,7 +199,6 @@ export async function candidateOrdersForDay(ymd: string, region?: string | null)
       shipment: { select: { fromLocationId: true } },
     },
     orderBy: [{ scheduledFor: "asc" }, { createdAt: "asc" }],
-    take: 200,
   });
 
   // Filter on the DELIVERY region ("BA"), not the account's city, so a route
@@ -254,6 +254,8 @@ export async function addStopToRoute(
   }
 
   const stop = await db.$transaction(async (tx) => {
+    const locked = await tx.deliveryRoute.updateMany({ where: { id: routeId, status: route.status }, data: { routingSnapshot: Prisma.DbNull } });
+    if (!locked.count) throw new Error("The route changed. Reload before adding a stop.");
     const max = await tx.routeStop.aggregate({ where: { routeId }, _max: { sequence: true } });
     return tx.routeStop.create({
       data: { routeId, orderId, sequence: (max._max.sequence ?? 0) + 1 },
@@ -288,6 +290,8 @@ export async function removeStopFromRoute(
   assertRouteOpen(stop.route.status);
 
   await db.$transaction(async (tx) => {
+    const locked = await tx.deliveryRoute.updateMany({ where: { id: stop.routeId, status: stop.route.status }, data: { routingSnapshot: Prisma.DbNull } });
+    if (!locked.count) throw new Error("The route changed. Reload before removing a stop.");
     await tx.routeStop.delete({ where: { id: stopId } });
     // Close the hole so the driver never sees "1, 2, 4".
     const rest = await tx.routeStop.findMany({
@@ -298,7 +302,7 @@ export async function removeStopFromRoute(
     await resequence(tx, rest.map((s) => s.id));
   });
 
-  await appendOrderEvent({
+  if (stop.orderId) await appendOrderEvent({
     orderId: stop.orderId,
     eventType: "route.stop_removed",
     actor: opts.actor ?? "ops",
@@ -314,13 +318,16 @@ export async function removeStopFromRoute(
  * a position. Negatives can never collide with the positives already there.
  */
 export async function reorderRouteStops(routeId: string, orderedStopIds: string[]): Promise<void> {
-  const stops = await db.routeStop.findMany({ where: { routeId }, select: { id: true } });
-  const known = new Set(stops.map((s) => s.id));
-  const ordered = orderedStopIds.filter((id) => known.has(id));
-  if (ordered.length !== stops.length) {
-    throw new Error("Reorder must list every stop on the route exactly once.");
-  }
-  await db.$transaction((tx) => resequence(tx, ordered));
+  await db.$transaction(async tx => {
+    const locked = await tx.deliveryRoute.updateMany({ where: { id: routeId, status: "draft" }, data: { routingSnapshot: Prisma.DbNull } });
+    if (!locked.count) throw new Error("Only draft routes can be reordered.");
+    const stops = await tx.routeStop.findMany({ where: { routeId }, select: { id: true } });
+    const known = new Set(stops.map(s => s.id));
+    if (orderedStopIds.length !== stops.length || new Set(orderedStopIds).size !== stops.length || orderedStopIds.some(id => !known.has(id))) {
+      throw new Error("Reorder must list every stop on the route exactly once.");
+    }
+    await resequence(tx, orderedStopIds);
+  });
 }
 
 /** Move one stop up or down by a position. The list view's arrows. */
@@ -337,7 +344,7 @@ export async function moveStop(stopId: string, direction: "up" | "down"): Promis
 
   const ids = stops.map((s) => s.id);
   [ids[i], ids[j]] = [ids[j], ids[i]];
-  await db.$transaction((tx) => resequence(tx, ids));
+  await reorderRouteStops(stop.routeId, ids);
 }
 
 async function resequence(tx: Prisma.TransactionClient, orderedIds: string[]): Promise<void> {
@@ -350,14 +357,14 @@ async function resequence(tx: Prisma.TransactionClient, orderedIds: string[]): P
 }
 
 export async function assignDriver(routeId: string, driverId: string | null): Promise<void> {
-  await db.deliveryRoute.update({ where: { id: routeId }, data: { driverId } });
+  await db.deliveryRoute.update({ where: { id: routeId }, data: { driverId, routingSnapshot: Prisma.DbNull } });
 }
 
 export async function updateRouteMeta(
   routeId: string,
   data: { name?: string | null; notes?: string | null; warehouseId?: string },
 ): Promise<void> {
-  await db.deliveryRoute.update({ where: { id: routeId }, data });
+  await db.deliveryRoute.update({ where: { id: routeId }, data: { ...data, routingSnapshot: Prisma.DbNull } });
 }
 
 export interface DispatchResult {
@@ -376,18 +383,22 @@ export interface DispatchResult {
  * numbers, because the whole point of minting here is that the number on the
  * paper and the number in the ledger are the same one.
  */
-export async function dispatchRoute(routeId: string, byUserId: string): Promise<DispatchResult> {
+export async function dispatchRoute(routeId: string, byUserId: string, reviewSignature?: string): Promise<DispatchResult> {
   const result = await db.$transaction(
     async (tx) => {
-      const route = await tx.deliveryRoute.findUniqueOrThrow({
-        where: { id: routeId },
-        include: { stops: { orderBy: { sequence: "asc" } } },
-      });
+      await tx.$queryRaw`SELECT id FROM delivery_routes WHERE id = ${routeId} FOR UPDATE`;
+      const route = await tx.deliveryRoute.findUniqueOrThrow({ where: { id: routeId }, include: ROUTE_INCLUDE });
+      if (reviewSignature) {
+        const signature = routeSignature(route.warehouse.address ?? "", route.stops.map(s => ({ id: s.id, address: (s.order?.account.deliveryAddress || s.order?.account.address || s.stopAddress || "").trim() })));
+        if (signature !== reviewSignature || readPreview(route.routingSnapshot)?.signature !== reviewSignature) throw new Error("The route changed. Coordinate the path again before pushing.");
+        const driver = route.driverId ? await tx.rep.findUnique({ where: { id: route.driverId } }) : null;
+        if (!driver?.active || driver.role !== "driver") throw new Error("The assigned driver is no longer active.");
+      }
 
       if (route.status === "cancelled") throw new Error("That route was cancelled.");
       if (route.status !== "draft") {
         const shipments = await tx.shipment.findMany({
-          where: { orderId: { in: route.stops.map((s) => s.orderId) } },
+          where: { orderId: { in: route.stops.flatMap((s) => s.orderId ? [s.orderId] : []) } },
           select: { bolNumber: true },
         });
         return {
@@ -404,6 +415,7 @@ export async function dispatchRoute(routeId: string, byUserId: string): Promise<
       const bolNumbers: string[] = [];
 
       for (const stop of route.stops) {
+        if (!stop.orderId) continue;
         const number = await mintForOrder(tx, stop.orderId, route.warehouseId, dispatchedAt, byUserId);
         bolNumbers.push(number);
       }
@@ -426,6 +438,7 @@ export async function dispatchRoute(routeId: string, byUserId: string): Promise<
     // happened. The Sheet's BOL # column now has a value to receive.
     const stops = await db.routeStop.findMany({ where: { routeId }, select: { orderId: true } });
     for (const s of stops) {
+      if (!s.orderId) continue;
       await enqueue("write_delivery_to_sheet", s.orderId, { orderId: s.orderId }, { orderId: s.orderId });
     }
   }
@@ -527,8 +540,10 @@ export async function mintStopPaperwork(stopId: string, byUserId: string | null)
     where: { id: stopId },
     include: { route: { select: { warehouseId: true } } },
   });
+  if (!stop.orderId) throw new Error("Custom stops do not need delivery paperwork.");
+  const orderId = stop.orderId;
   const number = await db.$transaction((tx) =>
-    mintForOrder(tx, stop.orderId, stop.route.warehouseId, new Date(), byUserId ?? undefined),
+    mintForOrder(tx, orderId, stop.route.warehouseId, new Date(), byUserId ?? undefined),
   );
   await enqueue("write_delivery_to_sheet", stop.orderId, { orderId: stop.orderId }, { orderId: stop.orderId });
   return number;
@@ -654,7 +669,7 @@ export async function failStop(
       completedAt: new Date(),
     },
   });
-  await appendOrderEvent({
+  if (stop.orderId) await appendOrderEvent({
     orderId: stop.orderId,
     eventType: "route.stop_failed",
     actor: opts.actor ?? "ops",
@@ -737,7 +752,7 @@ export function routeManifest(route: RouteWithStops): ManifestLine[] {
   for (const stop of route.stops) {
     // A stop already delivered or written off is not still on the truck.
     if (stop.status === "delivered" || stop.status === "skipped") continue;
-    for (const line of stop.order.lines) {
+    for (const line of stop.order?.lines ?? []) {
       const existing = bySku.get(line.productId);
       if (existing) {
         existing.qty += line.qty;
@@ -764,7 +779,7 @@ export function routeTotals(route: RouteWithStops): { units: number; kegs: numbe
   let units = 0;
   let kegs = 0;
   for (const stop of route.stops) {
-    for (const line of stop.order.lines) {
+    for (const line of stop.order?.lines ?? []) {
       units += line.qty;
       if (line.product.isKeg) kegs += line.qty;
     }

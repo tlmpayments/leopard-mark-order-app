@@ -8,6 +8,9 @@ import { stageOrders, loadOrders } from "@/lib/ops/queries";
 import { money, shortDate, stamp } from "@/lib/ops/format";
 import { StageChip } from "../../_components/StageChip";
 import { sendSetupLinkAction } from "./actions";
+import { sheetLink } from "@/lib/ops/sourceLinks";
+import { isStripeInvoice, stripeSetup } from "@/lib/ops/scope";
+import { deliveryRegionFor } from "@/lib/deliveryRegion";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +45,7 @@ export default async function AccountDetail({ params }: PageProps<"/ops/accounts
   const checklist = accountChecklist({
     ...account,
     contactEmail: account.contacts.find((c) => c.email)?.email ?? null,
-    regionHasWarehouse: account.region ? routeRegions.some((r) => r.region === account.region) : false,
+    regionHasWarehouse: account.region ? routeRegions.some((r) => r.region === deliveryRegionFor(account.region)) : false,
   });
   const billing = resolveBillingEmail({
     billingContactEmail: account.billingContactEmail,
@@ -73,11 +76,13 @@ export default async function AccountDetail({ params }: PageProps<"/ops/accounts
             )}
             {account.creditHold ? <span className="pill serious">credit hold</span> : null}
             <span className="small muted">
-              {account.salesRep?.name ?? "no rep"} · {checklist.doneCount}/9 setup
+              {account.salesRep?.name ?? "no rep"} · {stripeSetup(account).label}
             </span>
           </div>
         </div>
         <div className="actions">
+          <a className="btn" href={sheetLink("Customer Accounts", account.sheetRowRef)} target="_blank" rel="noopener noreferrer">Source record</a>
+          <Link className="btn" href={`/ops/documents?accountId=${account.id}`}>Saved documents</Link>
           <Link className="btn ghost" href="/ops/accounts">
             ← Accounts
           </Link>
@@ -90,8 +95,8 @@ export default async function AccountDetail({ params }: PageProps<"/ops/accounts
             billing.email ? (
               <form action={sendSetupLinkAction}>
                 <input type="hidden" name="accountId" value={account.id} />
-                <button className="btn primary" type="submit" title={`Sends to ${billing.email}`}>
-                  Send payment setup link
+                <button className="btn" type="button" disabled title="Customer emails are paused during the pilot">
+                  Setup emails paused
                 </button>
               </form>
             ) : (
@@ -140,6 +145,7 @@ export default async function AccountDetail({ params }: PageProps<"/ops/accounts
           <section className="panel">
             <h3 style={{ marginBottom: 10 }}>Billing &amp; delivery</h3>
             <dl className="kv">
+              <dt>Billing address</dt><dd>{account.address ?? "Not recorded"}</dd>
               <dt>Billing email</dt>
               <dd>
                 {billing.email ? (
@@ -352,8 +358,8 @@ export default async function AccountDetail({ params }: PageProps<"/ops/accounts
         </div>
         {account.invoices.length === 0 ? (
           <div className="empty">
-            <b>Never invoiced.</b>
-            Invoices are issued when a delivery is marked complete.
+            <b>No invoice records linked here.</b>
+            Review the source sheet and saved documents. Invoice sending is paused.
           </div>
         ) : (
           <div className="tblwrap">
@@ -371,15 +377,15 @@ export default async function AccountDetail({ params }: PageProps<"/ops/accounts
               <tbody>
                 {account.invoices.map((i) => (
                   <tr key={i.id}>
-                    <td className="mono small">{i.invoiceNumber ?? i.stripeInvoiceId.slice(0, 14)}</td>
+                    <td className="mono small"><Link href={`/ops/orders/${i.orderId}`}>{i.invoiceNumber ?? "Open order"}</Link></td>
                     <td>
-                      <span className={`pill ${i.status === "paid" ? "good" : i.status === "local_error" ? "serious" : "neutral"}`}>
-                        {i.status}
+                      <span className={`pill ${isStripeInvoice(i.stripeInvoiceId) && i.status === "paid" ? "good" : i.status === "local_error" ? "serious" : "neutral"}`}>
+                        {isStripeInvoice(i.stripeInvoiceId) ? i.status : "Needs reconciliation"}
                       </span>
                     </td>
-                    <td className="small">{shortDate(i.dueDate)}</td>
+                    <td className="small">{isStripeInvoice(i.stripeInvoiceId) ? shortDate(i.dueDate) : "—"}</td>
                     <td className="r num">{money(i.amountDue)}</td>
-                    <td className="r num muted">{Number(i.amountPaid) ? money(i.amountPaid) : "—"}</td>
+                    <td className="r num muted">{isStripeInvoice(i.stripeInvoiceId) ? money(i.amountPaid) : "Unverified"}</td>
                     <td className="r">
                       {i.hostedInvoiceUrl ? (
                         <a className="btn sm ghost" href={i.hostedInvoiceUrl} target="_blank" rel="noopener">

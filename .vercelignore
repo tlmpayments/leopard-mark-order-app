@@ -1,0 +1,9 @@
+.pilot
+__tests__
+node_modules
+.next
+.env*
+*.tsbuildinfo
+
+.claude
+.windsurf

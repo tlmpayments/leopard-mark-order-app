@@ -1,3 +1,4 @@
+import { syncDeliveryToSheet } from "@/lib/sheetSync";
 /**
  * Job handlers — the side-effecting half of the queue.
  *
@@ -203,13 +204,9 @@ export const HANDLERS: Record<JobKind, JobHandler> = {
 
   write_delivery_to_sheet: async (p) => {
     const orderId = str(p, "orderId");
-    // Delivery facts (Delivery Date, BOL #, Lot #, empties) become DB-owned
-    // once this ships, so they are mirrored to the Sheet by re-running the same
-    // sync the order used. A Sheet outage must never fail a warehouse action,
-    // which is exactly why this is a job and not an inline write.
-    const result = await syncOrderToSheet(orderId);
-    if (!result.ok) throw new Error(result.error ?? "Sheet sync failed");
-    return result.alreadySynced ? "row already present; delivery fields refreshed" : "mirrored to Sheet";
+    const result = await syncDeliveryToSheet(orderId);
+    if (!result.ok) throw new Error(result.error ?? "Delivery update to Sales failed");
+    return "Sales delivery fields updated";
   },
 
   // ---- Periodic ----

@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  outputFileTracingIncludes: {
+    "/*": ["./public/rep-app/assets/icons/brand/logo-alt.svg", "./public/rep-app/assets/icons/brand/logo-lmc.svg"],
+  },
   // Next.js's /public static serving has no directory-index fallback (unlike
   // a traditional static host), so /rep-app and /rep-app/ need an explicit
   // rewrite to the file the rep PWA's manifest/sw.js expect to be served

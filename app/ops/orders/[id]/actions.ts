@@ -1,8 +1,10 @@
 "use server";
 
+import { redirect } from "next/navigation";
+import { prepareOrderInvoice } from "@/lib/documents/orderInvoice";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { assertLocation, assertRole, ADMIN_ROLES, LEDGER_ROLES } from "@/lib/ops/session";
+import { assertLocation, assertRole, ADMIN_ROLES, LEDGER_ROLES, DOCS_ROLES } from "@/lib/ops/session";
 import { markDelivered, parseDeliveredLines } from "@/lib/delivery";
 import { scheduleOrder } from "@/lib/scheduling";
 import { blockOrder, unblockOrder, appendOrderEvent } from "@/lib/orderEvents";
@@ -151,4 +153,11 @@ export async function cancelOrderAction(formData: FormData): Promise<void> {
   });
   revalidatePath(`/ops/orders/${orderId}`);
   revalidatePath("/ops");
+}
+
+export async function prepareOrderInvoiceAction(formData: FormData): Promise<void> {
+  const user = await assertRole(DOCS_ROLES);
+  const document = await prepareOrderInvoice(String(formData.get("orderId") ?? ""), user.name);
+  revalidatePath("/ops/documents");
+  redirect(`/api/documents/archive/${document.id}`);
 }

@@ -1,228 +1,50 @@
 import Link from "next/link";
+import type { WarehouseReport } from "@/lib/inventory/warehouseReport";
 import { db } from "@/lib/db";
-import { availableForDelivery, kegCustodyBalances, stockByLocation } from "@/lib/inventory";
-import { money, stamp } from "@/lib/ops/format";
-
+import { availableForDelivery, stockByLocation } from "@/lib/inventory";
+import { isCoreProduct } from "@/lib/ops/scope";
+import { sheetLink } from "@/lib/ops/sourceLinks";
+import { stamp } from "@/lib/ops/format";
 export const dynamic = "force-dynamic";
-
-/**
- * Inventory (§8.6) — supersedes inventory.tlmbg.co.
- *
- * The matrix is netted from the append-only ledger on read, not from a stored
- * total. "Available for delivery" counts warehouses only and subtracts what
- * scheduled orders have already promised, because two kegs on the shelf that
- * are both on tomorrow's truck are not two kegs you can sell.
- */
-export default async function InventoryPage() {
-  const [stock, availability, custody, recent, locations] = await Promise.all([
-    stockByLocation(),
-    availableForDelivery(),
-    kegCustodyBalances(),
-    db.inventoryEvent.findMany({
-      orderBy: { occurredAt: "desc" },
-      take: 15,
-      include: {
-        product: { select: { skuCode: true } },
-        account: { select: { businessName: true } },
-      },
-    }),
-    db.location.findMany({ where: { active: true }, orderBy: [{ type: "asc" }, { id: "asc" }] }),
+export default async function InventoryPage({ searchParams }: PageProps<"/ops/inventory">) {
+  const params = await searchParams;
+  const selected = typeof params.warehouse === "string" ? params.warehouse : "";
+  const [stock, available, locations, events, snapshots, reports] = await Promise.all([
+    stockByLocation(), availableForDelivery(),
+    db.location.findMany({ where: { active: true, type: "warehouse" }, orderBy: { name: "asc" } }),
+    db.inventoryEvent.findMany({ orderBy: { occurredAt: "desc" }, include: { product: true, account: { select: { businessName: true } }, orderLine: { select: { orderId: true } } } }),
+    db.inventorySnapshot.findMany({ where: { source: "leopard_mark_warehouse" }, orderBy: { snapshotDate: "desc" } }),
+    db.archivedDocument.findMany({where:{docType:"inventory_report"},orderBy:{createdAt:"desc"},select:{id:true,payloadJson:true}}),
   ]);
+  const products = await db.product.findMany({ where: { active: true }, orderBy: { skuCode: "asc" } });
+  const latest = snapshots[0]?.snapshotDate.getTime();
+  const reportRows = snapshots.filter(s => s.snapshotDate.getTime() === latest && isCoreProduct(s.rawProductCode));
+  const warehouses = locations.filter(w => !selected || w.id === selected);
+  const recent = events.filter(e => isCoreProduct(e.product.skuCode, e.product.productName) && (!selected || e.fromLocationId === selected || e.toLocationId === selected)).slice(0, 40);
+  const latestReports = new Map<string, {id:string; report:WarehouseReport}>();
+  for(const saved of reports){const report=saved.payloadJson as unknown as WarehouseReport;if(report.kind!=="warehouse_report")continue;const previous=latestReports.get(report.warehouseId);if(!previous || report.date>previous.report.date)latestReports.set(report.warehouseId,{id:saved.id,report});}
+  return <>
+    <div className="page-head"><div><h1>Inventory</h1><p>Sunlight Groove, Cantinesca and glassware. Open a warehouse to review quantities.</p></div><div className="actions"><Link className="btn primary" href="/ops/inventory/import">Add warehouse report</Link><a className="btn" href={sheetLink("Inventory Ledger")} target="_blank" rel="noopener noreferrer">Open inventory ledger</a></div></div>
+    <form className="list-tools"><select aria-label="Warehouse" name="warehouse" defaultValue={selected}><option value="">All warehouses</option>{locations.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}</select><button className="btn">Apply</button><a href={sheetLink("Production")} target="_blank" rel="noopener noreferrer">Production records</a></form>
+    {[...latestReports.values()].filter(({report})=>!selected||report.warehouseId===selected).map(({id,report})=><section className="panel flush warehouse-panel" key={id}><div className="panel-head"><div><h2>{report.warehouseName}</h2><p className="small muted">Warehouse report · {report.date} · dated quantities</p></div><div className="actions"><a href={`/api/documents/archive/${id}`} target="_blank" rel="noopener noreferrer">Saved report</a><a href={`/api/documents/archive/${id}?source=1`}>Original Excel</a></div></div><div className="tblwrap"><table className="tbl"><thead><tr><th>Product</th><th>Format</th><th className="r">On hand</th><th className="r">Available then</th></tr></thead><tbody>{reportTotals(report).map(r=><tr key={r.code}><td><b>{r.name}</b></td><td>{r.format}</td><td className="r num">{r.onHand}</td><td className="r num"><span className="pill neutral">{r.available}</span></td></tr>)}</tbody></table></div><details style={{padding:"16px 18px"}}><summary>Lot details ({report.rows.length})</summary><div className="tblwrap"><table className="tbl"><thead><tr><th>Product / SKU</th><th>Lot / P.O.</th><th>Packaged</th><th className="r">On hand</th><th className="r">On order</th><th className="r">Available then</th></tr></thead><tbody>{report.rows.map((r,i)=><tr key={i}><td><b>{r.description}</b><div className="small muted">{r.productCode}</div></td><td>{r.lot||"—"}</td><td>{r.packagingDate||"—"}</td><td className="r num">{r.onHand}</td><td className="r num">{r.onOrder}</td><td className="r num"><span className="pill neutral">{r.available}</span></td></tr>)}</tbody></table></div></details><p className="small muted" style={{padding:"0 18px 16px"}}>Match deliveries since this report and the warehouse’s existing commitments before promising stock. Beer lot dates are packaging dates; production records hold brew dates.</p></section>)}
+    <details className="panel" style={{marginBottom:24}}><summary>App ledger balances · reconcile with warehouse reports</summary><p className="small muted">These balances only include recorded app movements. Missing opening stock or historical deliveries can make them incomplete.</p>
+    {warehouses.map(w => <section className="panel flush warehouse-panel" key={w.id}><div className="panel-head"><h2>{w.name}</h2><span className="small muted">{w.city} · {w.id}</span></div><div className="tblwrap"><table className="tbl"><thead><tr><th>Product</th><th>Format</th><th>SKU</th><th className="r">On hand</th><th className="r">Reserved</th><th className="r">Available</th></tr></thead><tbody>
+      {products.filter(p => isCoreProduct(p.skuCode, p.productName)).map(p => { const quantity = stock.find(s => s.locationId === w.id && s.productId === p.id); const a = available.find(s => s.locationId === w.id && s.productId === p.id); return <tr key={p.id}><td><a href={sheetLink("Inventory Ledger")} target="_blank" rel="noopener noreferrer"><b>{p.productName}</b></a></td><td>{p.formatLabel}</td><td className="small">{p.skuCode}</td><td className="r num">{quantity?.onHand ?? "—"}</td><td className="r num">{a?.reserved ?? "—"}</td><td className="r num"><span className={`pill ${a ? a.available > 0 ? "good" : "warn" : "neutral"}`}>{a?.available ?? "Unconfirmed"}</span></td></tr>; })}
+    </tbody></table></div></section>)}
+    </details>
+    {!warehouses.length && <div className="empty">No warehouse matches this selection.</div>}
+    <p className="small muted">These running balances come from the app ledger. A blank balance is unconfirmed. Warehouse report balances are dated snapshots and are not added to the ledger a second time.</p>
+    {!!reportRows.length && <details className="panel" style={{ marginTop: 24 }} open><summary>Wilmington warehouse report · {snapshots[0].snapshotDate.toISOString().slice(0, 10)}</summary><div className="tblwrap"><table className="tbl"><thead><tr><th>Warehouse product code</th><th>Lot / P.O.</th><th className="r">On hand</th><th className="r">On order</th><th className="r">Available</th></tr></thead><tbody>{reportRows.map(r => <tr key={r.id}><td>{r.rawProductCode}</td><td>{r.lotRef ?? "Not recorded"}</td><td className="r num">{r.onHand?.toString() ?? "—"}</td><td className="r num">{r.onOrder?.toString() ?? "—"}</td><td className="r num">{r.available?.toString() ?? "—"}</td></tr>)}</tbody></table></div><p className="small muted">The date inside the beer lot number is the packaging date. Match brewery production records for brew date. Match “On order” commitments before adding reservations.</p></details>}
+    <section className="panel flush" style={{ marginTop: 24 }}><div className="panel-head"><h2>Recent stock history</h2><a href={sheetLink("Inventory Ledger")} target="_blank" rel="noopener noreferrer">Source ledger</a></div><div className="tblwrap"><table className="tbl"><thead><tr><th>Date</th><th>Product / lot</th><th>Movement</th><th className="r">Quantity</th><th>Destination / order</th><th>Source</th></tr></thead><tbody>{recent.map(e => <tr key={e.id}><td className="small">{stamp(e.occurredAt)}</td><td>{e.product.productName}<div className="small muted">{e.lotNumber ?? "Lot not recorded"}</div></td><td>{e.type}</td><td className="r num">{e.qty}</td><td>{e.orderLine ? <Link href={`/ops/orders/${e.orderLine.orderId}`}>{e.account?.businessName ?? "Open order"}</Link> : e.account?.businessName ?? e.toLocationId ?? "—"}</td><td>{e.sheetRowRef ? <a href={sheetLink("Inventory Ledger", e.sheetRowRef)} target="_blank" rel="noopener noreferrer">Sheet row {e.sheetRowRef}</a> : e.refNote ?? "App entry"}</td></tr>)}</tbody></table>{!recent.length && <div className="empty">No stock movements recorded for this selection.</div>}</div></section>
+  </>;
+}
 
-  const warehouses = locations.filter((l) => l.type === "warehouse");
-  const products = [...new Map(stock.map((s) => [s.productId, s])).values()].sort((a, b) =>
-    a.skuCode.localeCompare(b.skuCode),
-  );
-
-  const onHandAt = new Map(stock.map((s) => [`${s.productId}|${s.locationId}`, s.onHand]));
-  const availAt = new Map(availability.map((a) => [`${a.productId}|${a.locationId}`, a]));
-
-  const kegsOut = custody.reduce((s, c) => s + c.balance, 0);
-  const exposure = custody.reduce((s, c) => s + c.depositExposure, 0);
-  const alerts = availability.filter((a) => a.belowThreshold || a.available < 0);
-
-  return (
-    <>
-      <div className="page-head">
-        <div>
-          <div className="eyebrow">Inventory · event-sourced</div>
-          <h1>Stock</h1>
-          <p>
-            Netted from the ledger on read. Corrections are new ADJUSTMENT rows — a ledger row is never edited, so the
-            history always adds up to the present.
-          </p>
-        </div>
-        <div className="actions">
-          <Link className="btn" href="/ops/inventory/movement">
-            Log movement
-          </Link>
-          <Link className="btn primary" href="/ops/inventory/transfer">
-            New transfer
-          </Link>
-        </div>
-      </div>
-
-      {stock.length === 0 ? (
-        <div className="state">
-          <b>The ledger is empty.</b>
-          <span>
-            Stock lives in the spreadsheet&rsquo;s Inventory Ledger tab until{" "}
-            <span className="mono">scripts/migrate-inventory-from-sheet.ts</span> imports it. That script proves parity
-            against the old dashboard SKU by SKU before anything here is trusted.
-          </span>
-        </div>
-      ) : (
-        <div className="panel flush">
-          <div className="tblwrap">
-            <table className="tbl matrix">
-              <thead>
-                <tr>
-                  <th>SKU</th>
-                  <th>Product</th>
-                  <th>Format</th>
-                  {warehouses.map((w) => (
-                    <th className="r wh" key={w.id}>
-                      {w.id}
-                    </th>
-                  ))}
-                  <th className="r">Available</th>
-                  <th className="r">Reserved</th>
-                  <th>vs threshold</th>
-                </tr>
-              </thead>
-              <tbody>
-                {products.map((p) => {
-                  const rows = warehouses.map((w) => availAt.get(`${p.productId}|${w.id}`));
-                  const available = rows.reduce((s, r) => s + (r?.available ?? 0), 0);
-                  const reserved = rows.reduce((s, r) => s + (r?.reserved ?? 0), 0);
-                  const threshold = rows.find((r) => r?.reorderThreshold != null)?.reorderThreshold ?? null;
-                  const pct = threshold ? Math.min(100, (available / (threshold * 3)) * 100) : 100;
-                  return (
-                    <tr className="row" key={p.productId}>
-                      <td className="mono small">{p.skuCode}</td>
-                      <td>
-                        <b>{p.productName}</b>
-                      </td>
-                      <td>{p.formatLabel}</td>
-                      {warehouses.map((w) => {
-                        const q = onHandAt.get(`${p.productId}|${w.id}`);
-                        const a = availAt.get(`${p.productId}|${w.id}`);
-                        return (
-                          <td
-                            className={`q ${q === 0 || q == null ? "" : a?.available != null && a.available < 0 ? "out" : a?.belowThreshold ? "low" : ""}`}
-                            key={w.id}
-                          >
-                            {q ?? "—"}
-                          </td>
-                        );
-                      })}
-                      <td className="r num" style={{ fontWeight: 600 }}>
-                        {available}
-                      </td>
-                      <td className="r num muted">{reserved || "—"}</td>
-                      <td style={{ minWidth: 140 }}>
-                        {threshold ? (
-                          <>
-                            <div className="bar-h">
-                              <i
-                                style={{
-                                  width: `${Math.max(0, pct)}%`,
-                                  background: available <= threshold ? "var(--warn)" : undefined,
-                                }}
-                              />
-                            </div>
-                            <div className="small muted mono" style={{ marginTop: 2 }}>
-                              threshold {threshold}
-                            </div>
-                          </>
-                        ) : (
-                          <span className="small muted">no threshold set</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      <div className="grid g3" style={{ marginTop: 16 }}>
-        <section className="panel">
-          <div className="panel-head">
-            <h3>Reorder alerts</h3>
-            <span className={`pill ${alerts.length ? "warn" : "good"}`}>{alerts.length || "clear"}</span>
-          </div>
-          {alerts.length === 0 ? (
-            <p className="small muted" style={{ margin: 0 }}>
-              Every SKU is above its reorder threshold at every warehouse.
-            </p>
-          ) : (
-            alerts.slice(0, 6).map((a) => (
-              <div className="ship" key={`${a.productId}-${a.locationId}`}>
-                <b>
-                  {a.skuCode} · {a.locationId}
-                </b>
-                <div className="m">
-                  <span>
-                    {a.onHand} on hand, {a.reserved} reserved
-                  </span>
-                  <span style={{ color: a.available < 0 ? "var(--serious-ink)" : "var(--warn-ink)" }}>
-                    {a.available < 0 ? `oversold by ${-a.available}` : `${a.available} available`}
-                  </span>
-                </div>
-              </div>
-            ))
-          )}
-        </section>
-
-        <section className="panel">
-          <div className="panel-head">
-            <h3>Keg custody</h3>
-            <span className="small muted">in trade</span>
-          </div>
-          <div className="kpi" style={{ border: 0, padding: 0 }}>
-            <div className="v">
-              {kegsOut}{" "}
-              <span className="muted" style={{ fontSize: 16, fontFamily: "var(--font-body)" }}>
-                kegs
-              </span>
-            </div>
-            <div className="d">{money(exposure)} deposit exposure across {custody.length} account-SKUs</div>
-          </div>
-          <p className="small muted" style={{ margin: "8px 0 0" }}>
-            Balance per account = Σ(delivered − returned). This is the gap the old Inventory README named outright.
-          </p>
-        </section>
-
-        <section className="panel">
-          <div className="panel-head">
-            <h3>Ledger · latest</h3>
-            <span className="small muted">append-only</span>
-          </div>
-          {recent.length === 0 ? (
-            <p className="small muted" style={{ margin: 0 }}>
-              No events yet.
-            </p>
-          ) : (
-            <div className="feed small">
-              {recent.map((e) => (
-                <div className="ev" key={e.id}>
-                  <span className="who system" style={{ fontSize: 8 }}>
-                    {e.type.slice(0, 3)}
-                  </span>
-                  <span className="mono">
-                    {e.product.skuCode} ×{e.qty} ·{" "}
-                    {e.fromLocationId ?? "—"} → {e.account?.businessName ?? e.toLocationId ?? "—"}
-                  </span>
-                  <span className="when">{stamp(e.occurredAt)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      </div>
-    </>
-  );
+function reportTotals(report:WarehouseReport) {
+  const groups=new Map<string,{code:string;name:string;format:string;onHand:number;available:number}>();
+  for(const row of report.rows){
+    const code=row.productCode.replace('TLM-SBG','TLM-SGB');
+    const value=groups.get(code)??{code,name:/GLW/.test(code)?'Glassware':/CNT/.test(code)?'Cantinesca':'Sunlight Groove',format:/GLW/.test(code)?'Cases · 24 glasses':/AKHB/.test(code)?'½ barrel kegs':/AKSB/.test(code)?'⅙ barrel kegs':'Cases',onHand:0,available:0};
+    value.onHand+=row.onHand;value.available+=row.available;groups.set(code,value);
+  }
+  return [...groups.values()];
 }

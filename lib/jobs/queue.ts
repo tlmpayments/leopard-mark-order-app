@@ -103,6 +103,8 @@ export async function claimDueJobs(limit = 10, now: Date = new Date()): Promise<
     const rows = await tx.$queryRaw<Array<{ id: string }>>`
       SELECT "id" FROM "job_runs"
       WHERE "status" IN ('queued', 'failed') AND "run_after" <= ${now}
+      -- Retain billing work for later review; the pilot must not consume or retry sends.
+      AND "kind" NOT IN ('ensure_stripe_customer', 'send_payment_setup_link', 'issue_invoice')
       ORDER BY "run_after" ASC
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED

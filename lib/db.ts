@@ -12,7 +12,10 @@ const globalForDb = globalThis as unknown as {
 };
 
 const pool =
-  globalForDb.pool ?? new Pool({ connectionString: process.env.DATABASE_URL });
+  globalForDb.pool ?? new Pool({
+    connectionString: process.env.DATABASE_URL,
+    max: Number(process.env.DATABASE_POOL_MAX) || 10,
+  });
 
 export const db =
   globalForDb.prisma ?? new PrismaClient({ adapter: new PrismaPg(pool) });

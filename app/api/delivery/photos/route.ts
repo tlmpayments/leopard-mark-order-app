@@ -45,6 +45,8 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "That route is not on the road." }, { status: 409 });
   }
 
+  if (!stop.orderId) return NextResponse.json({ error: "Photos are supported on order deliveries only." }, { status: 400 });
+
   const width = Number.parseInt(String(form.get("width") ?? ""), 10);
   const height = Number.parseInt(String(form.get("height") ?? ""), 10);
 

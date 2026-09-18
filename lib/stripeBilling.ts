@@ -1,3 +1,4 @@
+import { assertInvoiceSendingEnabled } from "@/lib/billing/pilot";
 // Stripe invoice issuance (Phase 10 of
 // /Users/jackbegley/.claude/plans/greedy-snuggling-clarke.md). Called from
 // Phase 3 Stage 2's `order` action right after an Order+OrderLines are
@@ -21,6 +22,7 @@ function termsToDays(terms: string | null): number {
 }
 
 export async function issueOrderInvoice(orderId: string): Promise<void> {
+  assertInvoiceSendingEnabled();
   const order = await db.order.findUniqueOrThrow({
     where: { id: orderId },
     include: {

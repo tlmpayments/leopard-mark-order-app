@@ -1,3 +1,4 @@
+import { assertCustomerEmailsEnabled } from "@/lib/billing/pilot";
 // Minimal Resend REST call for transactional emails outside the NextAuth
 // magic-link flow (which already sends its own mail internally via
 // next-auth/providers/resend -- see auth.ts). Not using the `resend` SDK
@@ -14,6 +15,7 @@ export async function sendEmail({
   subject: string;
   html: string;
 }): Promise<void> {
+  assertCustomerEmailsEnabled();
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.RESEND_FROM_EMAIL;
   if (!apiKey || !from) {

@@ -1,200 +1,63 @@
 import Link from "next/link";
-import { PIPELINE_STAGES, STAGE_LABELS, stageIndex, type PipelineStage } from "@/lib/pipeline";
-import { loadOrders, stageOrders, type StagedOrder } from "@/lib/ops/queries";
-import { age, linesSummary, money, money0 } from "@/lib/ops/format";
-import { StageChip } from "../_components/StageChip";
-
+import { CarrierDeliveryButton } from "./CarrierDeliveryButton";
+import { carrierDeliveryDay, carrierDeliveryProblem } from "@/lib/ops/carrierDelivery";
+import { deliveryRegionFor } from "@/lib/deliveryRegion";
+import { todayYmd } from "@/lib/routes";
+import { pacificDayRange } from "@/lib/scheduling";
+import { loadOrders, type OpsOrder } from "@/lib/ops/queries";
+import { availableForDelivery, type AvailabilityRow } from "@/lib/inventory";
+import { inMarket, marketParam } from "@/lib/ops/scope";
+import { sheetLink } from "@/lib/ops/sourceLinks";
+import { money, shortDate } from "@/lib/ops/format";
+import { MarketFilter } from "../_components/MarketFilter";
 export const dynamic = "force-dynamic";
-
-const CHANNEL_LABELS: Record<string, string> = { rep_app: "rep app", portal: "portal", sms: "SMS" };
-
-/**
- * Orders (§8.2) — board and table over the same data.
- *
- * Board and table are two views of one query, switched by a URL param rather
- * than client state, so a link to "the LA orders as a table" is a real link
- * someone can paste into Slack.
- */
 export default async function OrdersPage({ searchParams }: PageProps<"/ops/orders">) {
   const params = await searchParams;
-  const stageFilter = firstParam(params.stage) as PipelineStage | undefined;
-  const view = firstParam(params.view) === "table" || stageFilter ? "table" : "board";
-  const region = firstParam(params.region);
-
-  const orders = stageOrders(await loadOrders({})).filter((o) => o.pipeline.stage !== "cancelled");
-  const scoped = region ? orders.filter((o) => o.account.region === region) : orders;
-  const listed = stageFilter ? scoped.filter((o) => o.pipeline.stage === stageFilter || stageKeyOf(o) === stageFilter) : scoped;
-
-  const regions = [...new Set(orders.map((o) => o.account.region).filter(Boolean))] as string[];
-
-  return (
-    <>
-      <div className="page-head">
-        <div>
-          <div className="eyebrow">Orders</div>
-          <h1>{stageFilter ? STAGE_LABELS[stageFilter] : "All open orders"}</h1>
-          <p>
-            Every stage change writes an order event. Blocked orders keep their column — blocked is an overlay, not a
-            stage.
-          </p>
-        </div>
-        <div className="actions">
-          <div className="seg">
-            <Link className={view === "board" ? "on" : ""} href="/ops/orders">
-              Board
-            </Link>
-            <Link className={view === "table" ? "on" : ""} href="/ops/orders?view=table">
-              Table
-            </Link>
-          </div>
-          {regions.length > 1 ? (
-            <div className="seg">
-              <Link className={!region ? "on" : ""} href={`/ops/orders?view=${view}`}>
-                All
-              </Link>
-              {regions.map((r) => (
-                <Link key={r} className={region === r ? "on" : ""} href={`/ops/orders?view=${view}&region=${r}`}>
-                  {r}
-                </Link>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      {stageFilter ? (
-        <p style={{ margin: "-6px 0 14px" }}>
-          <Link href="/ops/orders">← all stages</Link>
-        </p>
-      ) : null}
-
-      {orders.length === 0 ? (
-        <div className="state">
-          <b>No orders yet.</b>
-          <span>
-            Reps&rsquo; orders still land in the Sheet via Apps Script. They appear here once the rep app is pointed at
-            this database, or after the historical backfill runs.
-          </span>
-        </div>
-      ) : view === "board" ? (
-        <Board orders={scoped} />
-      ) : (
-        <Table orders={listed} />
-      )}
-    </>
-  );
+  const market = marketParam(params.market);
+  const [all, availability] = await Promise.all([loadOrders({ status: { notIn: ["cancelled", "rejected", "expired", "draft"] } }), availableForDelivery()]);
+  const orders = all.filter(o => inMarket(o.account.region, market));
+  const historical = orders.filter(o => o.invoice?.stripeInvoiceId.startsWith("sheet:") && !o.scheduledFor && !o.deliveredAt && !o.deliveryDate);
+  const historyIds = new Set(historical.map(o => o.id));
+  const needsAction = orders.filter(o => !o.scheduledFor && !o.deliveredAt && !o.deliveryDate && !historyIds.has(o.id));
+  const handled = orders.filter(o => o.scheduledFor || o.deliveredAt || o.deliveryDate);
+  return <>
+    <div className="page-head"><div><h1>Order inbox</h1><p>Review incoming orders, choose stock and schedule delivery.</p></div><a className="btn" href={sheetLink("Sales")} target="_blank" rel="noopener noreferrer">Open sales sheet</a></div>
+    <MarketFilter path="/ops/orders" market={market} />
+    {market === "BA" && <p className="small muted">Express Wine deliveries: schedule the order, then mark it delivered here on its delivery day. No driver app or photo is required. Invoice sending is paused.</p>}
+    <p className="small muted">Past delivery dates from the sheet count as delivered here, per your reporting convention. This does not trigger stock deductions or invoice sending.</p>
+    <section className="inbox-group"><div className="inbox-heading"><h2>Needs review</h2><span className="pill neutral">{needsAction.length}</span></div><OrderRows orders={needsAction} availability={availability} incoming /></section>
+    {!!historical.length && <details className="panel" style={{ marginBottom: 24 }}><summary>Historical records · delivery dates need reconciliation ({historical.length})</summary><p>These imported invoice records have no delivery dates in the app. Check the source sheet before scheduling again or changing inventory.</p><OrderRows orders={historical} availability={availability} /></details>}
+    <section className="inbox-group"><div className="inbox-heading"><h2>Scheduled &amp; handled</h2><span className="pill good">{handled.length}</span></div><OrderRows orders={handled} availability={availability} /></section>
+  </>;
 }
-
-function stageKeyOf(o: StagedOrder): PipelineStage {
-  return PIPELINE_STAGES[stageIndex(o.pipeline)] ?? "new_order";
+function inferredDelivered(order: OpsOrder): boolean {
+  return !!order.deliveryDate && order.deliveryDate < pacificDayRange(todayYmd()).start;
 }
-
-function Board({ orders }: { orders: StagedOrder[] }) {
-  return (
-    <div className="board">
-      {PIPELINE_STAGES.map((key, i) => {
-        // A blocked order sits in the column of the stage it is blocked AT, so
-        // the board still shows where the work actually is.
-        const inCol = orders.filter((o) => stageIndex(o.pipeline) === i);
-        return (
-          <div className="bcol" key={key}>
-            <div className="bh">
-              <span>
-                <i style={{ background: `var(--st${i + 1})` }} />
-                {STAGE_LABELS[key]}
-              </span>
-              <span className="num">{inCol.length}</span>
-            </div>
-            {inCol.length === 0 ? (
-              <div className="small muted" style={{ padding: "10px 4px" }}>
-                Nothing here
-              </div>
-            ) : (
-              inCol.map((o) => (
-                <Link
-                  className={`card${o.pipeline.stage === "blocked" ? " blocked" : ""}`}
-                  key={o.id}
-                  href={`/ops/orders/${o.id}`}
-                >
-                  <div className="a">
-                    <span>{o.account.businessName}</span>
-                    {o.account.region ? <span className="region">{o.account.region}</span> : null}
-                  </div>
-                  <div className="li">{linesSummary(o.lines)}</div>
-                  {o.pipeline.stage === "blocked" ? (
-                    <div className="small" style={{ color: "var(--serious-ink)", marginTop: 4 }}>
-                      {o.blockedReason?.replace(/_/g, " ")}
-                    </div>
-                  ) : null}
-                  <div className="f">
-                    <span>
-                      {o.salesRep?.name ?? "—"} · {CHANNEL_LABELS[o.channel] ?? o.channel} · {age(o.pipeline.since)}
-                    </span>
-                    <span className="num">{money0(o.total)}</span>
-                  </div>
-                </Link>
-              ))
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function Table({ orders }: { orders: StagedOrder[] }) {
-  if (orders.length === 0) {
-    return (
-      <div className="state">
-        <b>Nothing in this stage.</b>
-        <span>Try another stage, or clear the filter.</span>
-      </div>
-    );
+function stockStatus(order: OpsOrder, availability: AvailabilityRow[]) {
+  if (order.deliveredAt || inferredDelivered(order)) return { label: "Delivered", tone: "good" };
+  if (!order.inventorySource) return { label: "Choose warehouse", tone: "neutral" };
+  const wanted = new Map<string, number>();
+  for (const line of order.lines) wanted.set(line.productId, (wanted.get(line.productId) ?? 0) + line.qty);
+  if (!wanted.size) return { label: "Missing line items", tone: "warn" };
+  for (const [productId, qty] of wanted) {
+    const stock = availability.find(a => a.productId === productId && a.locationId === order.inventorySource);
+    if (!stock) return { label: "Verify stock", tone: "warn" };
+    // A scheduled order is already included in reserved stock.
+    const freeForThisOrder = stock.available + (order.scheduledFor ? qty : 0);
+    if (freeForThisOrder < qty) return { label: "Stock short", tone: "serious" };
   }
-  return (
-    <div className="panel flush">
-      <div className="tblwrap">
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th>Invoice #</th>
-              <th>Account</th>
-              <th>Region</th>
-              <th>Lines</th>
-              <th className="r">Total</th>
-              <th>Stage</th>
-              <th>Rep · channel</th>
-              <th>In stage</th>
-            </tr>
-          </thead>
-          <tbody>
-            {orders.map((o) => (
-              <tr className="row" key={o.id}>
-                <td className="mono">
-                  <Link href={`/ops/orders/${o.id}`}>{o.invoiceNumber ?? o.id.slice(0, 10)}</Link>
-                </td>
-                <td>
-                  <b>{o.account.businessName}</b>
-                </td>
-                <td>{o.account.region ? <span className="region">{o.account.region}</span> : "—"}</td>
-                <td className="small">{linesSummary(o.lines)}</td>
-                <td className="r num">{money(o.total)}</td>
-                <td>
-                  <StageChip pipeline={o.pipeline} />
-                </td>
-                <td className="small">
-                  {o.salesRep?.name ?? "—"} · {CHANNEL_LABELS[o.channel] ?? o.channel}
-                </td>
-                <td className="small mono">{age(o.pipeline.since)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
+  return { label: order.lines.every(l => l.lotNumber || !l.product.isKeg) ? "Stock available" : "Stock available · choose lots", tone: "good" };
 }
-
-function firstParam(v: string | string[] | undefined): string | undefined {
-  return Array.isArray(v) ? v[0] : v;
+function OrderRows({ orders, availability, incoming = false }: { orders: OpsOrder[]; availability: AvailabilityRow[]; incoming?: boolean }) {
+  return <div className="panel flush"><div className="tblwrap"><table className="tbl inbox-table"><thead><tr><th>Account / order</th><th>Line items</th><th>Warehouse / stock</th><th>Delivery</th><th className="r">Total</th><th>Action</th></tr></thead><tbody>
+    {orders.map(o => { const stock = stockStatus(o, availability); return <tr key={o.id} className={incoming ? "incoming-order" : ""}>
+      <td><Link href={`/ops/orders/${o.id}`}><b>{o.account.businessName}</b></Link><div className="small muted">{o.invoiceNumber ?? "Number pending"} · {o.account.region ?? "Unassigned"}</div><div className="small muted">{o.salesRep?.name ?? "Rep unassigned"}</div></td>
+      <td>{o.lines.map(l => <div className="order-line" key={l.id}><strong>{l.qty} ×</strong> {l.product.productName} <span className="muted">{l.product.formatLabel}</span>{l.lotNumber && <div className="small muted">Lot {l.lotNumber}</div>}</div>)}</td>
+      <td><Link href={`/ops/inventory${o.inventorySource ? "?warehouse=" + encodeURIComponent(o.inventorySource) : ""}`}><span className={`pill ${stock.tone}`}>{stock.label}</span></Link><div className="small muted">{o.inventorySource ?? "Not selected"}</div></td>
+      <td>{o.deliveredAt ? <>Delivered<div className="small muted">{shortDate(o.deliveredAt)}</div></> : inferredDelivered(o) ? <>Delivered · sheet date<div className="small muted">{shortDate(o.deliveryDate)}</div></> : (o.scheduledFor || o.deliveryDate) ? shortDate(o.scheduledFor || o.deliveryDate) : "Not scheduled"}</td><td className="r num">{money(o.lines.reduce((total, line) => total + Number(line.lineTotal), 0))}</td>
+      <td><Link className={`btn ${incoming ? "primary" : ""}`} href={`/ops/orders/${o.id}${incoming ? "#schedule" : ""}`}>{incoming ? "Schedule delivery" : "Open order"}</Link>
+        {deliveryRegionFor(o.account.region) === "BA" && !o.deliveredAt && <CarrierDeliveryButton orderId={o.id} day={o.scheduledFor ? carrierDeliveryDay(o.scheduledFor) : null} problem={carrierDeliveryProblem(o)} />}
+      </td>
+    </tr>; })}
+  </tbody></table>{!orders.length && <div className="empty">{incoming ? "No orders waiting to be scheduled." : "Scheduled and delivered orders will appear here."}</div>}</div></div>;
 }

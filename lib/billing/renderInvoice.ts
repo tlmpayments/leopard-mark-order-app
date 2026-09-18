@@ -42,6 +42,7 @@ export interface InvoiceDocLine {
 
 export interface InvoiceDocData {
   docType: "invoice";
+  draft?: boolean;
   invoiceNumber: string;
   /** Pre-formatted display strings, so a reprint shows the date it was issued. */
   poDate?: string | null;
@@ -115,7 +116,7 @@ export function renderInvoiceHtml(d: InvoiceDocData): string {
 <div class="inv-doc">
   <div class="inv-header">
     <img class="inv-logo" src="${LOGO_URL}" alt="The Leopard Mark Brewing Co." />
-    <div class="inv-doc-label">Invoice</div>
+    <div class="inv-doc-label">${d.draft ? "Draft invoice" : "Invoice"}</div>
   </div>
   <div class="inv-info-row">
     <div class="inv-company-block">

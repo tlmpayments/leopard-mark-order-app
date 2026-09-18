@@ -31,6 +31,8 @@ export interface PaperworkInvoiceLine {
   depositAmount?: number | null;
   qty: number;
   unitPrice: number;
+  /** Preserve a recorded order total rather than recalculating historical pricing. */
+  recordedLineTotal?: number;
   lot?: string | null;
 }
 
@@ -46,6 +48,7 @@ export interface PaperworkInvoiceInput {
   lines: PaperworkInvoiceLine[];
   /** Empty kegs collected on this delivery, credited at the deposit rate. */
   kegReturnQty?: number;
+  emptiesBySku?: Record<string, number>;
   notes?: string | null;
   preparedBy?: string | null;
 }
@@ -70,7 +73,7 @@ export function buildPaperworkInvoice(input: PaperworkInvoiceInput): InvoiceDocD
     productName: l.productName,
     formatLabel: l.formatLabel,
     qty: Number(l.qty) || 0,
-    lineTotal: lineTotal(l.qty, l.unitPrice),
+    lineTotal: l.recordedLineTotal ?? lineTotal(l.qty, l.unitPrice),
     lotNumber: l.lot ?? null,
     isKeg: l.isKeg,
     depositAmount: l.depositAmount ?? null,
@@ -87,7 +90,7 @@ export function buildPaperworkInvoice(input: PaperworkInvoiceInput): InvoiceDocD
   const firstKegSku = priced.find((l) => l.isKeg)?.skuCode;
   const emptiesBySku = returnQty > 0 ? { [firstKegSku ?? "__empties__"]: returnQty } : {};
 
-  const composed = composeInvoice({ lines: composeLines, emptiesBySku });
+  const composed = composeInvoice({ lines: composeLines, emptiesBySku: input.emptiesBySku ?? emptiesBySku });
 
   // Rebuild the printed rows from the composed items, so what the customer
   // reads is item-for-item what the billing system would send.
@@ -98,7 +101,7 @@ export function buildPaperworkInvoice(input: PaperworkInvoiceInput): InvoiceDocD
     lot: l.lot ?? null,
     qty: Number(l.qty) || 0,
     unitPrice: Number(l.unitPrice) || 0,
-    lineTotal: lineTotal(l.qty, l.unitPrice),
+    lineTotal: l.recordedLineTotal ?? lineTotal(l.qty, l.unitPrice),
     kind: "product",
   }));
 

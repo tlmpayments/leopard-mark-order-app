@@ -98,7 +98,7 @@ function RouteBlock({ route, showDriver }: { route: RouteWithStops; showDriver: 
         {next ? (
           loading ? null : (
             <Link className="dv-btn go" href={`/delivery/stops/${next.id}`} style={{ marginTop: 14 }}>
-              Next stop → {next.order.account.businessName}
+              Next stop → {next.order?.account.businessName ?? next.stopName}
             </Link>
           )
         ) : (
@@ -151,7 +151,7 @@ function RouteBlock({ route, showDriver }: { route: RouteWithStops; showDriver: 
         ) : null}
 
         {route.stops.map((stop) => {
-          const units = stop.order.lines.reduce((n, l) => n + l.qty, 0);
+          const units = stop.order?.lines.reduce((n, l) => n + l.qty, 0) ?? 0;
           return (
             <Link
               className={`dv-stop${stop.status === "delivered" ? " done" : stop.status === "failed" ? " failed" : ""}`}
@@ -160,10 +160,10 @@ function RouteBlock({ route, showDriver }: { route: RouteWithStops; showDriver: 
             >
               <span className="seq">{stop.status === "delivered" ? "✓" : stop.sequence}</span>
               <span>
-                <span className="name">{stop.order.account.businessName}</span>
+                <span className="name">{stop.order?.account.businessName ?? stop.stopName}</span>
                 <span className="sub">
-                  {units} unit{units === 1 ? "" : "s"}
-                  {stop.order.account.deliveryWindow ? ` · ${stop.order.account.deliveryWindow}` : ""}
+                  {stop.order ? `${units} unit${units === 1 ? "" : "s"}` : stop.stopAddress}
+                  {stop.order?.account.deliveryWindow ? ` · ${stop.order?.account.deliveryWindow}` : ""}
                   {stop.status === "failed" ? ` · ${stop.failureReason ?? "not delivered"}` : ""}
                 </span>
               </span>

@@ -1,0 +1,22 @@
+import { afterAll, expect, it, vi } from 'vitest';
+import { prepareOrderInvoice } from '@/lib/documents/orderInvoice';
+import { testDb, closeTestDb, createFixtureOrder } from './helpers';
+vi.mock("@/lib/db", async () => ({db: (await import("./helpers")).testDb}));
+const ids: string[] = [];
+afterAll(async()=>{for(const id of ids)await testDb.archivedDocument.deleteMany({where:{orderId:id}});await closeTestDb();});
+it('draft keeps the source number, agreed price, total and lot without creating an issued invoice',async()=>{
+ const {order}=await createFixtureOrder();ids.push(order.id);
+ await testDb.orderLine.updateMany({where:{orderId:order.id},data:{unitPrice:175,lineTotal:349.99,lotNumber:'01CNT2607151'}});
+ const original=await prepareOrderInvoice(order.id,'Preview Ops');
+ const saved=await testDb.archivedDocument.findUniqueOrThrow({where:{id:original.id}});
+ const data=saved.payloadJson as {invoiceNumber:string;draft:boolean;deliveryDate:string;dueDate:null;lines:Array<{unitPrice:number;lineTotal:number;lot:string}>};
+ expect(saved.docNumber).toBe(order.invoiceNumber);
+ expect(data.invoiceNumber).toBe(order.invoiceNumber);
+ expect(data.draft).toBe(true);
+ expect(data.dueDate).toBeNull();
+ expect(data.deliveryDate).toBe('Not scheduled');
+ expect(data.lines[0]).toMatchObject({unitPrice:175,lineTotal:349.99,lot:'01CNT2607151'});
+ expect(saved.renderedHtml).toContain('data:image/svg+xml;base64,');
+ expect(await testDb.invoice.count({where:{orderId:order.id}})).toBe(0);
+ expect(await testDb.inventoryEvent.count({where:{orderLine:{orderId:order.id}}})).toBe(0);
+});

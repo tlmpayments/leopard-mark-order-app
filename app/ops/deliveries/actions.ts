@@ -14,6 +14,7 @@ import {
   removeStopFromRoute,
   updateRouteMeta,
 } from "@/lib/routes";
+import { deliveryDefaults } from "@/lib/deliveryBuilder";
 import { kickJobs } from "@/lib/jobs/kick";
 
 /**
@@ -37,17 +38,10 @@ function revalidateDispatch(routeId?: string, ymd?: string): void {
 export async function createRouteAction(formData: FormData): Promise<void> {
   const user = await assertRole(LEDGER_ROLES);
   const ymd = String(formData.get("day") ?? "");
-  const region = String(formData.get("region") ?? "").trim();
-  const warehouseId = String(formData.get("warehouseId") ?? "");
-  const driverId = String(formData.get("driverId") ?? "") || null;
-  const name = String(formData.get("name") ?? "");
-
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) throw new Error("Pick a route day");
-  if (!region) throw new Error("Pick a region");
-  if (!warehouseId) throw new Error("Pick a warehouse");
-  await assertLocation(user, warehouseId);
-
-  const route = await createRoute({ ymd, region, warehouseId, driverId, name });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd) || Number.isNaN(Date.parse(`${ymd}T12:00:00Z`))) throw new Error("Pick a route day");
+  const { warehouse, driver } = await deliveryDefaults();
+  await assertLocation(user, warehouse.id);
+  const route = await createRoute({ ymd, region: "LA", warehouseId: warehouse.id, driverId: driver.id, name: "Jose’s delivery" });
   revalidateDispatch(route.id, ymd);
   redirect(`/ops/deliveries/routes/${route.id}`);
 }

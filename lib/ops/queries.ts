@@ -9,6 +9,7 @@
  */
 
 import { db } from "@/lib/db";
+import { isStripeInvoice } from "./scope";
 import {
   PIPELINE_STAGES,
   STAGE_LABELS,
@@ -114,7 +115,7 @@ export function stageOrders(orders: OpsOrder[]): StagedOrder[] {
       blockedReason: o.blockedReason,
       blockedAt: o.blockedAt,
       proposedSlotAt: proposedSlotAt(o),
-      invoice: o.invoice
+      invoice: o.invoice && isStripeInvoice(o.invoice.stripeInvoiceId)
         ? {
             status: o.invoice.status,
             sentAt: o.invoice.sentAt,
@@ -592,6 +593,7 @@ export interface InvoiceWithAging {
   hostedInvoiceUrl: string | null;
   businessName: string;
   accountHref: string;
+  region: string | null;
   orderInvoiceNumber: string | null;
   /** Positive = overdue by this many days. Null unless open with a due date. */
   daysOverdue: number | null;
@@ -600,11 +602,10 @@ export interface InvoiceWithAging {
 export async function invoicesWithAging(now: Date = new Date()): Promise<InvoiceWithAging[]> {
   const rows = await db.invoice.findMany({
     include: {
-      account: { select: { id: true, businessName: true } },
+      account: { select: { id: true, businessName: true, region: true } },
       order: { select: { id: true, invoiceNumber: true } },
     },
     orderBy: { createdAt: "desc" },
-    take: 300,
   });
 
   return rows.map((i) => ({
@@ -622,6 +623,7 @@ export async function invoicesWithAging(now: Date = new Date()): Promise<Invoice
     hostedInvoiceUrl: i.hostedInvoiceUrl,
     businessName: i.account.businessName,
     accountHref: `/ops/accounts/${i.account.id}`,
+    region: i.account.region,
     orderInvoiceNumber: i.order.invoiceNumber,
     daysOverdue:
       i.dueDate && i.status === "open"

@@ -271,7 +271,7 @@ describe("delivery after dispatch", () => {
     const route = await loadRoute(f.route.id);
 
     for (const stop of route!.stops) {
-      await markDelivered({ orderId: stop.orderId, deliveredByUserId: f.driver.id, actor: "ops" });
+      await markDelivered({ orderId: stop.orderId!, deliveredByUserId: f.driver.id, actor: "ops" });
       await testDb.routeStop.update({
         where: { id: stop.id },
         data: { status: "delivered", completedAt: new Date() },
@@ -302,7 +302,7 @@ describe("delivery after dispatch", () => {
     expect(stop.status).toBe("failed");
     expect(stop.failureReason).toBe("closed");
 
-    const order = await testDb.order.findUniqueOrThrow({ where: { id: route!.stops[0].orderId } });
+    const order = await testDb.order.findUniqueOrThrow({ where: { id: route!.stops[0].orderId! } });
     expect(order.deliveredAt).toBeNull();
     expect(order.status).toBe("scheduled");
 
@@ -473,5 +473,37 @@ describe("a BOL number issued outside this system", () => {
     const f = await fixture(1);
     await addStopToRoute(f.route.id, f.orders[0].order.id);
     await expect(setExternalBolNumber(f.orders[0].order.id, "   ")).rejects.toThrow(/required/i);
+  });
+});
+
+describe("custom delivery stops", () => {
+  it("dispatches a custom-only route without creating shipments and settles when completed", async () => {
+    const f = await fixture(0);
+    const stop = await testDb.routeStop.create({ data: { routeId: f.route.id, sequence: 1, stopName: "Supply pickup", stopAddress: "100 Main St, Los Angeles, CA" } });
+    const result = await dispatchRoute(f.route.id, f.driver.id);
+    expect(result.stopCount).toBe(1); expect(result.bolNumbers).toEqual([]);
+    const { routeManifest, routeTotals, settleRouteStatus } = await import("@/lib/routes");
+    const loaded = (await loadRoute(f.route.id))!;
+    expect(routeManifest(loaded)).toEqual([]); expect(routeTotals(loaded)).toEqual({stops:1,units:0,kegs:0});
+    await testDb.routeStop.update({where:{id:stop.id},data:{status:"delivered",completedAt:new Date()}});
+    await settleRouteStatus(f.route.id);
+    expect((await loadRoute(f.route.id))!.status).toBe("completed");
+  });
+  it("keeps custom and order stops in one sequence and only issues order paperwork", async () => {
+    const f = await fixture(1);
+    await addStopToRoute(f.route.id,f.orders[0].order.id);
+    const stop = await testDb.routeStop.create({ data: { routeId:f.route.id,sequence:2,stopName:"Return supplies",stopAddress:"200 Main St, Los Angeles, CA" } });
+    await moveStop(stop.id,"up");
+    expect((await loadRoute(f.route.id))!.stops[0].id).toBe(stop.id);
+    const result = await dispatchRoute(f.route.id,f.driver.id);
+    expect(result.stopCount).toBe(2); expect(result.bolNumbers).toHaveLength(1);
+    await failStop(stop.id,"Closed");
+    expect((await loadRoute(f.route.id))!.stops[0].status).toBe("failed");
+  });
+  it("rejects stale review signatures inside the dispatch transaction", async () => {
+    const f = await fixture(0);
+    await testDb.routeStop.create({data:{routeId:f.route.id,sequence:1,stopName:"Pickup",stopAddress:"123 Main St"}});
+    await expect(dispatchRoute(f.route.id,f.driver.id,"stale-review")).rejects.toThrow("route changed");
+    expect((await loadRoute(f.route.id))!.status).toBe("draft");
   });
 });

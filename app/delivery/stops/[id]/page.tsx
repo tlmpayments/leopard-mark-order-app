@@ -67,6 +67,26 @@ export default async function StopPage({ params }: PageProps<"/delivery/stops/[i
   if (user.role === "driver" && stop.route.driverId !== user.id) redirect("/delivery");
   if (stop.route.status === "draft") redirect("/delivery");
 
+  if (!stop.order) return <main>
+    <Link href="/delivery">‹ Back to the route</Link>
+    <h1>{stop.stopName}</h1><p>Stop {stop.sequence} of {stop.route.stops.length}</p>
+    <p>{stop.stopAddress}</p>
+    <a className="dv-btn go" target="_blank" rel="noopener noreferrer" href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(stop.stopAddress ?? "")}`}>Navigate to stop</a>
+    {stop.notes && <p>{stop.notes}</p>}
+    {stop.status === "pending" && stop.route.status !== "cancelled" ? <>
+      <form action={completeStopAction} style={{ marginTop: 20 }}>
+        <input type="hidden" name="stopId" value={stop.id}/>
+        <label>Notes<textarea name="notes" defaultValue={stop.notes ?? ""}/></label>
+        <button className="dv-btn go">Complete stop</button>
+      </form>
+      <form action={failStopAction} style={{ marginTop: 20 }}>
+        <input type="hidden" name="stopId" value={stop.id}/>
+        <label>Reason<input name="reason" required /></label>
+        <button className="dv-btn">Unable to complete</button>
+      </form>
+    </> : <p>{stop.status === "delivered" ? "Stop completed" : stop.status}</p>}
+  </main>;
+
   const order = stop.order;
   const account = order.account;
   const address = account.deliveryAddress ?? account.address ?? null;

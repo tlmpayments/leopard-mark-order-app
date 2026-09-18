@@ -91,6 +91,7 @@ function doPost(e) {
     if (body.action === 'updateCustomer') return respond(handleUpdateCustomer(body.customer));
     if (body.action === 'setPin') return respond(handleSetPin(body.name, body.pin));
     if (body.action === 'syncOrder') return respond(handleSyncOrder(body));
+    if (body.action === 'syncDelivery') return respond(handleSyncDelivery(body));
     if (body.action === 'marketingOrder') return respond(handleMarketingOrder(body));
     if (body.action === 'writeOrderIds') return respond(handleWriteOrderIds(body));
     return respond({ ok: false, error: 'Unknown action' });
@@ -2510,4 +2511,37 @@ function configureMarketingSlack() {
         : 'Check SLACK_BOT_TOKEN in Script Properties.';
   Logger.log('SLACK_CHANNEL_MARKETING set to ' + CHANNEL_ID + ', but the test post FAILED: ' + res.error + ' -- ' + hint);
   return { ok: false, channel: CHANNEL_ID, posted: false, error: res.error, hint: hint };
+}
+
+// Delivery confirmation updates only existing Sales rows, never order contents.
+// Deploy after renewing the Google Apps Script connection.
+function handleSyncDelivery(body) {
+  var secret = PropertiesService.getScriptProperties().getProperty('SYNC_SHARED_SECRET');
+  if (!secret || body.secret !== secret) return { ok: false, error: 'Unauthorized' };
+  if (!body.orderId || !/^\d{4}-\d{2}-\d{2}$/.test(body.deliveredDate || '')) return { ok: false, error: 'Missing delivery identity or date' };
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SALES_SHEET_NAME);
+    if (!sheet) return { ok: false, error: 'Sales tab not found' };
+    var hc = getSalesHeaderAndCol(sheet);
+    var normalized = hc.header.map(function (h) { return String(h).trim().toLowerCase(); });
+    var orderCol = normalized.indexOf('order id');
+    var deliveredCol = normalized.indexOf('delivered');
+    var dateCol = normalized.indexOf('delivery (invoice) date');
+    if (orderCol < 0 || deliveredCol < 0 || dateCol < 0) return { ok: false, error: 'Sales delivery headers are missing; no cells changed' };
+    var count = sheet.getLastRow() - hc.headerRowNumber;
+    if (count <= 0) return { ok: false, error: 'No Sales rows found' };
+    var ids = sheet.getRange(hc.headerRowNumber + 1, orderCol + 1, count, 1).getValues();
+    var rows = [];
+    ids.forEach(function (r, i) { if (String(r[0]).trim() === body.orderId) rows.push(hc.headerRowNumber + 1 + i); });
+    if (!rows.length) return { ok: false, error: 'Order ID not found in Sales; link existing rows before retrying' };
+    var date = Utilities.parseDate(body.deliveredDate, SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone(), 'yyyy-MM-dd');
+    rows.forEach(function (row) {
+      sheet.getRange(row, dateCol + 1).setValue(date);
+      sheet.getRange(row, deliveredCol + 1).setValue(true);
+    });
+    SpreadsheetApp.flush();
+    return { ok: true, rowsUpdated: rows.length };
+  } finally { lock.releaseLock(); }
 }

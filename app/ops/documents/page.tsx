@@ -1,193 +1,37 @@
 import Link from "next/link";
+import { pacificDayRange } from "@/lib/scheduling";
 import { db } from "@/lib/db";
-import { loadOrders, stageOrders } from "@/lib/ops/queries";
-import { linesSummary, shortDate, stamp } from "@/lib/ops/format";
-
+import { shortDate, stamp } from "@/lib/ops/format";
+import { todayYmd } from "@/lib/routes";
 export const dynamic = "force-dynamic";
-
-/**
- * Documents (§8.7) — two clearly labelled modes.
- *
- * The two-numbering-schemes situation is the actual problem being removed here.
- * Today the BOL Maker mints `DR-<yymmdd>-####` with four random digits because
- * it has no write access to the ledger, while the Inventory app mints real
- * sequential per-origin BOL numbers. Both are kept, but the difference is now
- * explicit and it means something: a paperwork-only number says "this document
- * moved no stock", and a real BOL number says "this stock actually moved".
- */
-export default async function DocumentsPage() {
-  const [orders, logs] = await Promise.all([
-    loadOrders({ status: { notIn: ["cancelled", "rejected", "expired"] } }).then(stageOrders),
-    db.documentLog.findMany({ orderBy: { updatedAt: "desc" }, take: 40 }),
+const labels: Record<string, string> = { invoice: "Invoice", delivery_receipt: "Delivery receipt / BOL", straight_bol: "Straight BOL", print_batch: "Print batch", inventory_report: "Warehouse report" };
+export default async function DocumentsPage({ searchParams }: PageProps<"/ops/documents">) {
+  const params = await searchParams;
+  const q = String(params.q ?? "").trim();
+  const type = String(params.type ?? "all");
+  const orderId = typeof params.orderId === "string" ? params.orderId : undefined;
+  const accountId = typeof params.accountId === "string" ? params.accountId : undefined;
+  const [archive, legacy, scheduled] = await Promise.all([
+    db.archivedDocument.findMany({ where: {
+      ...(q ? { OR: [{ docNumber: { contains: q, mode: "insensitive" } }, { summary: { contains: q, mode: "insensitive" } }] } : {}),
+      ...(type !== "all" && labels[type] ? { docType: type } : {}), ...(orderId ? { orderId } : {}), ...(accountId ? { accountId } : {}),
+    }, orderBy: { createdAt: "desc" }, select: {id:true,docNumber:true,docType:true,summary:true,createdAt:true,orderId:true,accountId:true} }),
+    db.documentLog.findMany({ orderBy: { date: "desc" }, select: { docNumber: true, docType: true, summary: true, date: true } }),
+    db.order.findMany({ where: { scheduledFor: { gte: pacificDayRange(todayYmd()).start }, deliveredAt: null, status: { notIn: ["cancelled", "rejected", "expired"] } }, include: { account: { select: { businessName: true } } }, orderBy: { scheduledFor: "asc" } }),
   ]);
-
-  const attachable = orders.filter((o) => o.scheduledFor && !o.deliveredAt);
-  const delivered = orders.filter((o) => o.deliveredAt && o.bolNumber).slice(0, 15);
-  const today = new Date().toISOString().slice(0, 10);
-
-  return (
-    <>
-      <div className="page-head">
-        <div>
-          <div className="eyebrow">Documents · bol.tlmbg.co</div>
-          <h1>Bill of Lading Maker</h1>
-          <p>
-            One renderer for both paths. Paperwork-only never touches stock; attaching to a shipment uses the real BOL
-            number and, on print, offers to mark the delivery complete.
-          </p>
-        </div>
-        <div className="actions">
-          <Link className="btn" href="/docs">
-            Paperwork only ↗
-          </Link>
-          <a className="btn primary" href={`/api/documents/print?day=${today}`} target="_blank" rel="noopener">
-            Print today&rsquo;s batch
-          </a>
-        </div>
-      </div>
-
-      <div className="grid g2" style={{ marginBottom: 16 }}>
-        <section className="panel">
-          <div className="panel-head">
-            <h3>Attach to shipment</h3>
-            <span className="pill neutral">warehouse · ops</span>
-          </div>
-          <p className="small muted" style={{ margin: "0 0 10px" }}>
-            Pick a planned shipment. The document carries the real{" "}
-            <span className="mono">BOL-&lt;Location&gt;-&lt;yymmdd&gt;-&lt;seq&gt;</span> number, minted when its route
-            is dispatched — so the copy the driver hands over and the copy in the ledger are the same number.
-          </p>
-          {attachable.length === 0 ? (
-            <div className="empty">
-              <b>No planned shipments.</b>
-              Schedule an order and it appears here.
-            </div>
-          ) : (
-            attachable.map((o) => (
-              <div className="ship" key={o.id}>
-                <b>
-                  {o.account.businessName}{" "}
-                  <span className="muted small mono">{o.invoiceNumber ?? ""}</span>
-                </b>
-                <div className="m">
-                  <span>{linesSummary(o.lines)}</span>
-                  <span className="num">{shortDate(o.scheduledFor)}</span>
-                </div>
-                <div className="m">
-                  <span className="muted">{o.inventorySource ?? "warehouse tbd"}</span>
-                  <span>
-                    <a
-                      className="btn sm"
-                      href={`/api/documents/print?orderId=${o.id}`}
-                      target="_blank"
-                      rel="noopener"
-                    >
-                      Print receipt
-                    </a>{" "}
-                    <Link className="btn sm ghost" href={`/ops/orders/${o.id}`}>
-                      Open
-                    </Link>
-                  </span>
-                </div>
-              </div>
-            ))
-          )}
-        </section>
-
-        <section className="panel">
-          <div className="panel-head">
-            <h3>Issued BOLs</h3>
-            <span className="small muted">real numbers, real stock movement</span>
-          </div>
-          {delivered.length === 0 ? (
-            <div className="empty">
-              <b>No BOLs issued yet.</b>
-              A BOL number is minted when a delivery is marked complete.
-            </div>
-          ) : (
-            <div className="tblwrap">
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>BOL #</th>
-                    <th>Account</th>
-                    <th>Delivered</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {delivered.map((o) => (
-                    <tr key={o.id}>
-                      <td className="mono small">{o.bolNumber}</td>
-                      <td>{o.account.businessName}</td>
-                      <td className="small">{shortDate(o.deliveredAt)}</td>
-                      <td className="r">
-                        <a
-                          className="btn sm ghost"
-                          href={`/api/documents/print?orderId=${o.id}`}
-                          target="_blank"
-                          rel="noopener"
-                        >
-                          Reprint
-                        </a>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-      </div>
-
-      <section className="panel flush">
-        <div className="panel-head">
-          <h3>Previously generated</h3>
-          <span className="small muted">paperwork-only · no ledger effect · {logs.length}</span>
-        </div>
-        {logs.length === 0 ? (
-          <div className="empty">
-            <b>Nothing generated yet.</b>
-            Paperwork-only documents are saved here so they can be reopened, edited and reprinted.
-          </div>
-        ) : (
-          <div className="tblwrap">
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>Document #</th>
-                  <th>Type</th>
-                  <th>Date</th>
-                  <th>Summary</th>
-                  <th>Attached to</th>
-                  <th>Updated</th>
-                </tr>
-              </thead>
-              <tbody>
-                {logs.map((l) => (
-                  <tr key={l.docNumber}>
-                    <td className="mono small">{l.docNumber}</td>
-                    <td className="small">{l.docType === "delivery_receipt" ? "Delivery receipt" : "Straight BOL"}</td>
-                    <td className="small">{shortDate(l.date)}</td>
-                    <td className="small">{l.summary}</td>
-                    <td className="small">
-                      {l.shipmentId ? <span className="pill good">shipment</span> : <span className="muted">—</span>}
-                    </td>
-                    <td className="small mono">{stamp(l.updatedAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      <div className="spec" style={{ marginTop: 16 }}>
-        <b>One renderer.</b> <span className="mono">lib/bol/render.ts</span> is now the only implementation of these
-        two documents. It replaces the copy in the Inventory app and the hand-synced copy in the BOL Maker, which had
-        already drifted apart — the BOL Maker&rsquo;s version had gained SKU and lot columns and the print rules that
-        make the navy bars actually print, so that is the version that was kept.
-      </div>
-    </>
-  );
+  const archivedNumbers = new Set(archive.map(d => d.docNumber));
+  const older = orderId || accountId ? [] : legacy.filter(d => !archivedNumbers.has(d.docNumber) && (type === "all" || d.docType === type) && (!q || (d.docNumber + " " + d.summary).toLowerCase().includes(q.toLowerCase())));
+  return <>
+    <div className="page-head"><div><h1>Documents</h1><p>The company filing cabinet. Saved online and available to signed-in teammates.</p></div><div className="actions"><Link className="btn" href="/docs">Prepare BOL</Link><Link className="btn primary" href="/docs/invoice">Prepare invoice</Link></div></div>
+    <form action="/api/documents/print" target="_blank" className="list-tools"><label>Print the day <input type="date" name="day" defaultValue={todayYmd()} required /></label><button className="btn" type="submit">Open day’s paperwork</button></form>
+    <form className="list-tools"><input name="q" aria-label="Search documents" placeholder="Find document number or customer" defaultValue={q} />
+      {orderId && <input name="orderId" type="hidden" value={orderId} />}{accountId && <input name="accountId" type="hidden" value={accountId} />}
+      <select name="type" aria-label="Document type" defaultValue={type}><option value="all">All documents</option>{Object.entries(labels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select><button className="btn">Search</button><span className="muted">{archive.length} saved versions</span></form>
+    <div className="panel flush"><div className="tblwrap"><table className="tbl"><thead><tr><th>Document #</th><th>Type</th><th>Customer / summary</th><th>Saved</th><th>Links</th></tr></thead><tbody>
+    {archive.map(d => <tr key={d.id}><td><a href={`/api/documents/archive/${d.id}`} target="_blank" rel="noopener noreferrer"><b>{d.docNumber}</b></a></td><td>{labels[d.docType] ?? d.docType}</td><td>{d.summary}</td><td className="small">{stamp(d.createdAt)}</td><td><div className="actions"><a href={`/api/documents/archive/${d.id}?download=1`}>Download</a>{d.orderId && <Link href={`/ops/orders/${d.orderId}`}>Order</Link>}{d.accountId && <Link href={`/ops/accounts/${d.accountId}`}>Account</Link>}</div></td></tr>)}
+    {older.map(d => <tr key={d.docNumber}><td><a href={`/api/documents/paperwork/${encodeURIComponent(d.docNumber)}`} target="_blank" rel="noopener noreferrer">{d.docNumber}</a></td><td>{labels[d.docType] ?? d.docType}</td><td>{d.summary}</td><td>{shortDate(d.date)}</td><td><span className="pill neutral">Saved data · render on open</span></td></tr>)}
+    </tbody></table>{!archive.length && !older.length && <div className="empty">No saved documents match. Prepare an invoice or BOL to start the archive.</div>}</div></div>
+    <p className="small muted">Each saved version retains its original content and document number. Download the printable file or open it and choose Save as PDF. Documents are stored in the app’s online database; Google Drive copies are not connected yet.</p>
+    {!!scheduled.length && <details className="panel" style={{ marginTop: 24 }}><summary>Upcoming delivery paperwork ({scheduled.length})</summary><div className="tblwrap"><table className="tbl"><thead><tr><th>Order</th><th>Account</th><th>Scheduled</th><th>Paperwork</th></tr></thead><tbody>{scheduled.map(o => <tr key={o.id}><td><Link href={`/ops/orders/${o.id}`}>{o.invoiceNumber ?? "Open order"}</Link></td><td>{o.account.businessName}</td><td>{shortDate(o.scheduledFor)}</td><td><a href={`/api/documents/print?orderId=${o.id}`} target="_blank" rel="noopener noreferrer">Open / save BOL</a></td></tr>)}</tbody></table></div></details>}
+  </>;
 }

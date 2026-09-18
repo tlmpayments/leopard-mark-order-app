@@ -67,7 +67,7 @@ export async function completeStopAction(formData: FormData): Promise<void> {
   const { lines, emptiesByProductId } = parseDeliveredLines(formData);
   const notes = String(formData.get("notes") ?? "").trim() || null;
 
-  await markDelivered({
+  if (stop.orderId) await markDelivered({
     orderId: stop.orderId,
     deliveredByUserId: user.id,
     actor: "ops",

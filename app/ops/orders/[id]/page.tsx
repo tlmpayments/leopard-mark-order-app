@@ -1,4 +1,9 @@
+import { deliveryRegionFor } from "@/lib/deliveryRegion";
+import { CarrierDeliveryButton } from "../CarrierDeliveryButton";
+import { carrierDeliveryDay, carrierDeliveryProblem } from "@/lib/ops/carrierDelivery";
 import Link from "next/link";
+import { isStripeInvoice } from "@/lib/ops/scope";
+import { sheetLink } from "@/lib/ops/sourceLinks";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireOpsUser, LEDGER_ROLES, ADMIN_ROLES } from "@/lib/ops/session";
@@ -10,9 +15,9 @@ import { money, shortDate, stamp, toNumber } from "@/lib/ops/format";
 import { photosForOrder } from "@/lib/deliveryPhotos";
 import { StageChip } from "../../_components/StageChip";
 import {
+  prepareOrderInvoiceAction,
   blockOrderAction,
   cancelOrderAction,
-  issueInvoiceNowAction,
   markDeliveredAction,
   scheduleOrderAction,
   unblockOrderAction,
@@ -122,6 +127,9 @@ export default async function OrderDetail({ params }: PageProps<"/ops/orders/[id
           </div>
         </div>
         <div className="actions">
+          <form action={prepareOrderInvoiceAction}><input type="hidden" name="orderId" value={staged.id} /><button className="btn primary" type="submit">Prepare invoice draft</button></form>
+          <Link className="btn" href={`/ops/documents?orderId=${staged.id}`}>Saved documents</Link>
+          <a className="btn" href={sheetLink("Sales", staged.lines.find(l => l.sheetRowNumber)?.sheetRowNumber)} target="_blank" rel="noopener noreferrer">Source sales rows</a>
           <Link className="btn ghost" href="/ops/orders">
             ← Orders
           </Link>
@@ -159,7 +167,7 @@ export default async function OrderDetail({ params }: PageProps<"/ops/orders/[id
           </div>
 
           {idx <= 3 && !staged.deliveredAt ? (
-            <form action={scheduleOrderAction} className="actions" style={{ marginBottom: 12 }}>
+            <form id="schedule" action={scheduleOrderAction} className="actions" style={{ marginBottom: 12 }}>
               <input type="hidden" name="orderId" value={staged.id} />
               {staged.scheduledFor ? <input type="hidden" name="reschedule" value="1" /> : null}
               <label className="small muted">
@@ -188,7 +196,7 @@ export default async function OrderDetail({ params }: PageProps<"/ops/orders/[id
                 </select>
               </label>
               <label className="small muted">
-                Carrier <input name="carrierName" placeholder="Self" style={inputStyle} />
+                Carrier <input name="carrierName" placeholder="Self" defaultValue={staged.shipment?.carrierName ?? (deliveryRegionFor(staged.account.region) === "BA" ? "Express Wine" : "")} style={inputStyle} />
               </label>
               <button className="btn primary" type="submit">
                 {staged.scheduledFor ? "Reschedule" : "Schedule"}
@@ -196,6 +204,7 @@ export default async function OrderDetail({ params }: PageProps<"/ops/orders/[id
             </form>
           ) : null}
 
+          {deliveryRegionFor(staged.account.region) === "BA" && !staged.deliveredAt && <div style={{ marginBottom: 16 }}><CarrierDeliveryButton orderId={staged.id} day={staged.scheduledFor ? carrierDeliveryDay(staged.scheduledFor) : null} problem={carrierDeliveryProblem(staged)} /><p className="small muted">Uses the scheduled delivery day and recorded quantities and lots. No driver photo required. Invoice sending is paused.</p></div>}
           {staged.scheduledFor && !staged.deliveredAt ? (
             <form action={markDeliveredAction}>
               <input type="hidden" name="orderId" value={staged.id} />
@@ -257,7 +266,7 @@ export default async function OrderDetail({ params }: PageProps<"/ops/orders/[id
                   Mark delivered
                 </button>
                 <span className="small muted">
-                  Mints the BOL number, writes the ledger and keg custody, and enqueues the invoice.
+                  Mints the BOL number, writes the ledger and keg custody, and queues the invoice for later review. Sending is paused.
                 </span>
               </div>
             </form>
@@ -265,10 +274,10 @@ export default async function OrderDetail({ params }: PageProps<"/ops/orders/[id
 
           <div className="actions" style={{ marginTop: 12 }}>
             {staged.deliveredAt && !staged.invoice ? (
-              <form action={issueInvoiceNowAction}>
+              <form>
                 <input type="hidden" name="orderId" value={staged.id} />
-                <button className="btn primary" type="submit">
-                  Issue invoice now
+                <button className="btn primary" type="button" disabled>
+                  Invoice sending paused
                 </button>
               </form>
             ) : null}
@@ -304,8 +313,8 @@ export default async function OrderDetail({ params }: PageProps<"/ops/orders/[id
         </div>
       )}
 
-      {/* ---- The seven-node stage timeline ---- */}
-      <section className="panel" style={{ marginBottom: 16 }}>
+      {/* Detailed history stays available without dominating the order. */}
+      <details className="panel" style={{ marginBottom: 16 }}><summary>Order history and next steps</summary>
         <div className="panel-head">
           <h3>Pipeline</h3>
           <span className="small muted">future stages show what will happen next</span>
@@ -371,15 +380,15 @@ export default async function OrderDetail({ params }: PageProps<"/ops/orders/[id
           {node(
             5,
             "Invoiced",
-            staged.invoice && staged.invoice.status !== "local_error"
+            staged.invoice && isStripeInvoice(staged.invoice.stripeInvoiceId) && staged.invoice.status !== "local_error"
               ? `Stripe invoice sent to ${billing.email ?? "—"}. Net 30 from delivery → due ${shortDate(
                   staged.invoice.dueDate,
                 )}.`
               : staged.invoice?.status === "local_error"
-                ? "Stripe rejected the invoice; it is retrying and shows in the attention queue."
+                ? "An earlier preparation failed. Sending is paused; review the record."
                 : null,
             billing.email
-              ? `Sends automatically when marked delivered — to ${billing.email}. Net 30 from delivery, tax exempt, our INV # in the custom fields.`
+              ? "Prepare a draft for review. Customer sending is paused during the Stripe pilot."
               : "Blocked until a billing email is on file: there is nowhere to send the invoice. The order is fine; the invoice is not.",
             staged.invoice?.sentAt ?? staged.invoice?.createdAt ?? null,
             staged.invoice?.hostedInvoiceUrl ? (
@@ -391,13 +400,13 @@ export default async function OrderDetail({ params }: PageProps<"/ops/orders/[id
           {node(
             6,
             "Paid",
-            staged.invoice?.paidAt ? `Settled ${stamp(staged.invoice.paidAt)}.` : null,
-            "Stripe's invoice.paid webhook flips this and writes Paid back to the Sheet.",
-            staged.invoice?.paidAt ?? null,
+            staged.invoice && isStripeInvoice(staged.invoice.stripeInvoiceId) && staged.invoice.paidAt ? `Settled ${stamp(staged.invoice.paidAt)}.` : null,
+            "Payment requires a verified payment record. Historical labels need reconciliation.",
+            staged.invoice && isStripeInvoice(staged.invoice.stripeInvoiceId) ? staged.invoice.paidAt : null,
             staged.achRef ? <span className="tag mono">{staged.achRef}</span> : null,
           )}
         </div>
-      </section>
+      </details>
 
       {/* ---- Lines, with the deposit lines the invoice will carry ---- */}
       <section className="panel flush" style={{ marginBottom: 16 }}>
@@ -545,11 +554,11 @@ export default async function OrderDetail({ params }: PageProps<"/ops/orders/[id
                 : "send_invoice · ACH / card"}
             </dd>
             <dt>Due</dt>
-            <dd>{shortDate(staged.invoice?.dueDate)}</dd>
+            <dd>{staged.invoice && isStripeInvoice(staged.invoice.stripeInvoiceId) ? shortDate(staged.invoice.dueDate) : "—"}</dd>
             <dt>Stripe</dt>
             <dd className="mono small">{staged.invoice?.stripeInvoiceId ?? "—"}</dd>
             <dt>Paid</dt>
-            <dd>{staged.invoice?.amountPaid ? money(staged.invoice.amountPaid) : "—"}</dd>
+            <dd>{staged.invoice && isStripeInvoice(staged.invoice.stripeInvoiceId) ? money(staged.invoice.amountPaid) : "Unverified"}</dd>
           </dl>
         </section>
       </div>
@@ -558,8 +567,8 @@ export default async function OrderDetail({ params }: PageProps<"/ops/orders/[id
         <section className="panel">
           <div className="panel-head">
             <h3>Sheet sync</h3>
-            <span className={`pill ${syncLogs.some((s) => s.conflict) ? "warn" : "good"}`}>
-              {syncLogs.some((s) => s.conflict) ? "conflict" : "in sync"}
+            <span className={`pill ${syncLogs.some((s) => s.conflict) ? "warn" : syncLogs.length ? "good" : "neutral"}`}>
+              {syncLogs.some((s) => s.conflict) ? "conflict" : syncLogs.length ? "No logged conflict" : "Not verified"}
             </span>
           </div>
           <dl className="kv">
@@ -573,8 +582,7 @@ export default async function OrderDetail({ params }: PageProps<"/ops/orders/[id
             </dd>
             <dt>Ownership</dt>
             <dd className="small muted">
-              The database owns the order content, delivery date, BOL #, lot # and invoice status. The Sheet owns Notes
-              and the tap-handle columns.
+              Compare this record with the master sheet using the source link above. Missing dates and historical invoice labels need reconciliation before further action.
             </dd>
           </dl>
         </section>

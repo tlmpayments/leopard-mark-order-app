@@ -17,6 +17,7 @@
 import { Prisma } from "@/app/generated/prisma/client";
 import { db } from "@/lib/db";
 import { stripe } from "@/lib/stripeClient";
+import { assertInvoiceSendingEnabled } from "@/lib/billing/pilot";
 import { ensureStripeCustomer } from "@/lib/stripeCustomer";
 import { appendOrderEvent } from "@/lib/orderEvents";
 import { blockOrder, unblockOrder } from "@/lib/orderEvents";
@@ -37,6 +38,7 @@ export interface IssueInvoiceResult {
 }
 
 export async function issueInvoiceForOrder(orderId: string): Promise<IssueInvoiceResult> {
+  assertInvoiceSendingEnabled();
   const order = await db.order.findUniqueOrThrow({
     where: { id: orderId },
     include: {

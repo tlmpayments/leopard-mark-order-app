@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { assertSandboxKey } from "@/lib/billing/pilot";
 
 // One shared client, same singleton-on-globalThis pattern as lib/db.ts (Next.js
 // hot-reloads modules in dev; this avoids re-instantiating on every edit).
@@ -19,6 +20,7 @@ const globalForStripe = globalThis as unknown as { stripe?: Stripe };
 
 function createStripe(): Stripe {
   const apiKey = process.env.STRIPE_SECRET_KEY;
+  assertSandboxKey(apiKey);
   if (!apiKey) {
     throw new Error(
       "STRIPE_SECRET_KEY is not set, so this Stripe call cannot be made. " +

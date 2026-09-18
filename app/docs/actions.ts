@@ -8,6 +8,9 @@ import { mintDocumentNumber } from "@/lib/bol/sequence";
 import { buildPaperworkInvoice, type PaperworkInvoiceLine } from "@/lib/billing/paperworkInvoice";
 import { resolveUnitPrice } from "@/lib/billing/pricing";
 import type { DeliveryReceiptData, DocLine } from "@/lib/bol/render";
+import { renderPrintablePage } from "@/lib/bol/render";
+import { renderInvoicePage } from "@/lib/billing/renderInvoice";
+import { archiveDocument } from "@/lib/documents/archive";
 
 /**
  * Generate a paperwork-only document.
@@ -80,7 +83,8 @@ export async function generatePaperworkAction(formData: FormData): Promise<void>
     lines,
   };
 
-  await db.documentLog.create({
+  await db.$transaction(async (tx) => {
+  await tx.documentLog.create({
     data: {
       docNumber,
       docType: "delivery_receipt",
@@ -94,6 +98,9 @@ export async function generatePaperworkAction(formData: FormData): Promise<void>
     },
   });
 
+  await archiveDocument({ docNumber, docType: "delivery_receipt", html: renderPrintablePage([payload], docNumber), payload: JSON.parse(JSON.stringify(payload)), accountId, summary: account.businessName }, tx);
+  });
+  revalidatePath("/ops/documents");
   revalidatePath("/docs");
   redirect(`/docs?doc=${encodeURIComponent(docNumber)}`);
 }
@@ -187,6 +194,9 @@ export async function generateInvoiceAction(formData: FormData): Promise<void> {
   const typedNumber = String(formData.get("invoiceNumber") ?? "").trim();
   const invoiceNumber = typedNumber || (await mintDocumentNumber("INV", deliveryDate));
 
+  const linkedOrder = await db.order.findUnique({ where: { invoiceNumber }, select: { id: true, accountId: true } });
+  if (linkedOrder && linkedOrder.accountId !== accountId) throw new Error("That invoice number belongs to another account. Check the source order.");
+
   const shipToAddress = account.deliveryAddress ?? account.address;
   const doc = buildPaperworkInvoice({
     invoiceNumber,
@@ -211,8 +221,10 @@ export async function generateInvoiceAction(formData: FormData): Promise<void> {
     preparedBy: user.name,
   });
 
-  await db.documentLog.create({
-    data: {
+  await db.$transaction(async (tx) => {
+  await tx.documentLog.upsert({
+    where: { docNumber: invoiceNumber }, update: {},
+    create: {
       docNumber: invoiceNumber,
       docType: "invoice",
       date: deliveryDate,
@@ -225,6 +237,9 @@ export async function generateInvoiceAction(formData: FormData): Promise<void> {
     },
   });
 
+  await archiveDocument({ docNumber: invoiceNumber, docType: "invoice", html: renderInvoicePage([doc], invoiceNumber), payload: JSON.parse(JSON.stringify(doc)), accountId, orderId: linkedOrder?.id, summary: `${account.businessName} · ${MONEY.format(doc.total)}` }, tx);
+  });
+  revalidatePath("/ops/documents");
   revalidatePath("/docs/invoice");
   redirect(`/docs/invoice?doc=${encodeURIComponent(invoiceNumber)}`);
 }

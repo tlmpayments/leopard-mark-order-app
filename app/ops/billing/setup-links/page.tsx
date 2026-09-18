@@ -50,8 +50,7 @@ export default async function SetupLinksPage() {
           <div className="eyebrow">Billing · ach.tlmbg.co</div>
           <h1>Payment setup links</h1>
           <p>
-            An account with ACH on file gets charged automatically; one without gets a payable invoice and has to be
-            chased. That is the whole reason this list matters.
+            Review the billing contacts and payment setup recorded for each account. Customer emails and automatic billing are paused during the pilot.
           </p>
         </div>
         <div className="actions">
@@ -77,7 +76,7 @@ export default async function SetupLinksPage() {
         <div className="kpi">
           <div className="l">Never sent</div>
           <div className="v">{notSent.length}</div>
-          <div className="d">send from the account page</div>
+          <div className="d">setup emails paused</div>
         </div>
       </div>
 

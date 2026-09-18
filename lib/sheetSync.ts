@@ -325,3 +325,29 @@ export async function syncOrderToSheet(orderId: string): Promise<SyncOrderResult
 
   return { ok: true, alreadySynced: false, slackChannel: parsed.slackChannel, slackTs: parsed.slackTs };
 }
+
+/** Update delivery cells only; never append an order or change its pricing. */
+export async function syncDeliveryToSheet(orderId: string): Promise<SyncOrderResult> {
+  const order = await db.order.findUnique({ where: { id: orderId }, select: { deliveredAt: true, invoiceNumber: true } });
+  if (!order?.deliveredAt) return { ok: false, error: "Order has no confirmed delivery" };
+  const url = process.env.APPS_SCRIPT_URL;
+  const secret = process.env.SYNC_SHARED_SECRET;
+  if (!url || !secret) return { ok: false, error: "Delivery-to-Sales connection is not configured" };
+  try {
+    const response = await fetch(url, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "syncDelivery", secret, orderId, invoiceNumber: order.invoiceNumber,
+        deliveredDate: new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit" }).format(order.deliveredAt) }),
+      signal: AbortSignal.timeout(25000),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok || !(result.rowsUpdated > 0)) {
+      return { ok: false, error: result.error === "Unknown action"
+        ? "Sales delivery update is pending deployment of the Google Sheet connection"
+        : result.error || "No Sales delivery rows were updated" };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Could not reach the Sales delivery connection; update will retry" };
+  }
+}

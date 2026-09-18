@@ -10,6 +10,7 @@
 
 import { db } from "@/lib/db";
 import type { DeliveryReceiptData, DocLine } from "./render";
+import { pacificDayRange } from "@/lib/scheduling";
 
 const PT_DATE = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/Los_Angeles",
@@ -70,9 +71,7 @@ export async function deliveryReceiptFromOrder(orderId: string): Promise<Deliver
 
 /** Every delivery receipt for one route day, for the print batch (§8.5). */
 export async function deliveryReceiptsForDay(day: Date, region?: string): Promise<DeliveryReceiptData[]> {
-  const start = new Date(day);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start.getTime() + 86_400_000);
+  const { start, end } = pacificDayRange(day.toISOString().slice(0, 10));
 
   const orders = await db.order.findMany({
     where: {
@@ -108,6 +107,7 @@ export async function deliveryReceiptsForRoute(routeId: string): Promise<Deliver
 
   const docs: DeliveryReceiptData[] = [];
   for (const stop of stops) {
+    if (!stop.orderId) continue;
     const doc = await deliveryReceiptFromOrder(stop.orderId);
     if (doc) docs.push(doc);
   }
