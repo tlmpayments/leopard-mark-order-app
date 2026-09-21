@@ -1,18 +1,21 @@
 import { db } from "@/lib/db";
 import { currentOpsUser } from "@/lib/ops/session";
 import { initials, money } from "@/lib/ops/format";
+import { saveFacilityAddressAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 /**
- * Settings (§8.10). Read-only in this pass, and honest about it.
+ * Settings (§8.10). Read-only except for facility street addresses.
  *
- * Everything shown here is real data the system already reads. What it does not
- * yet offer is editing — and rather than render inert inputs that look editable,
+ * Everything shown here is real data the system already reads. Most of it is
+ * still read-only — and rather than render inert inputs that look editable,
  * each panel says where the value comes from, so nobody clicks a save button
- * that does nothing.
+ * that does nothing. The one exception is a facility's street address, which
+ * the delivery builder routes from and explicitly sends the operator here to
+ * set.
  */
 export default async function SettingsPage() {
   const user = await currentOpsUser();
@@ -209,7 +212,9 @@ export default async function SettingsPage() {
       <section className="panel flush">
         <div className="panel-head">
           <h3>Facilities</h3>
-          <span className="small muted">{locations.length} locations · warehouses are the only ones that can deliver</span>
+          <span className="small muted">
+            {locations.length} locations · warehouses are the only ones that can deliver
+          </span>
         </div>
         {locations.length === 0 ? (
           <div className="empty">
@@ -225,6 +230,7 @@ export default async function SettingsPage() {
                   <th>Name</th>
                   <th>Type</th>
                   <th>City</th>
+                  <th>Street address</th>
                   <th>Shipping hours</th>
                   <th>Dock</th>
                 </tr>
@@ -240,6 +246,20 @@ export default async function SettingsPage() {
                     <td className="small">
                       {l.city}, {l.state}
                     </td>
+                    <td className="small">
+                      <form action={saveFacilityAddressAction} className="fldwrap" style={{ display: "flex", gap: 6 }}>
+                        <input type="hidden" name="locationId" value={l.id} />
+                        <input
+                          className="fld"
+                          name="address"
+                          defaultValue={l.address ?? ""}
+                          maxLength={500}
+                          placeholder={l.type === "warehouse" ? "Street, city, state, ZIP" : "—"}
+                          aria-label={`Street address for ${l.name}`}
+                        />
+                        <button className="btn sm">Save</button>
+                      </form>
+                    </td>
                     <td className="small muted">{l.shippingHours ?? "—"}</td>
                     <td className="small">{l.hasLoadingDock ? "yes" : l.liftgateRequired ? "liftgate" : "—"}</td>
                   </tr>
@@ -248,6 +268,10 @@ export default async function SettingsPage() {
             </table>
           </div>
         )}
+        <p className="small muted" style={{ padding: "0 16px 16px" }}>
+          A warehouse&rsquo;s street address is the origin the delivery builder routes from. The seeded coordinates are
+          a city centre, not a loading dock, so routing stays off until the real address is saved here.
+        </p>
       </section>
     </>
   );
