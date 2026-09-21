@@ -30,9 +30,14 @@
 .ops .builder-error { padding:16px; margin-bottom:18px; background:var(--surface); border:1px solid #d44a45; border-radius:8px; }
 .ops .builder-notice { padding:18px; margin-bottom:20px; background:var(--surface-2); border-radius:8px; }
 .ops .builder-map-review { margin-top:24px; }
-.ops .builder-map-review iframe { width:100%; height:500px; border:0; border-radius:8px; background:var(--surface-2); }
+.ops .route-map { width:100%; height:500px; border-radius:8px; background:var(--surface-2); z-index:0; }
+/* Numbered pins, matching the sequence badges in the stop list above. */
+.ops .route-pin { display:flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:50%;
+  font:600 12px/1 var(--font-sans,system-ui); color:#fff; background:#3b5bdb; border:2px solid #fff; box-shadow:0 1px 4px rgb(0 0 0 / .4); }
+.ops .route-pin.origin { background:#495057; }
+.ops .builder-map-review .builder-error ul { margin:6px 0 0; padding-left:18px; }
 .ops .builder-push { display:flex; justify-content:space-between; align-items:center; gap:20px; padding-top:16px; }
 .ops .builder-push .btn { padding:16px 30px; font-size:18px; }
 .ops .builder-timing { color:var(--accent) !important; font-variant-numeric:tabular-nums; }
-@media(max-width:900px) { .ops .builder-columns { grid-template-columns:1fr; } .ops .builder-map-review iframe { height:360px; } }
+@media(max-width:900px) { .ops .builder-columns { grid-template-columns:1fr; } .ops .route-map { height:360px; } }
 @media(max-width:520px) { .ops .delivery-summary,.ops .builder-push { align-items:stretch; flex-direction:column; } .ops .builder-row { gap:8px; } .ops .builder-controls .btn { padding:6px; } }
