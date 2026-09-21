@@ -1,6 +1,19 @@
 /** Serializable routing values shared by the builder and routing service. */
-export type PlannedStop = { id: string; name: string; address: string; orderId: string | null; accountId: string | null; status: string };
-export type RoutePreview = { signature: string; stopIds: string[]; legSeconds: number[]; durationSeconds: number; distanceMeters: number; calculatedAt: string };
+export type PlannedStop = {
+  id: string; name: string; address: string; orderId: string | null; accountId: string | null; status: string;
+  /** Known coordinates, when the account row already carries them. Saves a geocode. */
+  lat?: number | null; lng?: number | null;
+};
+export type RoutePreview = {
+  signature: string; stopIds: string[]; legSeconds: number[]; durationSeconds: number; distanceMeters: number; calculatedAt: string;
+  /** The drawn line, [lng, lat] as the routing service returns it. Absent on reviews saved before the map existed. */
+  geometry?: [number, number][];
+  /** Where each stop and the warehouse actually landed, so the operator can check a pin. */
+  stopCoords?: [number, number][];
+  originCoord?: [number, number];
+  /** Addresses the geocoder matched imprecisely. Shown above the map. */
+  warnings?: string[];
+};
 export const MAX_ROUTE_STOPS = 21;
 export function routeSignature(origin: string, stops: Pick<PlannedStop, "id" | "address">[]): string {
   return JSON.stringify([origin, ...stops.map(s => [s.id, s.address])]);
@@ -16,9 +29,4 @@ export function validateStopOrder(known: string[], ordered: string[]): void {
   if (known.length !== ordered.length || new Set(ordered).size !== known.length || ordered.some(id => !known.includes(id))) {
     throw new Error("The stops changed. Reload the route and try again.");
   }
-}
-export function mapsEmbedUrl(key: string, origin: string, stops: Pick<PlannedStop, "address">[]): string {
-  const params = new URLSearchParams({ key, origin, destination: stops.at(-1)?.address ?? origin, mode: "driving" });
-  if (stops.length > 1) params.set("waypoints", stops.slice(0, -1).map(s => s.address).join("|"));
-  return `https://www.google.com/maps/embed/v1/directions?${params}`;
 }

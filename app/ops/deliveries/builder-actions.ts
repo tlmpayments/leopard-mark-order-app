@@ -5,7 +5,7 @@ import { Prisma } from "@/app/generated/prisma/client";
 import { assertLocation, assertRole, LEDGER_ROLES } from "@/lib/ops/session";
 import { addStopToRoute, dispatchRoute, loadRoute, removeStopFromRoute } from "@/lib/routes";
 import { deliveryDefaults, plannedStops } from "@/lib/deliveryBuilder";
-import { computeDeliveryPath } from "@/lib/googleRoutes";
+import { computeDeliveryPath } from "@/lib/orsRoutes";
 import { MAX_ROUTE_STOPS, readPreview, routeSignature, validateStopOrder } from "@/lib/routePlanning";
 import { kickJobs } from "@/lib/jobs/kick";
 
@@ -66,14 +66,33 @@ export async function removeBuilderStop(routeId: string, stopId: string) {
     refresh(routeId); return { ok: true as const };
   } catch (e) { return { ok: false as const, error: e instanceof Error ? e.message : "Could not remove stop." }; }
 }
+/**
+ * Write back coordinates for account stops that had to be geocoded.
+ *
+ * Best-effort on purpose: a failed cache write must never sink a route the
+ * operator has already waited on, and the only cost of losing it is one more
+ * geocode next time.
+ */
+async function persistGeocodes(stops: ReturnType<typeof plannedStops>, resolved: { id: string; coord: [number, number]; geocoded: boolean }[]) {
+  const byId = new Map(stops.map(s => [s.id, s]));
+  for (const hit of resolved) {
+    const accountId = hit.geocoded ? byId.get(hit.id)?.accountId : null;
+    if (!accountId) continue;
+    await db.account.update({ where: { id: accountId }, data: { lng: hit.coord[0], lat: hit.coord[1] } }).catch(() => {});
+  }
+}
 export async function coordinateDelivery(routeId: string, orderedIds: string[], optimize: boolean) {
   try {
     const { route } = await editableRoute(routeId);
-    if (!process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_KEY || !process.env.GOOGLE_ROUTES_API_KEY) throw new Error("Google Maps isn’t connected yet. Complete Maps setup before calculating this route.");
+    if (!process.env.OPENROUTESERVICE_API_KEY) throw new Error("Route planning isn’t connected yet. Add the OpenRouteService key before calculating this route.");
     const stops = plannedStops(route);
     validateStopOrder(stops.map(s => s.id), orderedIds);
     const ordered = orderedIds.map(id => stops.find(s => s.id === id)!);
-    const preview = await computeDeliveryPath(route.warehouse.address ?? "", ordered, optimize);
+    const { preview, resolved } = await computeDeliveryPath(route.warehouse.address ?? "", ordered, optimize);
+    // Geocodes are the scarce resource on the free plan, so an account that had
+    // to be looked up keeps its coordinates: the next route that visits it, and
+    // the territory map, both get them for nothing.
+    await persistGeocodes(stops, resolved);
     await db.$transaction(async tx => {
       const locked = await tx.deliveryRoute.updateMany({ where: { id: routeId, status: "draft", updatedAt: route.updatedAt }, data: { routingSnapshot: preview } });
       if (!locked.count) throw new Error("The route changed while calculating. Reload and try again.");

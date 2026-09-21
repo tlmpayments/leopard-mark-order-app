@@ -14,5 +14,7 @@ export async function deliveryDefaults() {
 }
 export function plannedStops(route: RouteWithStops): PlannedStop[] {
   return route.stops.map(s => ({ id: s.id, name: s.order?.account.businessName ?? s.stopName ?? "Stop", address: (s.order?.account.deliveryAddress || s.order?.account.address || s.stopAddress || "").trim(),
-    orderId: s.orderId, accountId: s.order?.account.id ?? s.accountRef, status: s.status }));
+    orderId: s.orderId, accountId: s.order?.account.id ?? s.accountRef, status: s.status,
+    // Saves a geocode when the account row already knows where it is.
+    lat: s.order?.account.lat ?? null, lng: s.order?.account.lng ?? null }));
 }

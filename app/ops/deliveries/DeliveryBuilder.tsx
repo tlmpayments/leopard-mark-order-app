@@ -2,11 +2,12 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { addBuilderStop, coordinateDelivery, pushDeliveryToDriver, removeBuilderStop, searchDeliveryAccounts } from "./builder-actions";
-import { mapsEmbedUrl, routeSignature, type PlannedStop, type RoutePreview } from "@/lib/routePlanning";
+import { routeSignature, type PlannedStop, type RoutePreview } from "@/lib/routePlanning";
+import RouteMap from "./RouteMap";
 import "./builder.css";
 
 export type Candidate = { id: string; name: string; accountId: string; address: string; units: number };
-type Props = { routeId: string; origin: string; driver: string; status: string; candidates: Candidate[]; stops: PlannedStop[]; preview: RoutePreview | null; mapKey: string; routingConfigured: boolean };
+type Props = { routeId: string; origin: string; driver: string; status: string; candidates: Candidate[]; stops: PlannedStop[]; preview: RoutePreview | null; routingConfigured: boolean };
 export default function DeliveryBuilder(props: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -57,7 +58,7 @@ export default function DeliveryBuilder(props: Props) {
     if (validPreview) coordinate(ordered, false); else { setStops(ordered); setPreview(null); }
   }
   return <div className="delivery-builder" aria-busy={pending}>
-    {editable && !props.routingConfigured && <div className="builder-notice" role="status"><b>Google Maps isn’t connected yet.</b><p>Maps setup is required to show the route and calculate drive times. You can keep adding stops while the connection is set up.</p></div>}
+    {editable && !props.routingConfigured && <div className="builder-notice" role="status"><b>Route planning isn’t connected yet.</b><p>An OpenRouteService key is required to order the stops and calculate drive times. You can keep adding stops while the connection is set up.</p></div>}
     {editable && props.routingConfigured && !props.origin.trim() && <div className="builder-notice" role="status"><b>The warehouse needs a street address.</b><p>Add Wilmington Warehouse’s exact address in Settings to calculate the route.</p></div>}
     {error && <div className="builder-error" role="alert">{error}</div>}
     {!editable && <div className="builder-notice" role="status">{props.status === "cancelled" ? "Delivery cancelled" : `Pushed to ${props.driver}. The route is available in the driver app.`}</div>}
@@ -99,9 +100,11 @@ export default function DeliveryBuilder(props: Props) {
     </div>
     {validPreview && <section className="panel builder-map-review">
       <div className="panel-head"><div><h2>Review the path</h2><p>{Math.ceil(validPreview.durationSeconds / 60)} min driving · {(validPreview.distanceMeters / 1609.344).toFixed(1)} miles · {stops.length} stops</p></div></div>
-      <p className="small muted">Use the arrows above to rearrange stops. The map and drive times update after each change. Estimates use current traffic and exclude unloading time.</p>
-      {props.mapKey && <iframe title="Delivery route from Wilmington Warehouse" src={mapsEmbedUrl(props.mapKey, props.origin, stops)} allowFullScreen referrerPolicy="no-referrer-when-downgrade" />}
-      <p className="small muted">The map follows the selected stop order. Google’s map preview may show different traffic estimates.</p>
+      <p className="small muted">Use the arrows above to rearrange stops. The map and drive times update after each change. Estimates exclude traffic and unloading time.</p>
+      {!!validPreview.warnings?.length && <div className="builder-error" role="alert"><b>Check these pins before pushing.</b><ul>{validPreview.warnings.map(w => <li key={w}>{w}</li>)}</ul></div>}
+      {validPreview.originCoord && validPreview.stopCoords?.length === stops.length
+        && <RouteMap origin={validPreview.originCoord} geometry={validPreview.geometry ?? []} stops={stops.map((s, i) => ({ name: s.name, coord: validPreview.stopCoords![i] }))} />}
+      <p className="small muted">Each pin sits where the route actually sends Jose, not where the address was typed. A pin on the wrong block means that stop’s address needs fixing.</p>
       {editable && <div className="builder-push"><p>Send this delivery to <b>{props.driver}</b> in the driver app.</p><button className="btn primary" disabled={pending} onClick={() => { setError(""); startTransition(async () => { try { const result = await pushDeliveryToDriver(props.routeId, validPreview.signature); if (!result.ok) setError(result.error); else router.refresh(); } catch { setError("Could not push the delivery. Reload to check its status before retrying."); } }); }}>Push to Driver</button></div>}
     </section>}
   </div>;
