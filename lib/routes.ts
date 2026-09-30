@@ -28,6 +28,7 @@ import { enqueue } from "@/lib/jobs/queue";
 import { atPacificHour, pacificDayRange, pacificParts, scheduleOrder } from "@/lib/scheduling";
 import { readPreview, routeSignature } from "@/lib/routePlanning";
 import { deliveryRegionFor } from "@/lib/deliveryRegion";
+import { AWAITING_SCHEDULING_WHERE } from "@/lib/awaitingScheduling";
 import type { OrderEventActor, RouteStatus } from "@/app/generated/prisma/enums";
 
 /** Today in Pacific time, as YYYY-MM-DD. The route day is a PT calendar day. */
@@ -177,10 +178,11 @@ export async function createRoute(opts: {
 /**
  * Orders that could go on a route for this day but are not on one yet.
  *
- * Two groups on purpose: orders already scheduled for the day (the obvious
- * candidates) and orders that are confirmed but unscheduled (the ones an
- * operator is deciding to squeeze in). Anything delivered, cancelled or
- * already assigned to a route is excluded.
+ * Two groups on purpose: orders awaiting delivery -- no delivery date at all,
+ * see AWAITING_SCHEDULING_WHERE -- and orders already scheduled for this very
+ * day that have not been put on a route. Anything delivered, cancelled, dated
+ * elsewhere (including every order with a delivery date in the sheet) or
+ * already on a route is excluded.
  */
 export async function candidateOrdersForDay(ymd: string, region?: string | null) {
   const { start, end } = pacificDayRange(ymd);
@@ -188,10 +190,19 @@ export async function candidateOrdersForDay(ymd: string, region?: string | null)
 
   const orders = await db.order.findMany({
     where: {
-      deliveredAt: null,
       routeStop: { is: null },
-      status: { notIn: ["cancelled", "rejected", "expired", "draft"] },
-      OR: [{ scheduledFor: { gte: start, lt: end } }, { scheduledFor: null }],
+      OR: [
+        // Awaiting delivery: no delivery date anywhere. The queue.
+        AWAITING_SCHEDULING_WHERE,
+        // ...and whatever is already scheduled for THIS day but has not been
+        // put on a route yet. It has a date, so it is not "awaiting", but it is
+        // today's work and the builder is where it gets a truck.
+        {
+          deliveredAt: null,
+          status: { notIn: ["cancelled", "rejected", "expired", "draft"] },
+          scheduledFor: { gte: start, lt: end },
+        },
+      ],
     },
     include: {
       account: { select: { id: true, businessName: true, region: true, deliveryAddress: true, address: true } },

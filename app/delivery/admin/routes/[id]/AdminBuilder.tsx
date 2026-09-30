@@ -250,7 +250,7 @@ export default function AdminBuilder(props: Props) {
       {waiting.length ? (
         <>
           <div className="dv-section" style={{ marginTop: 0 }}>
-            Orders waiting · {waiting.length}
+            Awaiting a delivery date · {waiting.length}
           </div>
           <div className="dv-list">
             {waiting.map((c) => (

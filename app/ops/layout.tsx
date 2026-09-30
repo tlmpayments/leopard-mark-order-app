@@ -1,5 +1,6 @@
 import "./ops.css";
 import { db } from "@/lib/db";
+import { AWAITING_SCHEDULING_WHERE } from "@/lib/awaitingScheduling";
 import { signOut } from "@/auth";
 import { requireOpsUser } from "@/lib/ops/session";
 import { healthChips } from "@/lib/ops/queries";
@@ -22,7 +23,7 @@ export default async function OpsLayout({ children }: LayoutProps<"/ops">) {
 
   const [openOrders, needsSetup, deadJobs, failedInvoices, pendingMarketing, chips] = await Promise.all([
     db.order.count({
-      where: { status: { notIn: ["cancelled", "rejected", "expired", "draft"] }, scheduledFor: null, deliveredAt: null, deliveryDate: null, NOT: { invoice: { is: { stripeInvoiceId: { startsWith: "sheet:" } } } } },
+      where: AWAITING_SCHEDULING_WHERE,
     }),
     db.account.count({ where: { stripeCustomerId: null } }),
     db.jobRun.count({ where: { status: "dead" } }),

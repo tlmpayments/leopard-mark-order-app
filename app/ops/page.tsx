@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
+import { AWAITING_SCHEDULING_WHERE } from "@/lib/awaitingScheduling";
 import { todayYmd } from "@/lib/routes";
 import { pacificDayRange } from "@/lib/scheduling";
 import { money, shortDate } from "@/lib/ops/format";
@@ -9,7 +10,7 @@ export default async function Home() {
   const day = todayYmd();
   const { start, end } = pacificDayRange(day);
   const [incoming, scheduled, accounts, documents] = await Promise.all([
-    db.order.findMany({ where: { scheduledFor: null, deliveredAt: null, deliveryDate: null, NOT: { invoice: { is: { stripeInvoiceId: { startsWith: "sheet:" } } } }, status: { notIn: ["cancelled", "rejected", "expired", "draft"] } }, include: { account: { select: { businessName: true, region: true } }, lines: { include: { product: { select: { productName: true, formatLabel: true } } } } }, orderBy: { createdAt: "desc" } }),
+    db.order.findMany({ where: AWAITING_SCHEDULING_WHERE, include: { account: { select: { businessName: true, region: true } }, lines: { include: { product: { select: { productName: true, formatLabel: true } } } } }, orderBy: { createdAt: "desc" } }),
     db.order.findMany({ where: { scheduledFor: { gte: start, lt: end }, status: { notIn: ["cancelled", "rejected", "expired"] } }, include: { account: { select: { businessName: true } } }, orderBy: { scheduledFor: "asc" } }),
     db.account.count(), db.archivedDocument.count(),
   ]);
