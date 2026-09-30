@@ -164,7 +164,11 @@ export default auth((req) => {
   // contactId (that's only ever set by auth.ts's jwt callback for the
   // "resend" provider), so a rep's own session must not be treated as a
   // valid customer login here.
-  const isPublicCustomerPage = path === "/customer/login" || path === "/customer/signup";
+  // /customer/preview is exempt from the session gate ONLY so the page can run;
+  // the page itself 404s outside a Vercel Preview deployment and without its
+  // token, so this exemption exposes nothing in production.
+  const isPublicCustomerPage =
+    path === "/customer/login" || path === "/customer/signup" || path === "/customer/preview";
   if (path.startsWith("/customer") && !isPublicCustomerPage && !req.auth?.contactId) {
     return Response.redirect(new URL("/customer/login", req.nextUrl));
   }
