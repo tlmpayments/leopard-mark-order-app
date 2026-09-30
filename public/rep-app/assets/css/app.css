@@ -123,6 +123,17 @@ a { color: var(--accent); }
 
 #login-step-pin .back-link { display: block; text-align: center; margin-bottom: 4px; }
 .pin-instructions { text-align: center; color: var(--silver); font-size: 14px; font-weight: 600; }
+/* The one-off "sign in again so your marks sync" line. Sits under the prompt
+   rather than replacing it, so a mistyped PIN resetting the prompt does not
+   also wipe the explanation for why the PIN is being asked for at all. */
+.pin-reauth {
+  text-align: center;
+  color: var(--silver-dim, var(--silver));
+  font-size: 12.5px;
+  line-height: 1.45;
+  max-width: 30ch;
+  margin: 2px auto 0;
+}
 .pin-dots { display: flex; justify-content: center; gap: 14px; margin: 6px 0; }
 .pin-dot {
   width: 16px;
@@ -1132,6 +1143,7 @@ body {
 .brand-sub, .rep-block .rep-label, .section-title, label { color: var(--silver-dim); }
 .brand-sub { letter-spacing: .11em; font-size: 11px; }
 .pin-instructions { color: var(--ink); font-size: 16px; }
+.pin-reauth { color: var(--silver-dim); }
 .pin-dot { background: #fff; border-color: var(--line); }
 .pin-dot.filled { background: var(--coral); border-color: var(--coral); }
 .pin-pad button {
@@ -1586,7 +1598,7 @@ input:focus, select:focus, textarea:focus { outline-color: var(--coral); border-
 .prospect-actions { display: flex; gap: 10px; margin-top: 16px; }
 .prospect-actions .btn { flex: 1; text-align: center; text-decoration: none; display: grid; place-items: center; }
 
-/* Leaflet draws its own pins; .lm-pin already exists for the territory map,
+/* Leaflet draws its own pins; .lm-pin already exists for the accounts map,
    and a prospect pin is the same shape in a status colour with a ring when a
    rep has touched it, so the two maps stay visually one family. */
 .lm-pin.lm-pin--touched { border-color: #fffdf8; box-shadow: 0 2px 7px rgba(16,47,68,.35), 0 0 0 2px rgba(255,253,248,.55); }
@@ -1613,30 +1625,6 @@ input:focus, select:focus, textarea:focus { outline-color: var(--coral); border-
 }
 .prospect-day-divider:first-child { margin-top: 2px; }
 
-/* A territory's name, pinned to the top edge of its outline. Centred on its
-   own anchor because the divIcon has no size to offset against. */
-.territory-tag {
-  display: inline-block;
-  transform: translate(-50%, -100%);
-  padding: 3px 9px;
-  border-radius: 999px;
-  color: #102f44;
-  font: 600 11px var(--font-body);
-  white-space: nowrap;
-  box-shadow: 0 2px 6px rgba(16,47,68,.25);
-}
-
-/* A rep who is not in the split needs to know why he is looking at 414 doors
-   instead of his own 174. */
-.prospect-orphan-note {
-  margin-top: 10px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: #fff0bd;
-  color: #98610b;
-  font-size: 12px;
-  line-height: 1.45;
-}
 .prospect-progress .prospect-legend { margin-top: 10px; }
 
 /* What a tier means, shown when a rep picks one. Three short lines: what the
@@ -1833,3 +1821,75 @@ input:focus, select:focus, textarea:focus { outline-color: var(--coral); border-
 .prospect-sync { margin: 8px 0 0; font-size: 11px; font-weight: 600; color: var(--good); }
 .prospect-sync.is-pending { color: var(--warn); }
 .prospect-sync.is-local { color: var(--silver-dim); font-weight: 400; }
+
+/* ---- Live prospecting -------------------------------------------------------
+   A pin another rep just changed rings out once so the eye lands on it. Done
+   with box-shadow, not transform: .lm-pin is already rotated -45deg to make
+   its teardrop, and an animated transform would throw that away. */
+@keyframes lm-pin-ring {
+  0%   { box-shadow: 0 0 0 0 rgba(237,99,63,.85), 0 2px 6px rgba(0,0,0,.5); }
+  70%  { box-shadow: 0 0 0 16px rgba(237,99,63,0), 0 2px 6px rgba(0,0,0,.5); }
+  100% { box-shadow: 0 0 0 0 rgba(237,99,63,0), 0 2px 6px rgba(0,0,0,.5); }
+}
+.lm-pin.lm-pin--fresh { animation: lm-pin-ring 1.2s ease-out 3; }
+@media (prefers-reduced-motion: reduce) { .lm-pin.lm-pin--fresh { animation: none; } }
+
+.prospect-legend--reps { margin-top: 2px; }
+.prospect-legend--reps b { color: var(--ink); }
+
+/* The crew's scheduled days and the route picker, stacked under the resume
+   banner. Rows are buttons because the whole row is the tap target. */
+.plan-card, .route-picker {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--foam);
+  overflow: hidden;
+}
+.plan-card-title, .route-picker summary {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 12px 14px;
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  list-style: none;
+}
+.plan-card-title { cursor: default; }
+.route-picker summary::-webkit-details-marker { display: none; }
+.plan-card-title small, .route-picker summary small { color: var(--silver-dim); font-weight: 500; font-size: 11px; }
+.plan-day, .route-pick {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  width: 100%;
+  padding: 11px 14px;
+  border: 0; border-top: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.plan-day-main, .route-pick-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.plan-day-main b, .route-pick-main b { font-size: 13px; }
+.plan-day-main small, .route-pick-main small { color: var(--silver-dim); font-size: 11px; line-height: 1.35; }
+.plan-day-go, .route-pick-go { flex: 0 0 auto; color: var(--coral); font-weight: 700; font-size: 12px; }
+.route-pick.is-done .route-pick-go { color: var(--good); }
+.route-pick-bar { display: block; height: 4px; margin-top: 5px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.route-pick-bar i { display: block; height: 100%; background: var(--coral); }
+.route-pick.is-done .route-pick-bar i { background: var(--good); }
+
+/* Who was last at the door the rep is standing at. */
+.run-visited {
+  display: none;
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255,253,248,.85);
+}
+
+/* The door's trail: one line per visit, newest first. */
+.prospect-trail { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+.trail-row { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; color: var(--ink); }
+.trail-row .prospect-dot { margin-top: 5px; flex: 0 0 auto; }
+.trail-row small { display: block; color: var(--silver-dim); font-size: 11px; }
+.trail-row em { display: block; margin-top: 2px; font-style: normal; color: var(--silver); font-size: 12px; line-height: 1.4; }

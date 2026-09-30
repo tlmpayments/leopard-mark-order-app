@@ -1246,8 +1246,8 @@ model DriverAccessToken {
 /// in -- so that the office can see coverage and a rep's work survives his
 /// phone.
 ///
-/// One row per door rather than one per rep: territories do not overlap, so a
-/// door has one status. `repName` records who last set it, which is the
+/// One row per door rather than one per rep: a door has one status, whoever
+/// last set it -- the reps work the same routes and see each other's marks live. `repName` records who last set it, which is the
 /// question ops actually asks ("who has been to this one, and when").
 model ProspectVisit {
   id         String              @id @default(cuid())
@@ -1272,6 +1272,31 @@ model ProspectVisit {
   @@index([repName])
   @@index([status])
   @@map("prospect_visits")
+}
+
+/// The trail behind ProspectVisit: one row per time a rep set a door's status,
+/// never updated and never overwritten. ProspectVisit answers "what is this
+/// door now"; this answers "who has been here, and what did they find".
+///
+/// `status` is text rather than ProspectVisitStatus because a trail also has
+/// to record a rep clearing a door back to unvisited ("new"), which the enum
+/// deliberately has no value for. Validated in the API instead.
+///
+/// The unique key is what makes a flush safe to repeat: a phone that lost
+/// signal mid-request resends the same queue, and the same mark (same door,
+/// same rep, same device timestamp) must not appear in the trail twice.
+model ProspectVisitEvent {
+  id         String   @id @default(cuid())
+  prospectId Int      @map("prospect_id")
+  status     String
+  note       String?
+  repName    String   @map("rep_name")
+  markedAt   DateTime @map("marked_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@unique([prospectId, repName, markedAt])
+  @@index([prospectId, markedAt])
+  @@map("prospect_visit_events")
 }
 
 /// Mirrors PROSPECT_STATUSES in the rep app. `new` is deliberately absent:

@@ -40,6 +40,7 @@
 
     <div class="login-step" id="login-step-pin">
       <div class="pin-instructions" id="pin-instructions">Enter your 4-digit PIN</div>
+      <div class="pin-reauth" id="pin-reauth-note" hidden>Enter your PIN once more so your prospecting marks reach the office. Nothing you’ve recorded is lost.</div>
       <div class="pin-dots" id="pin-dots">
         <span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span><span class="pin-dot"></span>
       </div>
@@ -570,10 +571,10 @@
        the map are never out of step because both render from one filtered
        array (renderProspects in app.js).
 
-       Statuses live on the rep's own device (localStorage, keyed by rep
-       name). Nothing here is written back to the sheet or to Apps Script,
-       which is why the screen says so out loud in .prospect-scope-note --
-       a rep needs to know that what he marks is his own record. -->
+       Marks are saved on the phone first and shared with every other rep's
+       phone within a few seconds (see the live section in app.js). There are
+       no territories: any rep can pick any route, and a route half-worked by
+       someone else shows exactly what is left. -->
   <section id="screen-prospects" class="screen">
     <a class="back-link" id="back-prospects-to-home">← Back</a>
     <div class="section-title">Find Prospective Accounts</div>
@@ -584,9 +585,10 @@
     <div class="prospect-sync" id="prospect-sync"></div>
     <button class="prospect-reset" id="prospect-reset" type="button"></button>
 
-    <!-- Generate a route. One route at a time, worked stop by stop, picked up
-         again tomorrow where it was left -- a 36-door route is three days, so
-         a run that forgot itself overnight would be useless. -->
+    <!-- The run in progress, this crew's scheduled days, and every route to
+         start or pick up. One route at a time, worked stop by stop; where it
+         stands is read from the shared marks, so it is picked up wherever
+         anyone left it. -->
     <div class="prospect-run-cta" id="prospect-run-cta"></div>
 
     <div id="prospects-map" class="accounts-map prospects-map"></div>
@@ -595,16 +597,12 @@
       <input id="prospect-search" placeholder="Search name, owner, street, city or ZIP" autocomplete="off" />
     </div>
 
-    <!-- Two questions, two controls: whose doors, and which region of them.
-         This was twenty chips across three rows -- rep, wave and status all
-         competing for one glance. Wave folded into the region dropdown (the
-         plan's waves ARE geography: the routes, their tails, and the tracks
-         that sit outside both) and status became a dropdown, because a rep
-         picks a territory every morning and filters by status only now and
-         then. -->
+    <!-- Which region, and what status. Wave is folded into the region dropdown
+         (the plan's waves ARE geography: the routes, their tails, and the
+         tracks that sit outside both), and status is a dropdown because it is
+         filtered by only now and then. -->
     <div class="prospect-controls">
-      <div class="chip-row" id="prospect-rep-filter" role="group" aria-label="Whose doors to show"></div>
-      <!-- Concept fit (column J). Chips rather than another dropdown because
+        <!-- Concept fit (column J). Chips rather than another dropdown because
            this is the one filter a rep uses mid-sweep -- "just the A doors on
            this street" -- and because tapping one has to be able to answer
            what the tier means, which the note below does. -->
@@ -641,7 +639,7 @@
     </button>
     <p class="prospect-scope-note">
       Marks save on this phone first, so a door can be recorded without signal, and
-      sync to the office as soon as there is any.
+      reach the office and every other rep’s phone as soon as there is any.
     </p>
   </section>
 
@@ -687,6 +685,7 @@
       <div class="run-name" id="run-name">—</div>
       <div class="run-address" id="run-address">—</div>
       <div class="prospect-tags" id="run-tags"></div>
+      <div class="run-visited" id="run-visited"></div>
       <div class="run-warning" id="run-warning"></div>
       <a class="run-navigate" id="run-navigate" target="_blank" rel="noopener">Navigate to this door</a>
     </div>
@@ -695,7 +694,7 @@
     <div class="prospect-status-grid" id="run-status-buttons" role="group" aria-label="Record this visit"></div>
 
     <div class="field" style="margin-top:14px;">
-      <label for="run-note">Note <small style="font-weight:400; color:var(--silver-dim);">(saved on this phone)</small></label>
+      <label for="run-note">Note <small style="font-weight:400; color:var(--silver-dim);">(shared with the team)</small></label>
       <textarea id="run-note" rows="2" placeholder="Who you spoke to, when to come back…"></textarea>
     </div>
 
@@ -731,7 +730,7 @@
     <div class="prospect-status-grid" id="prospect-status-buttons" role="group" aria-label="Set visit status"></div>
 
     <div class="field" style="margin-top:16px;">
-      <label for="prospect-note">Note <small style="font-weight:400; color:var(--silver-dim);">(saved on this phone)</small></label>
+      <label for="prospect-note">Note <small style="font-weight:400; color:var(--silver-dim);">(shared with the team)</small></label>
       <textarea id="prospect-note" rows="3" placeholder="Who you spoke to, when to come back, what they pour now…"></textarea>
     </div>
 
@@ -742,6 +741,11 @@
 
     <div class="section-title" style="margin-top:22px;">The plan for this door</div>
     <div class="order-summary" id="prospect-facts"></div>
+
+    <!-- Who has been here, newest first. Read from the server, because the
+         trail is every rep's marks, not just this phone's. -->
+    <div class="section-title" style="margin-top:18px;">Visit trail</div>
+    <div class="prospect-trail" id="prospect-trail"></div>
   </section>
 
   <!-- ACCOUNT DETAIL -->
@@ -865,6 +869,7 @@
   <script src="assets/js/marketing-materials.js"></script>
   <script src="assets/js/customers.js"></script>
   <script src="assets/js/prospects.js"></script>
+  <script src="assets/js/prospect-plan.js"></script>
   <script src="assets/js/app.js"></script>
 </body>
 </html>
