@@ -257,6 +257,13 @@ async function main(): Promise<void> {
             salesRepId: rep?.id ?? null,
             invoiceNumber: row.invoiceNumber,
             invoiceStatus: row.status || null,
+            // The sheet's "Delivery (Invoice) Date" (invoiceDetail calls it
+            // invoiceDate). Carried across because "awaiting delivery" means
+            // "has no delivery date" (lib/awaitingScheduling.ts): an imported
+            // order that left this empty would read as waiting forever even
+            // though the sheet dated it. Blank in the sheet stays null, which
+            // is exactly the order that does still need scheduling.
+            deliveryDate: detail.invoiceDate && !Number.isNaN(new Date(detail.invoiceDate).getTime()) ? new Date(detail.invoiceDate) : null,
             paymentMethod: detail.paymentMethod || null,
             expectedEmptyKegs: detail.expectedEmptyKegs || null,
             // Deliberately NOT set: sheetSyncedAt (this row did not come from a
