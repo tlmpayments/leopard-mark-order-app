@@ -22,6 +22,13 @@ model Rep {
   id        String   @id @default(cuid())
   name      String   @unique
   pinHash   String?  @map("pin_hash")
+  /// A second PIN that opens the delivery site and nothing else. Separate from
+  /// `pinHash` on purpose: that one is also the password for /admin/login
+  /// (name + PIN, full access), so making it short or easy to type at a truck
+  /// would weaken a door that has nothing to do with delivery. When this is
+  /// set the delivery sign-in uses it; when it is not, it falls back to
+  /// `pinHash` (a driver has only the one).
+  deliveryPinHash String? @map("delivery_pin_hash")
   active    Boolean  @default(true)
   role      UserRole  @default(rep)
   // Dispatch needs a number for the driver the same way a stop needs one for

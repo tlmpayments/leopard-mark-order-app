@@ -87,6 +87,17 @@ export default auth((req) => {
     return Response.redirect(new URL("/rep-app", req.nextUrl));
   }
 
+  // ---- 1c. Delivery-only sessions -----------------------------------------
+  // The delivery site signs in with a bare four-digit PIN (lib/deliveryPin.ts).
+  // That is convenient for a phone in a truck and far too guessable to be the
+  // key to the rest of the company, so a session minted that way is stamped
+  // `scope: "delivery"` and is kept out of everything but /delivery (and the
+  // API routes the delivery pages call). Checked on every request, server
+  // action POSTs included -- they go to the page's own URL.
+  if (req.auth?.scope === "delivery" && ["/ops", "/admin", "/docs", "/customer"].some((p) => path.startsWith(p))) {
+    return Response.redirect(new URL("/delivery", req.nextUrl));
+  }
+
   // ---- 2. Role gating -----------------------------------------------------
   // /admin used to be gated on "has any session at all", which was equivalent
   // to admin-only because the Credentials provider refused everyone else. It

@@ -255,10 +255,38 @@
   font-size: 15px; font-weight: 500; letter-spacing: 0; text-transform: none;
   color: var(--muted); margin-bottom: 28px;
 }
-.dv-login form {
-  display: flex; flex-direction: column; gap: 14px; text-align: left;
+.dv-login .err { color: var(--coral-deep); font-size: 14px; min-height: 20px; margin: 4px 0 10px; }
+
+/* The PIN: four dots and a keypad. Round keys, flat white, a grey flash under
+   the thumb -- and the flash is instant, because a key that answers late feels
+   like a key that missed. */
+.dv-pin-prompt { margin: 0 0 14px; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+.dv-dots { display: flex; justify-content: center; gap: 16px; }
+.dv-dots i {
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 1.5px solid var(--ink); background: transparent;
+  transition: background-color 90ms var(--ease-out);
 }
-.dv-login .err { color: var(--coral-deep); font-size: 14px; min-height: 20px; text-align: center; }
+.dv-dots i.on { background: var(--ink); }
+.dv-dots.error i { border-color: var(--coral-deep); background: var(--coral-deep); }
+.dv-dots.error { animation: dv-shake 360ms var(--ease-out); }
+@keyframes dv-shake { 20% { transform: translateX(-7px); } 45% { transform: translateX(6px); } 70% { transform: translateX(-3px); } }
+
+.dv-pad {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px 22px;
+  max-width: 300px; margin: 6px auto 0;
+}
+.dv-pad button {
+  aspect-ratio: 1; min-height: 0; padding: 0;
+  border: 0; border-radius: 50%;
+  background: var(--foam); color: var(--ink);
+  font: inherit; font-size: 30px; font-weight: 400; font-variant-numeric: tabular-nums;
+  transition: background-color 80ms;
+}
+.dv-pad button:active { background: #d1d1d6; }
+.dv-pad button.back { background: transparent; color: var(--muted); font-size: 22px; }
+.dv-pad button.back:active { background: var(--fill); }
+.dv-pad button:disabled { opacity: 0.5; }
 
 /* A stop's own action bar sticks to the bottom of the viewport: the driver's
    thumb is already there, and on a long order the button would otherwise be

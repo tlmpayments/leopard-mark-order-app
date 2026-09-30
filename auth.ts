@@ -5,6 +5,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import type { Adapter } from "next-auth/adapters";
 import { verifyRepPin } from "@/lib/repAuth";
 import { verifyHubPin } from "@/lib/ops/hubPin";
+import { verifyDeliveryPin } from "@/lib/deliveryPin";
 import { verifyDriverLink } from "@/lib/driverLink";
 import { db } from "@/lib/db";
 import type { UserRole } from "@/app/generated/prisma/enums";
@@ -73,6 +74,20 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         return { id: rep.id, name: rep.name, role: rep.role };
       },
     }),
+    // The delivery site's sign-in: four digits and no name. A separate provider
+    // so the name + PIN path above is untouched, and so a session minted here
+    // can be marked delivery-only (see the jwt callback and proxy.ts) -- a PIN
+    // this short, with no name to go with it, is not allowed to open the hub.
+    Credentials({
+      id: "delivery-pin",
+      name: "Delivery PIN",
+      credentials: { pin: { label: "PIN", type: "password" } },
+      async authorize(credentials) {
+        const rep = await verifyDeliveryPin(String(credentials?.pin ?? ""));
+        if (!rep) return null;
+        return { id: rep.id, name: rep.name, role: rep.role };
+      },
+    }),
     // The Ops Hub's shared PIN: four digits and nothing else. A separate
     // provider rather than a magic name in the box above, so the hub's login
     // cannot be reached by typing a person's name with the wrong PIN, and so
@@ -110,12 +125,15 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (
         (account?.provider === "credentials" ||
           account?.provider === "driver-link" ||
+          account?.provider === "delivery-pin" ||
           account?.provider === "ops-pin") &&
         user
       ) {
         const u = user as { id?: string; role?: string };
         if (u.id) token.repId = u.id;
         if (u.role) token.role = u.role;
+        // Stamped at sign-in and never cleared: a new sign-in is a new token.
+        if (account?.provider === "delivery-pin") token.scope = "delivery";
       }
       if (account?.provider === "resend" && user?.email) {
         const contact = await db.contact.findFirst({
@@ -133,6 +151,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     async session({ session, token }) {
       if (token.repId) session.repId = token.repId as string;
       if (token.role) session.role = token.role as UserRole;
+      if (token.scope) session.scope = token.scope as "delivery";
       if (token.contactId) {
         session.contactId = token.contactId as string;
         session.accountId = token.accountId as string;
