@@ -228,14 +228,15 @@ export default function AdminBuilder(props: Props) {
 
       {editable ? (
         <>
-          <button
-            className="dv-btn primary"
-            style={{ marginTop: 16 }}
-            disabled={pending || !stops.length || !props.routingConfigured || !props.origin.trim()}
-            onClick={() => coordinate(stops, true)}
-          >
-            {pending ? "Working…" : "Optimize and calculate path"}
-          </button>
+          <div className="dv-actionbar">
+            <button
+              className="dv-btn primary"
+              disabled={pending || !stops.length || !props.routingConfigured || !props.origin.trim()}
+              onClick={() => coordinate(stops, true)}
+            >
+              {pending ? "Working…" : "Optimize and calculate path"}
+            </button>
+          </div>
           <p className="sm muted" style={{ margin: "8px 4px 0" }}>
             Starts at {props.originName}. The last stop stays the destination; the stops between are put in the fastest order.
           </p>

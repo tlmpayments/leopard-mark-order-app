@@ -1,9 +1,10 @@
-import Link from "next/link";
 import "./delivery.css";
 import { currentDeliveryUser } from "@/lib/ops/session";
 import { LEDGER_ROLES } from "@/lib/ops/roles";
 import { todayYmd } from "@/lib/routes";
 import { RegisterSW } from "./_components/RegisterSW";
+import { LogoutButton } from "./_components/LogoutButton";
+import { HeaderNav } from "./_components/HeaderNav";
 
 export const metadata = {
   title: "Leopard Mark — Delivery",
@@ -66,22 +67,16 @@ export default async function DeliveryLayout({ children }: LayoutProps<"/deliver
       <div className="dv-shell">
         {user ? (
           <header className="dv-top">
-            <div className="id">
-              {user.name.split(" ")[0]}
-              <small>{DAY.format(new Date(`${todayYmd()}T12:00:00Z`))}</small>
+            <div className="row">
+              <div className="id">
+                {user.name.split(" ")[0]}
+                <small>{DAY.format(new Date(`${todayYmd()}T12:00:00Z`))}</small>
+              </div>
+              <LogoutButton />
             </div>
-            <nav className="nav">
-              <Link className="dv-btn quiet inline sm" href="/delivery">
-                {LEDGER_ROLES.includes(user.role) ? "Today" : "My route"}
-              </Link>
-              {/* Office staff only. A driver never sees this link, and the proxy
-                  and the pages themselves refuse him if he types the address. */}
-              {LEDGER_ROLES.includes(user.role) ? (
-                <Link className="dv-btn primary inline sm" href="/delivery/admin">
-                  Admin
-                </Link>
-              ) : null}
-            </nav>
+            {/* Office staff only. A driver never sees this, and the proxy and the
+                pages themselves refuse him if he types the address. */}
+            {LEDGER_ROLES.includes(user.role) ? <HeaderNav homeLabel="Today" /> : null}
           </header>
         ) : null}
         {children}

@@ -73,22 +73,26 @@
 /* The admin area is used at a desk as often as on a phone. */
 .dv-shell:has(.dv-admin) { max-width: 1040px; }
 
-/* ---------- header: translucent, content scrolls under ---------- */
+/* ---------- header: translucent, content scrolls under ----------
+   Name and date on the left, Log out top right. Office staff get a segmented
+   control underneath; a driver has one place to be and so no control at all. */
 .dv-top {
   position: sticky; top: 0; z-index: 20;
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  display: flex; flex-direction: column; gap: 10px;
   margin: 0 -20px 16px; padding: max(12px, env(safe-area-inset-top)) 20px 12px;
   background: rgba(242, 242, 247, 0.72);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
   backdrop-filter: blur(20px) saturate(180%);
   border-bottom: 0.5px solid var(--line);
 }
-.dv-top .id { font-size: 22px; font-weight: 700; letter-spacing: -0.022em; line-height: 1.1; }
+.dv-top .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dv-top .id { font-size: 22px; font-weight: 700; letter-spacing: -0.022em; line-height: 1.1; min-width: 0; }
 .dv-top .id small {
   display: block; margin-top: 2px;
   font-size: 13px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--muted);
 }
-.dv-top .nav { display: flex; gap: 8px; }
+.dv-top .dv-btn.inline { flex: 0 0 auto; }
+.dv-nav { margin-bottom: 0; }
 
 /* ---------- controls ---------- */
 .dv-btn {
@@ -117,7 +121,7 @@
 
 .dv-btn:disabled { opacity: 0.4; transform: none; cursor: default; }
 .dv-btn.inline { width: auto; min-height: 40px; padding: 8px 16px; border-radius: 999px; font-size: 15px; }
-.dv-btn.tiny { width: auto; min-height: 34px; padding: 6px 14px; border-radius: 999px; font-size: 15px; }
+.dv-btn.tiny { width: auto; min-height: 40px; min-width: 44px; padding: 8px 14px; border-radius: 999px; font-size: 15px; }
 
 .dv-row { display: flex; gap: 12px; }
 .dv-row > * { flex: 1; }
@@ -148,10 +152,10 @@
   display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 14px; align-items: center;
   min-height: 74px; padding: 14px 16px;
   background: var(--foam);
-  transition: background-color 100ms;
+  transition: background-color 100ms, transform 140ms var(--ease-out);
 }
 .dv-stop + .dv-stop { box-shadow: inset 0 0.5px 0 var(--line); }
-.dv-stop:active { background: var(--fill); }
+.dv-stop:active { background: var(--fill); transform: scale(0.985); }
 .dv-stop.done .name { color: var(--muted); }
 
 .dv-stop .seq {
@@ -306,20 +310,38 @@ a.dv-cell:active { background: var(--fill); }
 
 /* Segmented control. */
 .dv-seg { display: flex; padding: 2px; border-radius: 10px; background: var(--fill); margin-bottom: 14px; }
-.dv-seg button {
-  flex: 1; min-height: 34px; border: 0; border-radius: 8px; background: transparent;
+.dv-seg button, .dv-seg > a {
+  flex: 1; display: grid; place-items: center; min-height: 36px; border: 0; border-radius: 8px; background: transparent;
   color: var(--ink); font: inherit; font-size: 15px; font-weight: 500;
-  transition: background-color 150ms, box-shadow 150ms;
+  transition: background-color 160ms var(--ease-out), box-shadow 160ms var(--ease-out);
 }
-.dv-seg button[aria-pressed="true"] { background: var(--foam); font-weight: 600; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14); }
+.dv-seg button[aria-pressed="true"], .dv-seg > a[aria-pressed="true"] {
+  background: var(--foam); font-weight: 600; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14);
+}
 
-.dv-banner { padding: 14px 16px; margin-bottom: 14px; border-radius: var(--r-sm); background: #fff4d6; color: #7a4b00; font-size: 15px; }
+.dv-banner { transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out); padding: 14px 16px; margin-bottom: 14px; border-radius: var(--r-sm); background: #fff4d6; color: #7a4b00; font-size: 15px; }
 .dv-banner b { display: block; margin-bottom: 2px; }
+@starting-style { .dv-banner { opacity: 0; transform: translateY(-4px); } }
 .dv-banner.error { background: rgba(215, 0, 21, 0.1); color: #a0000f; }
 .dv-banner ul { margin: 6px 0 0; padding-left: 18px; }
 
 /* Two columns on a desk, one on a phone. */
 .dv-builder { display: block; }
+.dv-builder .dv-list { transition: opacity 160ms var(--ease-out); }
+.dv-builder[aria-busy="true"] .dv-list { opacity: 0.62; pointer-events: none; }
+/* Sticky primary action on the stops tab: the thumb is already at the bottom
+   of a long list. A translucent bar, like the header, so the list scrolls
+   under it. */
+.dv-actionbar {
+  position: sticky; bottom: 0; z-index: 10;
+  margin: 16px -20px 0; padding: 12px 20px max(12px, env(safe-area-inset-bottom));
+  background: rgba(242, 242, 247, 0.72);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border-top: 0.5px solid var(--line);
+}
+@media (min-width: 900px) { .dv-actionbar { position: static; margin: 16px 0 0; padding: 0; background: none; border: 0; -webkit-backdrop-filter: none; backdrop-filter: none; } }
+@media (prefers-reduced-transparency: reduce) { .dv-actionbar { background: var(--ground); -webkit-backdrop-filter: none; backdrop-filter: none; } }
 .dv-cols { display: grid; grid-template-columns: 1fr; gap: 20px; align-items: start; }
 .dv-panel[hidden] { display: none; }
 @media (min-width: 900px) {
