@@ -1893,3 +1893,32 @@ input:focus, select:focus, textarea:focus { outline-color: var(--coral); border-
 .trail-row .prospect-dot { margin-top: 5px; flex: 0 0 auto; }
 .trail-row small { display: block; color: var(--silver-dim); font-size: 11px; }
 .trail-row em { display: block; margin-top: 2px; font-style: normal; color: var(--silver); font-size: 12px; line-height: 1.4; }
+
+/* ---- Route tiles: every route as a big box, open on the screen ------------ */
+.route-picker { margin-top: 16px; border: 0; background: none; overflow: visible; }
+.route-picker-title { padding: 0 2px 10px; color: var(--ink); font-weight: 700; font-size: 16px; }
+.route-picker-title small { display: block; margin-top: 2px; color: var(--silver-dim); font-weight: 500; font-size: 12px; }
+.route-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.route-tile {
+  display: flex; flex-direction: column; gap: 4px;
+  min-height: 150px; padding: 14px;
+  border: 2px solid var(--line); border-radius: var(--radius);
+  background: var(--foam); color: var(--ink);
+  font: inherit; text-align: left; cursor: pointer; min-width: 0; overflow-wrap: anywhere;
+  box-shadow: 0 4px 0 var(--line);
+}
+.route-tile:active { transform: translateY(2px); box-shadow: 0 2px 0 var(--line); }
+.route-tile.is-started { border-color: var(--coral); box-shadow: 0 4px 0 #c74c30; }
+.route-tile-code { font-family: var(--font-serif); font-size: 30px; line-height: 1; font-weight: 700; }
+.route-tile-name { font-size: 13px; font-weight: 700; line-height: 1.25; }
+.route-tile-count { margin-top: auto; font-size: 12px; color: var(--silver-dim); }
+.route-tile-bar { display: block; height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.route-tile-bar i { display: block; height: 100%; background: var(--coral); }
+.route-tile-last { font-size: 11px; color: var(--silver-dim); }
+.route-tile-go { font-size: 13px; font-weight: 700; color: var(--coral); }
+.route-tile.is-done {
+  background: #ececec; border-color: #d8d8d8; box-shadow: none;
+  color: #9a9a9a; cursor: default; filter: grayscale(1);
+}
+.route-tile.is-done .route-tile-bar i { background: #b5b5b5; }
+.route-tile.is-done .route-tile-go, .route-tile.is-done .route-tile-count, .route-tile.is-done .route-tile-last { color: #9a9a9a; }

@@ -4122,24 +4122,34 @@
     '</div>';
   }
 
-  function renderRoutePicker(open) {
-    var rows = prospectRouteOptions().map(function (o) {
+  /** Every route as a big tile, open on the screen. Anyone can start or pick
+   *  up any of them; a finished route greys out and drops to the end so the
+   *  ones still to do are what the eye lands on. */
+  function renderRoutePicker() {
+    var tiles = prospectRouteOptions().map(function (o, i) {
       var doors = prospectRegionDoors(o.value);
       var worked = doors.filter(function (p) { return prospectStatusKey(p) !== 'new'; }).length;
+      var done = doors.length > 0 && worked >= doors.length;
       var last = lastMarkAmong(doors);
       var pct = doors.length ? Math.round((worked / doors.length) * 100) : 0;
-      var action = worked >= doors.length ? 'Done' : worked ? 'Resume' : 'Start';
-      return '<button type="button" class="route-pick' + (worked >= doors.length ? ' is-done' : '') +
-          '" data-route-region="' + escapeHtml(o.value) + '">' +
-        '<span class="route-pick-main"><b>' + escapeHtml(o.label) + '</b>' +
-          '<small>' + worked + ' of ' + doors.length + ' worked' +
-            (last ? ' \u00b7 last ' + escapeHtml(visitedByLine(last)) : '') + '</small>' +
-          '<span class="route-pick-bar"><i style="width:' + pct + '%;"></i></span></span>' +
-        '<span class="route-pick-go">' + action + ' \u2192</span>' +
-      '</button>';
-    }).join('');
-    return '<details class="route-picker"' + (open ? ' open' : '') + ' id="route-picker">' +
-      '<summary>Pick a route<small>Anyone can start or resume any of them</small></summary>' + rows + '</details>';
+      var m = /^(\S+)\s+(.*)$/.exec(o.label) || [null, o.label, ''];
+      return {
+        order: (done ? 1000 : 0) + i,
+        html: '<button type="button" class="route-tile' + (done ? ' is-done' : worked ? ' is-started' : '') + '"' +
+            (done ? ' disabled aria-disabled="true"' : '') + ' data-route-region="' + escapeHtml(o.value) + '">' +
+          '<span class="route-tile-code">' + escapeHtml(m[1]) + '</span>' +
+          '<span class="route-tile-name">' + escapeHtml(m[2]) + '</span>' +
+          '<span class="route-tile-count">' + worked + ' of ' + doors.length + ' worked</span>' +
+          '<span class="route-tile-bar"><i style="width:' + pct + '%;"></i></span>' +
+          '<span class="route-tile-last">' + (last ? 'Last ' + escapeHtml(visitedByLine(last)) : '&nbsp;') + '</span>' +
+          '<span class="route-tile-go">' + (done ? 'Completed' : worked ? 'Resume \u2192' : 'Start \u2192') + '</span>' +
+        '</button>'
+      };
+    });
+    tiles.sort(function (a, b) { return a.order - b.order; });
+    return '<div class="route-picker" id="route-picker"><div class="route-picker-title">Routes' +
+      '<small>Tap one to start it or pick up where it was left off</small></div>' +
+      '<div class="route-grid">' + tiles.map(function (t) { return t.html; }).join('') + '</div></div>';
   }
 
   /** The top of the prospecting screen: the run in progress, the crew's days,
@@ -4149,7 +4159,6 @@
     var el = document.getElementById('prospect-run-cta');
     var run = prospectState.run;
     var html = '';
-    var pickerOpen = el.querySelector('#route-picker') ? el.querySelector('#route-picker').open : true;
 
     if (run && run.index < run.ids.length) {
       var worked = runWorkedCount(run);
@@ -4161,7 +4170,7 @@
         '</button>' +
         '<button class="run-abandon" id="prospect-end-run" type="button">End this run</button>';
     }
-    html += renderPlanCard() + renderRoutePicker(pickerOpen);
+    html += renderPlanCard() + renderRoutePicker();
     el.innerHTML = html;
   }
 
