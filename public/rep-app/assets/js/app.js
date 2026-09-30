@@ -3376,8 +3376,15 @@
     });
     routes.sort(function (a, b) { return a.order - b.order; });
     groups.sort(function (a, b) { return a.label.localeCompare(b.label); });
-    return routes.concat(groups);
+    // The Arts District track rides along as a tile of its own: 17 walkable
+    // doors that belong to no route. The select filters by prefix, so it stays
+    // in "Other tracks" there and only the picker shows it here.
+    var arts = allProspects().some(function (p) { return isArtsDoor(p); })
+      ? [{ value: 'wave:arts', label: 'AD Arts District' }] : [];
+    return routes.concat(groups, arts);
   }
+
+  function isArtsDoor(p) { return p.wave.indexOf('Separate track') === 0; }
 
   /** The one filter that used to be two. '' means the whole plan minus the
    *  exclusions -- the doors there are actually to work. */
@@ -3633,6 +3640,7 @@
       if (p.wave.indexOf('Excluded') === 0) return false;
       if (region.indexOf('route:') === 0) return p.route === region.slice(6);
       if (region.indexOf('group:') === 0) return p.group === region.slice(6);
+      if (region === 'wave:arts') return isArtsDoor(p);
       return false;
     });
     list.sort(function (a, b) { return a.id - b.id; });
@@ -3642,6 +3650,10 @@
   /** The doors of one region, in the order they should be walked: plan order,
    *  then the shortest walk inside each day, exactly as the list shows them. */
   function prospectRunDoors(region) {
+    // The Arts District is worked in buyer order -- founder first, then the
+    // bar managers, then the chefs -- and the sheet says so in as many words.
+    // The shortest-walk optimiser would put the founder in the middle.
+    if (region === 'wave:arts') return prospectRegionDoors(region);
     var walked = [];
     prospectGroupByDay(prospectRegionDoors(region)).forEach(function (d) {
       var optimised = prospectOptimiseDay(d.doors, null);
@@ -3653,6 +3665,7 @@
   function prospectRegionLabel(region) {
     if (region.indexOf('route:') === 0) return region.slice(6);
     if (region.indexOf('group:') === 0) return region.slice(6).split(' (')[0];
+    if (region === 'wave:arts') return 'Arts District';
     return '';
   }
 
@@ -4196,7 +4209,7 @@
     // particular now, so the bar is how far the two of them have got between
     // them, with the split by rep underneath.
     var scope = allProspects().filter(function (p) {
-      return (p.route || p.group) && p.wave.indexOf('Excluded') !== 0;
+      return (p.route || p.group || isArtsDoor(p)) && p.wave.indexOf('Excluded') !== 0;
     });
     var counts = {};
     PROSPECT_STATUSES.forEach(function (st) { counts[st.key] = 0; });

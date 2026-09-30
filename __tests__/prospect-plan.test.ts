@@ -33,16 +33,20 @@ describe("prospect schedule", () => {
   it("puts every door of every route and second-pass group on exactly one day", () => {
     const scheduled = days.flatMap((d) => [...d.together, ...d.legs.james, ...d.legs.zack]);
     expect(new Set(scheduled).size).toBe(scheduled.length);
-    const expected = doors.filter((p) => (p.route || p.group) && p.wave.indexOf("Excluded") !== 0).map((p) => p.id);
+    const expected = doors
+      .filter((p) => (p.route || p.group || p.wave.indexOf("Separate track") === 0) && p.wave.indexOf("Excluded") !== 0)
+      .map((p) => p.id);
     expect([...scheduled].sort((a, b) => a - b)).toEqual([...expected].sort((a, b) => a - b));
   });
 
-  it("gives the two reps equal solo shares on every full day", () => {
-    for (const d of days.slice(0, -1)) {
-      expect(d.legs.james.length).toBe(d.legs.zack.length);
+  it("gives the two reps equal solo shares, within one door on a partial day", () => {
+    const full = plan.DEFAULTS.together + plan.DEFAULTS.solo * 2;
+    for (const d of days) {
+      const size = d.together.length + d.legs.james.length + d.legs.zack.length;
+      const gap = Math.abs(d.legs.james.length - d.legs.zack.length);
+      if (size === full) expect(gap).toBe(0);
+      else expect(gap).toBeLessThanOrEqual(1);
     }
-    const last = days[days.length - 1];
-    expect(Math.abs(last.legs.james.length - last.legs.zack.length)).toBeLessThanOrEqual(1);
   });
 
   it("keeps the overall load between the two within one door per day", () => {
@@ -65,6 +69,17 @@ describe("prospect schedule", () => {
       const shared = d.together.map((id) => at.get(id)!);
       expect(shared[shared.length - 1] - shared[0]).toBe(shared.length - 1);
     }
+  });
+
+  it("gives the Arts District a day of its own, in buyer order", () => {
+    const arts = doors.filter((p) => p.wave.indexOf("Separate track") === 0).map((p) => p.id).sort((a, b) => a - b);
+    expect(arts.length).toBe(17);
+    const day = days.find((d) => d.label === "Arts District")!;
+    expect(day).toBeTruthy();
+    expect([...day.together, ...day.legs.james, ...day.legs.zack].sort((a, b) => a - b)).toEqual(arts);
+    // Founder-level door first, and nothing else shares the day.
+    expect(day.together[0]).toBe(arts[0]);
+    expect(days.filter((d) => d.label.includes("Arts District")).length).toBe(1);
   });
 
   it("matches the crew by first name", () => {

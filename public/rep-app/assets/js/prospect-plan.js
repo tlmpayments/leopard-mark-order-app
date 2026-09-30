@@ -62,6 +62,11 @@
 
   function isExcluded(p) { return String(p.wave || '').indexOf('Excluded') === 0; }
 
+  /** The Downtown Arts District track (ZIP 90021): 17 doors that sit outside
+   *  the routes. Walkable, and worked in buyer order (founder first), so it
+   *  gets a day of its own rather than being spliced into a route day. */
+  function isArts(p) { return String(p.wave || '').indexOf('Separate track') === 0; }
+
   /** The regions in the order the plan works them: the first-push routes by
    *  their priority, then the second-pass groups that extend them. */
   function regionOrder(prospects, opts) {
@@ -96,6 +101,11 @@
         .sort(function (a, b) { return a.id - b.id; })
         .forEach(function (p) { queue.push(p); });
     });
+    // Buyer order, which column A already encodes.
+    prospects
+      .filter(function (p) { return isArts(p) && !isExcluded(p); })
+      .sort(function (a, b) { return a.id - b.id; })
+      .forEach(function (p) { queue.push(p); });
     return queue;
   }
 
@@ -127,9 +137,8 @@
       }
     }
 
-    for (var i = 0; i < queue.length; i += perDay) {
+    function addDay(block) {
       nextWorkingDay();
-      var block = queue.slice(i, i + perDay);
       var together = block.slice(0, opts.together);
       var rest = block.slice(opts.together);
       var half = Math.ceil(rest.length / 2);
@@ -139,7 +148,8 @@
 
       var seen = {}, labels = [];
       block.forEach(function (p) {
-        var label = regionLabel(p.route ? { kind: 'route', name: p.route } : { kind: 'group', name: p.group });
+        var label = isArts(p) ? 'Arts District'
+          : regionLabel(p.route ? { kind: 'route', name: p.route } : { kind: 'group', name: p.group });
         if (!seen[label]) { seen[label] = true; labels.push(label); }
       });
 
@@ -154,6 +164,13 @@
       });
       date.setDate(date.getDate() + 1);
     }
+
+    // Routes and their tails fill days back to back; the Arts District then
+    // starts a fresh day, so a day never spans it and Pico Rivera.
+    var routeDoors = queue.filter(function (p) { return !isArts(p); });
+    var artsDoors = queue.filter(isArts);
+    for (var i = 0; i < routeDoors.length; i += perDay) addDay(routeDoors.slice(i, i + perDay));
+    for (var j = 0; j < artsDoors.length; j += perDay) addDay(artsDoors.slice(j, j + perDay));
     return days;
   }
 
