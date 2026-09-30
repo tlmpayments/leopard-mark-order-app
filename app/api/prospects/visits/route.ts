@@ -30,11 +30,56 @@ async function caller(request: Request): Promise<{ name: string; canWrite: boole
   return null;
 }
 
-/** Every door anyone has marked. 551 doors is a small enough universe that
- *  paging it would be ceremony -- the whole set is a few kilobytes. */
+/** Cheap fingerprint of the whole board: how many doors are marked and when the
+ *  newest change landed. A clear (row deleted) lowers the count and any mark
+ *  raises the timestamp, so it moves on every change the reps care about --
+ *  which lets a phone poll every few seconds and pay for the full read only
+ *  when something is actually different. */
+async function boardVersion(): Promise<string> {
+  const agg = await db.prospectVisit.aggregate({ _count: { _all: true }, _max: { updatedAt: true } });
+  return `${agg._count._all}:${agg._max.updatedAt?.getTime() ?? 0}`;
+}
+
+/** Every door anyone has marked, or -- with ?trail=<prospectId> -- the history
+ *  of one door. 551 doors is a small enough universe that paging the board
+ *  would be ceremony; the whole set is a few kilobytes.
+ *
+ *  ?v=<version> is the version the caller already holds; when it is still
+ *  current the reply is just `{ unchanged: true }`. */
 export async function GET(request: Request): Promise<Response> {
   const who = await caller(request);
   if (!who) return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
+
+  const url = new URL(request.url);
+
+  const trailId = url.searchParams.get("trail");
+  if (trailId !== null) {
+    const prospectId = Number(trailId);
+    if (!Number.isInteger(prospectId) || prospectId < 1) {
+      return NextResponse.json({ ok: false, error: "trail needs a prospectId." }, { status: 400 });
+    }
+    const events = await db.prospectVisitEvent.findMany({
+      where: { prospectId },
+      orderBy: { markedAt: "desc" },
+      take: 50,
+      select: { status: true, note: true, repName: true, markedAt: true },
+    });
+    return NextResponse.json({
+      ok: true,
+      prospectId,
+      trail: events.map((e) => ({
+        status: e.status,
+        note: e.note ?? "",
+        rep: e.repName,
+        markedAt: e.markedAt.toISOString(),
+      })),
+    });
+  }
+
+  const version = await boardVersion();
+  if (url.searchParams.get("v") === version) {
+    return NextResponse.json({ ok: true, unchanged: true, version });
+  }
 
   const visits = await db.prospectVisit.findMany({
     orderBy: { prospectId: "asc" },
@@ -43,6 +88,7 @@ export async function GET(request: Request): Promise<Response> {
 
   return NextResponse.json({
     ok: true,
+    version,
     visits: visits.map((v) => ({
       prospectId: v.prospectId,
       status: v.status,
@@ -101,6 +147,21 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ ok: false, error: "Nothing in that batch was a valid visit." }, { status: 400 });
   }
 
+  // The trail keeps every mark, including one that lost the last-write-wins
+  // race below: a visit made in a basement at 10am still happened, it just is
+  // not what the door looks like now. Upserted on (door, rep, device time) so
+  // a re-sent queue is a no-op rather than a second entry, while a note edited
+  // after the tap -- same mark, same timestamp -- still lands in the trail.
+  await db.$transaction(
+    clean.map((v) =>
+      db.prospectVisitEvent.upsert({
+        where: { prospectId_repName_markedAt: { prospectId: v.prospectId, repName: who.name, markedAt: v.markedAt } },
+        create: { prospectId: v.prospectId, status: v.status, note: v.note || null, repName: who.name, markedAt: v.markedAt },
+        update: { status: v.status, note: v.note || null },
+      }),
+    ),
+  );
+
   let written = 0;
   let skipped = 0;
   for (const visit of clean) {
@@ -123,10 +184,9 @@ export async function POST(request: Request): Promise<Response> {
   return NextResponse.json({ ok: true, written, skipped });
 }
 
-/** Clearing a door, or a rep's whole record. The reset button in the app is
- *  the only caller: statuses a rep made while testing have to be removable,
- *  and now that they are shared, removable by someone other than the phone
- *  that made them. */
+/** Clearing a door, or a rep's whole record. Statuses a rep made while testing
+ *  have to be removable, and now that they are shared, removable by someone
+ *  other than the phone that made them. The trail is never deleted. */
 export async function DELETE(request: Request): Promise<Response> {
   const who = await caller(request);
   if (!who || !who.canWrite) return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
@@ -137,6 +197,11 @@ export async function DELETE(request: Request): Promise<Response> {
 
   if (Number.isInteger(prospectId) && prospectId > 0) {
     await db.prospectVisit.deleteMany({ where: { prospectId } });
+    // A clear is part of the door's story too: someone said "not visited"
+    // over another rep's mark, and the trail should show who.
+    await db.prospectVisitEvent.create({
+      data: { prospectId, status: "new", repName: who.name, markedAt: new Date() },
+    });
     return NextResponse.json({ ok: true, deleted: 1 });
   }
   if (rep) {

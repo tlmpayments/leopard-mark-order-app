@@ -166,6 +166,8 @@
   function completeLogin(rep, role) {
     state.rep = rep;
     state.repRole = role || 'Rep';
+    var reauthNote = document.getElementById('pin-reauth-note');
+    if (reauthNote) reauthNote.hidden = true;
     saveSession(rep);
     saveRole(state.repRole);
     enterHome();
@@ -2875,81 +2877,42 @@
 
   var PROSPECT_DOORS_PER_DAY = 12;
 
-  // Step 3: the split is by territory, not by rows. Each rep owns a
-  // contiguous block of routes and works them in priority order, and each
-  // second-pass group goes to whoever ran the route it extends -- so a tail
-  // is the same streets, worked by the same person, after the parent route.
-  //
-  // Keyed on the rep's LAST NAME, the way LA_TERRITORY_REPS above already
-  // keys them, so whatever exact form the Apps Script login returns
-  // ("James Williams", "J. Williams") still resolves. The two names and
-  // colours come from that same map, so a rep is one colour everywhere in
-  // this app.
-  //
-  // WHICH REP TAKES WHICH HALF IS AN ASSUMPTION, not something the plan
-  // states: the plan defines the two territories and names the two reps, and
-  // leaves the pairing to the team. Swap the two `rep` values below to swap
-  // territories; nothing else needs to change.
-  var PROSPECT_TERRITORIES = [
-    {
-      key: 'ne',
-      rep: 'williams',
-      label: 'North & East',
-      routes: [
-        'R3B East Los Angeles + Commerce',
-        'R5 Downey core',
-        'R3A Boyle Heights',
-        'R6 Montebello + Pico Rivera Whittier'
-      ],
-      groups: ['S1', 'S2', 'S4'] // Downey outer, Pico Rivera, Commerce
-    },
-    {
-      key: 'ws',
-      rep: 'villanueva',
-      label: 'West & South',
-      routes: [
-        'R1 Huntington Park',
-        'R2A Maywood + Bell',
-        'R4A South Gate',
-        'R2B Bell Gardens + Cudahy',
-        'R4B Lynwood + South Gate south'
-      ],
-      groups: ['S3'] // South LA
-    }
-  ];
+  // Who is on the road, and the schedule they follow, live in prospect-plan.js.
+  // There are no territories: any rep can open any route, and every mark is
+  // shared live, so two people on the same streets are coordinated by a
+  // schedule rather than a fence.
+  var PROSPECT_PLAN = window.LM_PROSPECT_PLAN;
+  var prospectScheduleCache = null;
 
-  // The plan's three-rep split, held here so that adding the third person is
-  // an edit rather than a rebuild: North (R3B, R3A, R6 + S2, S4), Centre
-  // (R1, R2A, R2B + S3), South & East (R4A, R4B, R5 + S1). Counted against
-  // the data it comes to 89, 78 and 94 first-push doors -- the plan's "78 to
-  // 94 each". Deliberately not wired up: only two reps have been named.
-  //
-  // var PROSPECT_TERRITORIES_THREE = [
-  //   { key: 'n',  rep: '?', label: 'North',        routes: ['R3B East Los Angeles + Commerce', 'R3A Boyle Heights', 'R6 Montebello + Pico Rivera Whittier'], groups: ['S2', 'S4'] },
-  //   { key: 'c',  rep: '?', label: 'Centre',       routes: ['R1 Huntington Park', 'R2A Maywood + Bell', 'R2B Bell Gardens + Cudahy'], groups: ['S3'] },
-  //   { key: 'se', rep: '?', label: 'South & East', routes: ['R4A South Gate', 'R4B Lynwood + South Gate south', 'R5 Downey core'], groups: ['S1'] }
-  // ];
-
-  /** The territory a door falls in, or null for the tracks that stay outside
-   *  the split. Route and group only: the Arts District track has neither and
-   *  is one buyer's job, and tier C and the exclusions are not dispatched to
-   *  anyone yet.
-   *
-   *  A multi-unit door DOES belong to a territory -- step 6 keeps its stop
-   *  number "so reps know where they fall" even though the owner meeting
-   *  comes first. It is the owner meeting that sits outside the split, not
-   *  the door. */
-  function prospectTerritory(p) {
-    for (var i = 0; i < PROSPECT_TERRITORIES.length; i++) {
-      var t = PROSPECT_TERRITORIES[i];
-      if (p.route && t.routes.indexOf(p.route) !== -1) return t;
-      if (p.group && t.groups.some(function (g) { return p.group.indexOf(g) === 0; })) return t;
-    }
-    return null;
+  function prospectSchedule() {
+    if (!prospectScheduleCache) prospectScheduleCache = PROSPECT_PLAN.buildSchedule(allProspects());
+    return prospectScheduleCache;
   }
 
-  function prospectTerritoryRep(t) {
-    return t ? (LA_TERRITORY_REPS[t.rep] || UNKNOWN_TERRITORY_REP) : UNKNOWN_TERRITORY_REP;
+  /** james | zack, or null for anyone else signing in (Steve guiding, an
+   *  admin). They get the route picker but no assigned days. */
+  function myCrewKey() { return PROSPECT_PLAN.crewKey(state.rep); }
+
+  /** First name for a trail line: "James Williams" -> "James". */
+  function repFirstName(name) {
+    var first = String(name || '').trim().split(/\s+/)[0];
+    return first || 'Someone';
+  }
+
+  /** "2:14 PM" today, "Tue 2:14 PM" this week, "Sep 30, 2:14 PM" otherwise. */
+  function whenLabel(ms) {
+    var d = new Date(ms), now = new Date();
+    var time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    if (d.toDateString() === now.toDateString()) return time;
+    var days = (now - d) / 86400000;
+    if (days < 6) return d.toLocaleDateString([], { weekday: 'short' }) + ' ' + time;
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ', ' + time;
+  }
+
+  /** "James \u00b7 2:14 PM" for a mark, or '' when nobody has been here. */
+  function visitedByLine(mark) {
+    if (!mark || !mark.status || mark.status === 'new' || !mark.at) return '';
+    return repFirstName(mark.rep) + ' \u00b7 ' + whenLabel(mark.at);
   }
 
   /** Which day of that route or group a stop falls on, cut along the sweep. */
@@ -2960,7 +2923,6 @@
   var PROSPECT_PAGE = 40; // rows rendered before "show more" -- 414 <li> at once is a scroll no thumb wants
 
   var prospectState = {
-    rep: 'mine',    // 'mine' | a territory key | 'all'
     // One control for both questions the wave chips and the route dropdown
     // used to ask separately. '' is the whole plan; 'route:'/'group:' narrow
     // to one piece of it; 'wave:' selects a track that sits outside the
@@ -2972,7 +2934,7 @@
     q: '',
     limit: PROSPECT_PAGE,
     here: null,       // {lat,lng} once the rep allows geolocation, for sort:'near'
-    marks: {},        // id -> { status, note, at }
+    marks: {},        // id -> { status, note, at, rep }
     map: null,
     markers: {},      // id -> L.Marker, so a status change repaints one pin not 414
     current: null,    // the prospect open on screen-prospect
@@ -3033,7 +2995,14 @@
     })
       .then(function (r) { return r.json(); })
       .then(function (res) {
-        if (res && res.ok && res.token) { saveProspectToken(res.token); return true; }
+        if (res && res.ok && res.token) {
+          saveProspectToken(res.token);
+          // The whole point of the sign-in: a rep told to log out and back in
+          // to get his marks up should have them up when he does, not when he
+          // next happens to open the prospecting tab.
+          syncProspectsNow();
+          return true;
+        }
         return false;
       })
       .catch(function () { return false; });
@@ -3063,7 +3032,7 @@
       markedAt: new Date(mark.at || Date.now()).toISOString()
     });
     saveProspectQueue(queue);
-    flushProspectQueue();
+    return flushProspectQueue();
   }
 
   /** Un-marking a door. A delete rather than a status, because "not visited"
@@ -3106,14 +3075,18 @@
   }
 
   var prospectFlushing = false;
+  var prospectFlushPromise = Promise.resolve();
 
   function flushProspectQueue() {
     var token = loadProspectToken();
     var queue = loadProspectQueue();
-    if (prospectFlushing || !queue.length || !token) return Promise.resolve();
+    // A flush already on the wire was built from a queue that does not have
+    // this caller's mark in it; wait for it, then send whatever is left.
+    if (prospectFlushing) return prospectFlushPromise.then(flushProspectQueue);
+    if (!queue.length || !token) return Promise.resolve();
     prospectFlushing = true;
 
-    return fetch(PROSPECT_API + '/visits', {
+    prospectFlushPromise = fetch(PROSPECT_API + '/visits', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
       body: JSON.stringify({ visits: queue })
@@ -3136,37 +3109,62 @@
       })
       .catch(function () { /* still offline; it stays queued */ })
       .then(function () { prospectFlushing = false; });
+    return prospectFlushPromise;
   }
+
+  /** The board version this phone last saw. Sent back on the next pull so the
+   *  server can answer "nothing new" without a body, which is what makes
+   *  polling every few seconds cheap enough to leave running. */
+  var prospectVersion = '';
 
   /** Pull what everyone has recorded and fold it into this device's copy.
    *  The server wins, except for marks this phone has not managed to send
    *  yet -- those are newer by definition and would otherwise be undone by
-   *  the very sync that is meant to preserve them. */
+   *  the very sync that is meant to preserve them.
+   *
+   *  Resolves to the ids of doors that changed under this phone (another rep's
+   *  mark, or a clear), or false when nothing did. A door the server no longer
+   *  has is dropped here too: with two reps on one board, "not visited" has to
+   *  travel, not just "visited". */
   function pullProspectVisits() {
     var token = loadProspectToken();
     if (!token) return Promise.resolve(false);
 
-    return fetch(PROSPECT_API + '/visits', { headers: { Authorization: 'Bearer ' + token } })
+    var url = PROSPECT_API + '/visits' + (prospectVersion ? '?v=' + encodeURIComponent(prospectVersion) : '');
+    return fetch(url, { headers: { Authorization: 'Bearer ' + token } })
       .then(function (r) {
         if (r.status === 401) { saveProspectToken(''); return null; }
         return r.json();
       })
       .then(function (res) {
-        if (!res || !res.ok) return false;
+        if (!res || !res.ok || res.unchanged || !res.visits) return false;
         var pending = {};
         loadProspectQueue().forEach(function (item) { pending[item.prospectId] = true; });
 
+        var before = prospectState.marks;
         var merged = {};
         res.visits.forEach(function (v) {
           if (pending[v.prospectId]) return;
           merged[v.prospectId] = { status: v.status, note: v.note || '', at: new Date(v.markedAt).getTime(), rep: v.rep };
         });
-        Object.keys(prospectState.marks).forEach(function (id) {
-          if (pending[Number(id)] || !merged[id]) merged[id] = prospectState.marks[id];
+        Object.keys(before).forEach(function (id) {
+          // Kept: anything still waiting to be sent, and a note on a door
+          // nobody has marked (status 'new' never reaches the server).
+          if (pending[Number(id)] || (!merged[id] && before[id].status === 'new')) merged[id] = before[id];
         });
+
+        var changed = [];
+        var ids = {};
+        Object.keys(before).concat(Object.keys(merged)).forEach(function (id) { ids[id] = true; });
+        Object.keys(ids).forEach(function (id) {
+          var a = before[id], b = merged[id];
+          if (!a || !b || a.status !== b.status || a.rep !== b.rep || a.at !== b.at || a.note !== b.note) changed.push(Number(id));
+        });
+
         prospectState.marks = merged;
+        prospectVersion = res.version || '';
         saveProspectMarks();
-        return true;
+        return changed.length ? changed : false;
       })
       .catch(function () { return false; });
   }
@@ -3188,9 +3186,151 @@
     el.className = 'prospect-sync' + (queued ? ' is-pending' : '');
   }
 
+  /** Push what this phone is holding and take what the office has, without
+   *  waiting for the rep to open the prospecting tab.
+   *
+   *  Marks queue whether or not there is a token, so a phone can be carrying
+   *  weeks of work while the office sees an empty board. Until now the only
+   *  things that moved that queue were opening the tab, making a new mark, or
+   *  an `online` transition -- so a rep could sign out and back in, get a
+   *  perfectly good token, and still sync nothing, because minting a token is
+   *  not the same as using one. Syncing is a background job; the tab is just
+   *  where it used to happen to get noticed.
+   *
+   *  Flush before pull, chained rather than fired together: the pull folds the
+   *  server's copy into this device's marks, and doing that while a flush is
+   *  still in flight means resolving against a server that has not been told
+   *  yet. */
+  function syncProspectsNow() {
+    if (!loadProspectToken()) return Promise.resolve(false);
+    prospectState.marks = loadProspectMarks();
+    backfillProspectMarks();
+    return flushProspectQueue()
+      .then(function () { return pullProspectVisits(); })
+      .then(function (changed) {
+        renderProspectSyncState();
+        return changed;
+      })
+      .catch(function () { return false; });
+  }
+
   window.addEventListener('online', function () {
-    flushProspectQueue();
+    syncProspectsNow();
   });
+
+  // ---- live: the other rep's marks, as they happen ------------------------
+  //
+  // While any prospecting screen is up, this phone asks the server every few
+  // seconds whether the board has moved. The ask is one small aggregate query
+  // and, when nothing changed, a reply with no body -- see boardVersion() in
+  // the visits route -- so two phones polling all day cost next to nothing.
+  // When something did change, the pins recolour in place and the screen the
+  // rep is on updates around him without moving him.
+  //
+  // Polling rather than a held-open stream because the API runs as serverless
+  // functions, where a connection that never ends is a function that never
+  // finishes and a bill that never stops. Five seconds is inside the time it
+  // takes to walk out of one door and into the next.
+  var PROSPECT_POLL_MS = 5000;
+  var prospectPulling = false;
+
+  function activeScreenId() {
+    var el = document.querySelector('.screen.active');
+    return el ? el.id : '';
+  }
+
+  function prospectScreenIsLive() {
+    return /^(screen-prospects|screen-prospect|screen-run|screen-run-overview)$/.test(activeScreenId());
+  }
+
+  function livePullProspects() {
+    if (prospectPulling || document.hidden || !prospectScreenIsLive() || !loadProspectToken()) return Promise.resolve();
+    prospectPulling = true;
+    // Flush before pull, for the same reason syncProspectsNow does. No
+    // reload of marks from storage here: an edit a rep is typing right now is
+    // in memory a moment before it is on disk.
+    return flushProspectQueue()
+      .then(function () { return pullProspectVisits(); })
+      .then(function (changed) {
+        if (changed) applyLiveProspectChanges(changed);
+        renderProspectSyncState();
+      })
+      .catch(function () {})
+      .then(function () { prospectPulling = false; });
+  }
+
+  window.setInterval(livePullProspects, PROSPECT_POLL_MS);
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) livePullProspects();
+  });
+
+  /** Repaint whatever the rep is looking at for the doors that just changed
+   *  under him. */
+  function applyLiveProspectChanges(ids) {
+    var me = String(state.rep || '').toLowerCase();
+    var announced = 0;
+
+    ids.forEach(function (id) {
+      var p = findProspect(id);
+      if (!p) return;
+      var mark = prospectMark(id);
+      var byOther = !!mark && String(mark.rep || '').toLowerCase() !== me;
+      refreshProspectPin(p, byOther);
+      // Say so, for the first few: a pin changing colour on a moving map is
+      // easy to miss, and "Zack just did Tacos Los Cholos" is the thing the
+      // other rep wants to know. More than three at once is a catch-up after
+      // signal came back, and a wall of toasts would be noise.
+      if (byOther && mark.status && mark.status !== 'new' && announced < 3 && ids.length <= 3) {
+        announced++;
+        toast(repFirstName(mark.rep) + ' \u2014 ' + prospectTitle(p) + ' \u00b7 ' + PROSPECT_STATUS_BY_KEY[mark.status].label);
+      }
+    });
+
+    var screen = activeScreenId();
+    if (screen === 'screen-prospects') {
+      renderProspectProgress();
+      renderRunCta();
+      renderProspectReset();
+      // A status filter can change which doors belong on the map at all.
+      if (prospectState.status !== 'all') renderProspects();
+      else renderProspectList(filteredProspects());
+    } else if (screen === 'screen-run-overview') {
+      openRunOverview(true);
+    } else if (screen === 'screen-run') {
+      applyLiveToRun(ids);
+    } else if (screen === 'screen-prospect' && prospectState.current && ids.indexOf(prospectState.current.id) !== -1) {
+      renderProspectStatusButtons();
+      renderProspectFacts(prospectState.current);
+      renderProspectTrail();
+    }
+  }
+
+  /** On the run screen: if the door the rep is standing at was just done by
+   *  the other rep, move him on rather than let him walk into a door that is
+   *  already worked. Otherwise only the progress bar moves -- a full render
+   *  would rewrite the note he may be typing. */
+  function applyLiveToRun(ids) {
+    var run = prospectState.run;
+    if (!run) return;
+    var p = findProspect(run.ids[run.index]);
+    if (p && ids.indexOf(p.id) !== -1) {
+      var before = run.index;
+      runSkipWorkedByOthers(run);
+      if (run.index !== before) {
+        run.index = runNextUnworked(run, run.index);
+        saveRun(run);
+        renderRun();
+        return;
+      }
+      renderRunStatusButtons(p);
+      var by = visitedByLine(prospectMark(p.id));
+      var visitedEl = document.getElementById('run-visited');
+      visitedEl.textContent = by ? 'Last visit: ' + by : '';
+      visitedEl.style.display = by ? 'block' : 'none';
+    }
+    var total = run.ids.length;
+    document.getElementById('run-bar-fill').style.width = (total ? (runWorkedCount(run) / total) * 100 : 0) + '%';
+  }
 
 
   function prospectMark(id) { return prospectState.marks[id] || null; }
@@ -3254,40 +3394,10 @@
   }
 
 
-  /** The hub view versus the field view. An admin is looking at the whole
-   *  board and needs to compare the two halves; James and Ricardo are looking
-   *  at their own streets on their own phone, where another rep's doors are
-   *  not context, they are noise. So the rep chips exist for one and not the
-   *  other, and a rep's screen is locked to his own territory. */
-  function prospectIsAdmin() {
-    return (state.repRole || '') === 'Admin';
-  }
-
-  /** The logged-in rep's own territory, if they have one. A rep who is not in
-   *  the split (Steve guiding, or anyone else signing in) has none, and the
-   *  "Mine" chip then shows everything rather than an empty screen. */
-  function myTerritory() {
-    var last = repLastName(state.rep);
-    return PROSPECT_TERRITORIES.filter(function (t) { return t.rep === last; })[0] || null;
-  }
-
-  function prospectMatchesRep(p) {
-    var sel = prospectState.rep;
-    if (sel === 'all') return true;
-    var t = prospectTerritory(p);
-    if (sel === 'outside') return !t;
-    if (sel === 'mine') {
-      var mine = myTerritory();
-      return mine ? t === mine : true;
-    }
-    return t && t.key === sel;
-  }
-
   function filteredProspects() {
     var q = prospectState.q.trim().toLowerCase();
     var list = allProspects().filter(function (p) {
       if (!prospectMatchesRegion(p)) return false;
-      if (!prospectMatchesRep(p)) return false;
       if (prospectState.tier !== 'all' && p.tier !== prospectState.tier) return false;
       if (prospectState.status !== 'all' && prospectStatusKey(p) !== prospectState.status) return false;
       if (!q) return true;
@@ -3411,12 +3521,15 @@
   }
 
   // ---- pins ---------------------------------------------------------------
-  function prospectPin(p) {
+  /** `fresh` pulses the pin: another rep just changed it and the eye should
+   *  land there. */
+  function prospectPin(p, fresh) {
     var s = prospectStatus(p);
     var touched = prospectStatusKey(p) !== 'new';
     return L.divIcon({
       className: '',
-      html: '<div class="lm-pin' + (touched ? ' lm-pin--touched' : '') + '" style="background:' + s.color + ';"></div>',
+      html: '<div class="lm-pin' + (touched ? ' lm-pin--touched' : '') + (fresh ? ' lm-pin--fresh' : '') +
+        '" style="background:' + s.color + ';"></div>',
       iconSize: [24, 24],
       iconAnchor: [12, 24],
       popupAnchor: [0, -24]
@@ -3425,109 +3538,19 @@
 
   function prospectPopupHtml(p) {
     var s = prospectStatus(p);
+    var by = visitedByLine(prospectMark(p.id));
     return '<div class="prospect-popup"><strong>' + escapeHtml(prospectTitle(p)) + '</strong>' +
       escapeHtml(p.address) +
       '<span class="pp-status" style="color:' + s.color + ';">' +
-      '<i class="prospect-dot" style="background:' + s.color + ';"></i>' + escapeHtml(s.label) + '</span>' +
+      '<i class="prospect-dot" style="background:' + s.color + ';"></i>' + escapeHtml(s.label) +
+      (by ? ' \u00b7 ' + escapeHtml(by) : '') + '</span>' +
       '<br/><a href="#" class="popup-open-prospect" data-prospect-id="' + p.id + '">Open this door →</a></div>';
-  }
-
-  // ---- territories, drawn -------------------------------------------------
-  // A rep asked where his half of the map is; the honest answer is a shape,
-  // not a word in a chip. Each territory is the convex hull of the doors
-  // assigned to it -- computed here rather than stored, so it follows the
-  // split: reassign a route in PROSPECT_TERRITORIES and the outline moves
-  // with it.
-  //
-  // The two hulls overlap a little, and that is the truth of the geography
-  // rather than a defect: Bell Gardens and Cudahy (West & South) sit between
-  // Downey and East LA (North & East). They are drawn with a light fill and a
-  // dashed edge so the overlap reads as two claims on the same ground rather
-  // than a solid block hiding the pins underneath.
-  function convexHull(points) {
-    if (points.length < 3) return points.slice();
-    var pts = points.slice().sort(function (a, b) { return a[0] - b[0] || a[1] - b[1]; });
-    var cross = function (o, a, b) {
-      return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
-    };
-    var lower = [];
-    pts.forEach(function (pt) {
-      while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], pt) <= 0) lower.pop();
-      lower.push(pt);
-    });
-    var upper = [];
-    pts.slice().reverse().forEach(function (pt) {
-      while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], pt) <= 0) upper.pop();
-      upper.push(pt);
-    });
-    lower.pop(); upper.pop();
-    return lower.concat(upper);
-  }
-
-  var PROSPECT_TERRITORY_PANE = 'lmTerritories';
-  var prospectTerritoryShapes = [];
-
-  function renderTerritoryShapes() {
-    prospectTerritoryShapes.forEach(function (layer) { prospectState.map.removeLayer(layer); });
-    prospectTerritoryShapes = [];
-    if (!prospectState.map) return;
-
-    // Drawn for the territories in view, and only when the map is showing
-    // doors that belong to one: a tier C or Arts District view has no
-    // territory to outline.
-    if (prospectState.region.indexOf('wave:') === 0) return;
-
-    prospectVisibleTerritories().forEach(function (t) {
-      var pts = allProspects()
-        .filter(function (p) { return prospectTerritory(p) === t; })
-        .map(function (p) { return [p.lat, p.lng]; });
-      var hullPts = convexHull(pts);
-      if (hullPts.length < 3) return;
-
-      var color = prospectTerritoryRep(t).color;
-      // Drawn into a pane of its own rather than added and then sent to the
-      // back. bringToBack() reaches for the path's parentNode, which does not
-      // exist until the map has a view -- and on this screen the shapes are
-      // drawn before the first fitBounds, so it threw, aborted the render and
-      // left the map blank with no pins and no tiles. A pane fixes the
-      // stacking order declaratively and cannot fail this way.
-      var shape = L.polygon(hullPts, {
-        pane: PROSPECT_TERRITORY_PANE,
-        color: color,
-        weight: 2,
-        opacity: 0.85,
-        dashArray: '7 6',
-        fillColor: color,
-        fillOpacity: 0.08,
-        interactive: false
-      }).addTo(prospectState.map);
-      prospectTerritoryShapes.push(shape);
-
-      // The name sits at the top of the shape rather than its centre, where
-      // it would land on top of the densest cluster of pins.
-      var lats = hullPts.map(function (q) { return q[0]; });
-      var lngs = hullPts.map(function (q) { return q[1]; });
-      var label = L.marker([Math.max.apply(null, lats), (Math.min.apply(null, lngs) + Math.max.apply(null, lngs)) / 2], {
-        pane: PROSPECT_TERRITORY_PANE,
-        interactive: false,
-        icon: L.divIcon({
-          className: '',
-          html: '<span class="territory-tag" style="background:' + color + ';">' +
-            escapeHtml(prospectTerritoryRep(t).name + ' \u00b7 ' + t.label) + '</span>',
-          iconSize: [0, 0]
-        })
-      }).addTo(prospectState.map);
-      prospectTerritoryShapes.push(label);
-    });
   }
 
   function renderProspectMap(list) {
     if (!window.L) return;
     if (!prospectState.map) {
       prospectState.map = L.map('prospects-map');
-      // Above the tiles (200), below the pins (600), so a territory is ground
-      // the doors sit on rather than a sheet over the top of them.
-      prospectState.map.createPane(PROSPECT_TERRITORY_PANE).style.zIndex = 350;
       L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         maxZoom: 19,
         subdomains: 'abcd',
@@ -3564,16 +3587,15 @@
       prospectState.markers[p.id] = marker;
     });
 
-    renderTerritoryShapes();
     prospectState.map.invalidateSize();
   }
 
   /** One pin, repainted in place. Re-running renderProspectMap after every tap
    *  would also refit the bounds and throw away the rep's pan and zoom. */
-  function refreshProspectPin(p) {
+  function refreshProspectPin(p, fresh) {
     var marker = prospectState.markers[p.id];
     if (!marker) return;
-    marker.setIcon(prospectPin(p));
+    marker.setIcon(prospectPin(p, fresh));
     marker.setPopupContent(prospectPopupHtml(p));
   }
 
@@ -3605,45 +3627,27 @@
     } catch (e) {}
   }
 
-  /** The doors of one region, in the order they should be walked: plan order,
-   *  then the shortest walk inside each day, exactly as the list shows them.
-   *  Excluded doors are never in a run. */
-  function prospectRunDoors(region) {
+  /** The doors of one region, in plan order, excluded doors never included. */
+  function prospectRegionDoors(region) {
     var list = allProspects().filter(function (p) {
       if (p.wave.indexOf('Excluded') === 0) return false;
-      if (!prospectMatchesRep(p)) return false;
       if (region.indexOf('route:') === 0) return p.route === region.slice(6);
       if (region.indexOf('group:') === 0) return p.group === region.slice(6);
       return false;
     });
     list.sort(function (a, b) { return a.id - b.id; });
+    return list;
+  }
+
+  /** The doors of one region, in the order they should be walked: plan order,
+   *  then the shortest walk inside each day, exactly as the list shows them. */
+  function prospectRunDoors(region) {
     var walked = [];
-    prospectGroupByDay(list).forEach(function (d) {
+    prospectGroupByDay(prospectRegionDoors(region)).forEach(function (d) {
       var optimised = prospectOptimiseDay(d.doors, null);
       walked = walked.concat(prospectPathMiles(optimised) < prospectPathMiles(d.doors) ? optimised : d.doors);
     });
     return walked;
-  }
-
-  /** The region a run should cover: whatever is selected, or else the rep's
-   *  first route that still has unworked doors in it. "Generate" should not
-   *  make him choose before it will do anything. */
-  function prospectSuggestedRegion() {
-    if (/^(route|group):/.test(prospectState.region)) return prospectState.region;
-    var options = [];
-    prospectVisibleTerritories().forEach(function (t) {
-      t.routes.forEach(function (r) { options.push({ value: 'route:' + r, order: prospectRoutePriority(r) }); });
-      t.groups.forEach(function (g) {
-        var full = prospectGroupName(g);
-        if (full) options.push({ value: 'group:' + full, order: 90 });
-      });
-    });
-    options.sort(function (a, b) { return a.order - b.order; });
-    for (var i = 0; i < options.length; i++) {
-      var doors = prospectRunDoors(options[i].value);
-      if (doors.some(function (p) { return prospectStatusKey(p) === 'new'; })) return options[i].value;
-    }
-    return options.length ? options[0].value : '';
   }
 
   function prospectRegionLabel(region) {
@@ -3668,6 +3672,43 @@
     saveRun(run);
     prospectState.run = run;
     openRunOverview();
+  }
+
+  /** Start (or pick up) one of this rep's scheduled days: the shared doors
+   *  first, then his own half. Where he is in it comes from the shared marks,
+   *  so a door his partner already did is not his to do again. */
+  function startPlanDay(iso) {
+    var key = myCrewKey();
+    var day = prospectSchedule().filter(function (d) { return d.date === iso; })[0];
+    if (!key || !day) return;
+    var legs = {};
+    day.together.forEach(function (id) { legs[id] = 'together'; });
+    (day.legs[key] || []).forEach(function (id) { legs[id] = 'solo'; });
+    var run = {
+      region: 'plan:' + iso,
+      plan: true,
+      label: planDateLabel(iso) + ' \u00b7 ' + day.label,
+      ids: planDayIds(day, key),
+      legs: legs,
+      index: 0,
+      started: Date.now()
+    };
+    run.index = runNextUnworked(run, 0);
+    saveRun(run);
+    prospectState.run = run;
+    openRunOverview();
+  }
+
+  /** The run's doors grouped into days. A scheduled day is one day by
+   *  definition; a whole route is cut along the plan's twelve-door days. */
+  function runDayGroups(run, doors) {
+    return run.plan ? [{ day: 1, doors: doors }] : prospectGroupByDay(doors);
+  }
+
+  /** "together" / "solo" for a scheduled day, "day 2" for a route. */
+  function runLegTag(run, p) {
+    if (run.legs) return run.legs[p.id] === 'together' ? 'together' : 'solo';
+    return 'day ' + (prospectDay(p) || 1);
   }
 
   /** The next index at or after `from` whose door is still untouched, or the
@@ -3703,27 +3744,46 @@
     });
   }
 
-  function openRunOverview() {
+  /** Move past any door another rep has already worked. Used when a run is
+   *  picked back up and when a mark arrives live -- never when a rep taps a
+   *  specific row, which is him asking to look at that door. */
+  function runSkipWorkedByOthers(run) {
+    var me = String(state.rep || '').toLowerCase();
+    while (run.index < run.ids.length) {
+      var p = findProspect(run.ids[run.index]);
+      var m = p && prospectMark(p.id);
+      if (!m || m.status === 'new' || !m.status || String(m.rep || '').toLowerCase() === me) break;
+      run.index++;
+    }
+    saveRun(run);
+  }
+
+  /** `live` repaints the page in place for a mark that just arrived: no
+   *  screen change, and no re-fit of a map the rep may have panned. */
+  function openRunOverview(live) {
+    live = live === true;
     var run = prospectState.run;
     if (!run) { showScreen('screen-prospects'); return; }
+    if (!live) runSkipWorkedByOthers(run);
     var doors = run.ids.map(findProspect).filter(Boolean);
     var worked = runWorkedCount(run);
     var left = doors.length - worked;
-    var days = Math.ceil(doors.length / PROSPECT_DOORS_PER_DAY);
+    var days = run.plan ? 1 : Math.ceil(doors.length / PROSPECT_DOORS_PER_DAY);
 
     document.getElementById('run-ov-route').textContent = run.label;
     document.getElementById('run-ov-meta').textContent =
-      doors.length + ' stops \u00b7 ' + prospectPathMiles(doors).toFixed(1) + ' mi \u00b7 about ' +
-      days + ' day' + (days === 1 ? '' : 's') + (worked ? ' \u00b7 ' + worked + ' already worked' : '');
+      doors.length + ' stops \u00b7 ' + prospectPathMiles(doors).toFixed(1) + ' mi' +
+      (run.plan ? '' : ' \u00b7 about ' + days + ' day' + (days === 1 ? '' : 's')) +
+      (worked ? ' \u00b7 ' + worked + ' already worked' : '');
 
     document.getElementById('run-ov-start').textContent =
       worked && run.index < run.ids.length ? 'RESUME AT STOP ' + (run.index + 1) : 'START';
 
     // Each day's drive, as a Maps link, on the page a rep looks at before he
     // sets off rather than buried in the list behind him.
-    document.getElementById('run-ov-links').innerHTML = prospectGroupByDay(doors).map(function (d) {
+    document.getElementById('run-ov-links').innerHTML = runDayGroups(run, doors).map(function (d) {
       var chunks = prospectMapsChunks(d.doors);
-      return '<div class="run-ov-day"><span>Day ' + d.day + ' \u00b7 ' + d.doors.length + ' stops \u00b7 ' +
+      return '<div class="run-ov-day"><span>' + (run.plan ? 'The day' : 'Day ' + d.day) + ' \u00b7 ' + d.doors.length + ' stops \u00b7 ' +
         prospectPathMiles(d.doors).toFixed(1) + ' mi</span>' +
         chunks.map(function (chunk, i) {
           return '<a href="' + prospectMapsUrl(chunk) + '" target="_blank" rel="noopener">' +
@@ -3743,9 +3803,9 @@
           '<span class="osub">' + escapeHtml(p.address.split(',')[0]) + ' \u00b7 ' + escapeHtml(titleCase(p.city)) + '</span>' +
           '<span class="prospect-tags">' +
             '<span class="prospect-tag tier-' + escapeHtml(p.tier) + '">Tier ' + escapeHtml(p.tier) + '</span>' +
-            '<span class="prospect-tag">day ' + (prospectDay(p) || 1) + '</span>' +
+            '<span class="prospect-tag">' + escapeHtml(runLegTag(run, p)) + '</span>' +
             (done ? '<span class="prospect-tag" style="background:' + st.color + '22; color:' + st.color + ';">' +
-              escapeHtml(st.label) + '</span>' : '') +
+              escapeHtml(st.label + ' \u00b7 ' + visitedByLine(prospectMark(p.id))) + '</span>' : '') +
           '</span>' +
         '</span>' +
         '</div>';
@@ -3759,11 +3819,12 @@
       });
     });
 
+    if (live) { renderRunOverviewMap(doors, true); return; }
     showScreen('screen-run-overview');
     setTimeout(function () { renderRunOverviewMap(doors); }, 50);
   }
 
-  function renderRunOverviewMap(doors) {
+  function renderRunOverviewMap(doors, keepView) {
     if (!window.L) return;
     if (!runOverviewMap) {
       runOverviewMap = L.map('run-ov-map');
@@ -3778,7 +3839,7 @@
     if (!doors.length) return;
 
     var points = doors.map(function (p) { return [p.lat, p.lng]; });
-    runOverviewMap.fitBounds(L.latLngBounds(points), { padding: [28, 28], maxZoom: 15 });
+    if (!keepView) runOverviewMap.fitBounds(L.latLngBounds(points), { padding: [28, 28], maxZoom: 15 });
 
     // The line is the order of the walk, which is the thing this page exists
     // to show: a rep can see at a glance whether the route doubles back.
@@ -3802,6 +3863,14 @@
   function openRunScreen() {
     showScreen('screen-run');
     renderRun();
+  }
+
+  /** "Stop 3 of 18 \u00b7 together" -- the position line, shared by the full
+   *  render and the in-place progress update. */
+  function runCountText(run, p) {
+    var day = prospectDay(p);
+    var where = run.plan ? runLegTag(run, p) : (day ? 'day ' + day : '');
+    return 'Stop ' + (run.index + 1) + ' of ' + run.ids.length + (where ? ' \u00b7 ' + where : '');
   }
 
   function renderRun() {
@@ -3848,9 +3917,11 @@
     var p = findProspect(run.ids[run.index]);
     if (!p) { runAdvance(); return; }
 
-    var day = prospectDay(p);
-    document.getElementById('run-count').textContent =
-      'Stop ' + (run.index + 1) + ' of ' + total + (day ? ' \u00b7 day ' + day : '');
+    document.getElementById('run-count').textContent = runCountText(run, p);
+    var by = visitedByLine(prospectMark(p.id));
+    var visitedEl = document.getElementById('run-visited');
+    visitedEl.textContent = by ? 'Last visit: ' + by : '';
+    visitedEl.style.display = by ? 'block' : 'none';
     document.getElementById('run-stop-no').textContent = p.stop || '\u2014';
     document.getElementById('run-name').textContent = prospectTitle(p);
     document.getElementById('run-address').textContent = p.address;
@@ -3912,7 +3983,8 @@
     prospectState.marks[p.id] = {
       status: key,
       note: document.getElementById('run-note').value || existing.note || '',
-      at: Date.now()
+      at: Date.now(),
+      rep: state.rep
     };
     saveProspectMarks();
     queueProspectVisit(p.id, prospectState.marks[p.id]);
@@ -3925,7 +3997,7 @@
   });
 
   document.getElementById('run-next').addEventListener('click', runAdvance);
-  document.getElementById('run-overview').addEventListener('click', openRunOverview);
+  document.getElementById('run-overview').addEventListener('click', function () { openRunOverview(); });
 
   document.getElementById('run-open').addEventListener('click', function () {
     var run = prospectState.run;
@@ -3991,56 +4063,143 @@
     renderProspects();
   });
 
-  /** The button (or the resume banner) at the top of the prospecting screen. */
+  /** "Tomorrow \u00b7 Wed Sep 30" for a schedule date. */
+  function planDateLabel(iso) {
+    var d = PROSPECT_PLAN.parseIso(iso), today = new Date();
+    var tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+    var nice = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+    if (iso === PROSPECT_PLAN.isoOf(today)) return 'Today \u00b7 ' + nice;
+    if (iso === PROSPECT_PLAN.isoOf(tomorrow)) return 'Tomorrow \u00b7 ' + nice;
+    return nice;
+  }
+
+  function planDayIds(day, key) { return day.together.concat(day.legs[key] || []); }
+
+  /** The days still to come for whoever is signed in, today first. */
+  function upcomingPlanDays(limit) {
+    var key = myCrewKey();
+    if (!key) return [];
+    var today = PROSPECT_PLAN.isoOf(new Date());
+    return prospectSchedule().filter(function (d) { return d.date >= today; }).slice(0, limit);
+  }
+
+  function markedCount(ids) {
+    return ids.filter(function (id) {
+      var p = findProspect(id);
+      return p && prospectStatusKey(p) !== 'new';
+    }).length;
+  }
+
+  /** The most recent mark among a set of doors, for "last: Zack 2:14 PM". */
+  function lastMarkAmong(doors) {
+    var best = null;
+    doors.forEach(function (p) {
+      var m = prospectMark(p.id);
+      if (m && m.status && m.status !== 'new' && (!best || m.at > best.at)) best = m;
+    });
+    return best;
+  }
+
+  function renderPlanCard() {
+    var key = myCrewKey();
+    var days = upcomingPlanDays(4);
+    if (!key || !days.length) return '';
+    var partner = PROSPECT_PLAN.CREW.filter(function (c) { return c.key !== key; })[0];
+    return '<div class="plan-card">' +
+      '<div class="plan-card-title">Your days<small>Start together, then split ' +
+        (partner ? 'with ' + escapeHtml(partner.name) : '') + ' \u00b7 equal shares</small></div>' +
+      days.map(function (d) {
+        var ids = planDayIds(d, key);
+        var done = markedCount(ids);
+        var mine = (d.legs[key] || []).length;
+        return '<button type="button" class="plan-day" data-plan-date="' + d.date + '">' +
+          '<span class="plan-day-main"><b>' + escapeHtml(planDateLabel(d.date)) + '</b>' +
+            '<small>' + escapeHtml(d.label) + ' \u00b7 ' + d.together.length + ' together, then ' + mine + ' each \u00b7 ' +
+            done + ' of ' + ids.length + ' worked</small></span>' +
+          '<span class="plan-day-go">' + (done >= ids.length ? 'Done' : done ? 'Resume' : 'Start') + ' \u2192</span>' +
+        '</button>';
+      }).join('') +
+    '</div>';
+  }
+
+  function renderRoutePicker(open) {
+    var rows = prospectRouteOptions().map(function (o) {
+      var doors = prospectRegionDoors(o.value);
+      var worked = doors.filter(function (p) { return prospectStatusKey(p) !== 'new'; }).length;
+      var last = lastMarkAmong(doors);
+      var pct = doors.length ? Math.round((worked / doors.length) * 100) : 0;
+      var action = worked >= doors.length ? 'Done' : worked ? 'Resume' : 'Start';
+      return '<button type="button" class="route-pick' + (worked >= doors.length ? ' is-done' : '') +
+          '" data-route-region="' + escapeHtml(o.value) + '">' +
+        '<span class="route-pick-main"><b>' + escapeHtml(o.label) + '</b>' +
+          '<small>' + worked + ' of ' + doors.length + ' worked' +
+            (last ? ' \u00b7 last ' + escapeHtml(visitedByLine(last)) : '') + '</small>' +
+          '<span class="route-pick-bar"><i style="width:' + pct + '%;"></i></span></span>' +
+        '<span class="route-pick-go">' + action + ' \u2192</span>' +
+      '</button>';
+    }).join('');
+    return '<details class="route-picker"' + (open ? ' open' : '') + ' id="route-picker">' +
+      '<summary>Pick a route<small>Anyone can start or resume any of them</small></summary>' + rows + '</details>';
+  }
+
+  /** The top of the prospecting screen: the run in progress, the crew's days,
+   *  and every route to start or pick up. Progress on all of it is read from
+   *  the shared marks, so "where it was left off" is whoever left it. */
   function renderRunCta() {
     var el = document.getElementById('prospect-run-cta');
     var run = prospectState.run;
+    var html = '';
+    var pickerOpen = el.querySelector('#route-picker') ? el.querySelector('#route-picker').open : true;
 
     if (run && run.index < run.ids.length) {
       var worked = runWorkedCount(run);
-      el.innerHTML =
+      html +=
         '<button class="cta-btn cta-btn--run" id="prospect-resume-run" type="button">' +
           '<span>Resume ' + escapeHtml(run.label) +
             '<small>Stop ' + (run.index + 1) + ' of ' + run.ids.length + ' \u00b7 ' + worked + ' worked</small></span>' +
           '<span class="cta-btn-icon" aria-hidden="true">\u2192</span>' +
         '</button>' +
         '<button class="run-abandon" id="prospect-end-run" type="button">End this run</button>';
-      document.getElementById('prospect-resume-run').addEventListener('click', openRunOverview);
-      document.getElementById('prospect-end-run').addEventListener('click', function () {
-        saveRun(null);
-        prospectState.run = null;
-        renderProspects();
-      });
-      return;
     }
-
-    var region = prospectSuggestedRegion();
-    if (!region) { el.innerHTML = ''; return; }
-    var doors = prospectRunDoors(region);
-    var left = doors.filter(function (p) { return prospectStatusKey(p) === 'new'; }).length;
-    var days = Math.ceil(doors.length / PROSPECT_DOORS_PER_DAY);
-
-    el.innerHTML =
-      '<button class="cta-btn cta-btn--run" id="prospect-generate-run" type="button">' +
-        '<span>Generate a route<small>' + escapeHtml(prospectRegionLabel(region)) + ' \u00b7 ' +
-          left + ' door' + (left === 1 ? '' : 's') + ' left \u00b7 about ' + days + ' day' + (days === 1 ? '' : 's') +
-        '</small></span>' +
-        '<span class="cta-btn-icon" aria-hidden="true">\u2192</span>' +
-      '</button>';
-    document.getElementById('prospect-generate-run').addEventListener('click', function () { startRun(region); });
+    html += renderPlanCard() + renderRoutePicker(pickerOpen);
+    el.innerHTML = html;
   }
 
+  // One listener for the whole block: renderRunCta rebuilds its contents on
+  // every live update, so per-button listeners would be thrown away each time.
+  document.getElementById('prospect-run-cta').addEventListener('click', function (e) {
+    if (e.target.closest('#prospect-resume-run')) { openRunOverview(); return; }
+    if (e.target.closest('#prospect-end-run')) {
+      saveRun(null);
+      prospectState.run = null;
+      renderRunCta();
+      return;
+    }
+    var day = e.target.closest('[data-plan-date]');
+    if (day) { startPlanDay(day.getAttribute('data-plan-date')); return; }
+    var route = e.target.closest('[data-route-region]');
+    if (route) startRun(route.getAttribute('data-route-region'));
+  });
+
   // ---- the screen ---------------------------------------------------------
-  function renderProspectProgress(list) {
-    // The bar is the rep's own ground, not the whole county: on James's phone
-    // "worked" has to mean worked out of his 174, or the number is somebody
-    // else's progress.
+  function renderProspectProgress() {
+    // The whole plan, worked by the whole team: doors are nobody's in
+    // particular now, so the bar is how far the two of them have got between
+    // them, with the split by rep underneath.
     var scope = allProspects().filter(function (p) {
-      return p.wave.indexOf('Excluded') !== 0 && prospectMatchesRep(p);
+      return (p.route || p.group) && p.wave.indexOf('Excluded') !== 0;
     });
     var counts = {};
     PROSPECT_STATUSES.forEach(function (st) { counts[st.key] = 0; });
-    scope.forEach(function (p) { counts[prospectStatusKey(p)]++; });
+    var byRep = {};
+    scope.forEach(function (p) {
+      var key = prospectStatusKey(p);
+      counts[key]++;
+      if (key !== 'new') {
+        var who = repFirstName((prospectMark(p.id) || {}).rep || state.rep);
+        byRep[who] = (byRep[who] || 0) + 1;
+      }
+    });
     var walked = scope.length - counts['new'];
 
     var bar = PROSPECT_STATUSES.map(function (st) {
@@ -4049,71 +4208,32 @@
         escapeHtml(st.label + ': ' + counts[st.key]) + '"></i>' : '';
     }).join('');
 
-    var whose = prospectScopeLabel();
-    var orphan = !prospectIsAdmin() && !myTerritory()
-      ? '<div class="prospect-orphan-note">No prospecting territory is assigned to you yet, so this is the whole Los Angeles list. Ask the office which routes are yours.</div>'
-      : '';
-    var line = '<div class="pp-line">' + (whose ? '<b>' + escapeHtml(whose) + '</b> \u00b7 ' : '') +
-      '<b>' + walked + '</b> of <b>' + scope.length + '</b> doors worked \u00b7 ' +
+    var line = '<div class="pp-line"><b>' + walked + '</b> of <b>' + scope.length + '</b> doors worked \u00b7 ' +
       '<b>' + counts.interested + '</b> interested \u00b7 <b>' + counts.signed + '</b> signed</div>';
 
     // The colour breakdown: every status with its count, so the bar can be
-    // read rather than guessed at. It doubles as the map's legend, which is
-    // why the old standalone legend row is gone.
+    // read rather than guessed at. It doubles as the map's legend.
     var breakdown = '<div class="prospect-legend">' + PROSPECT_STATUSES.map(function (st) {
       return '<span><i class="prospect-dot" style="background:' + st.color + ';"></i>' +
         escapeHtml(st.label) + ' <b>' + counts[st.key] + '</b></span>';
     }).join('') + '</div>';
 
-    // An admin also gets both halves side by side, which is the comparison
-    // the hub view exists for.
-    var perRep = '';
-    if (prospectIsAdmin()) {
-      perRep = '<div class="prospect-legend">' + PROSPECT_TERRITORIES.map(function (t) {
-        var rep = prospectTerritoryRep(t);
-        var doors = allProspects().filter(function (p) { return prospectTerritory(p) === t; });
-        var done = doors.filter(function (p) { return prospectStatusKey(p) !== 'new'; }).length;
-        return '<span><i class="prospect-dot" style="background:' + rep.color + ';"></i>' +
-          escapeHtml(rep.name + ' \u00b7 ' + t.label) + ' <b>' + done + '/' + doors.length + '</b></span>';
-      }).join('') + '</div>';
-    }
+    var names = Object.keys(byRep).sort(function (a, b) { return byRep[b] - byRep[a]; });
+    var perRep = names.length
+      ? '<div class="prospect-legend prospect-legend--reps">' + names.map(function (n) {
+          return '<span>' + escapeHtml(n) + ' <b>' + byRep[n] + '</b></span>';
+        }).join('') + '</div>'
+      : '';
 
     document.getElementById('prospect-progress').innerHTML =
-      line + '<div class="pp-bar">' + bar + '</div>' + breakdown + perRep + orphan;
-  }
-
-  /** Whose doors this screen is currently showing, in words. */
-  function prospectScopeLabel() {
-    if (prospectState.rep === 'all') return 'Everyone';
-    var t = prospectState.rep === 'mine' ? myTerritory()
-      : PROSPECT_TERRITORIES.filter(function (x) { return x.key === prospectState.rep; })[0];
-    if (!t) return prospectIsAdmin() ? 'Everyone' : '';
-    return prospectTerritoryRep(t).name + ' \u00b7 ' + t.label;
+      line + '<div class="pp-bar">' + bar + '</div>' + breakdown + perRep;
   }
 
   function renderProspectFilters() {
-    var row = document.getElementById('prospect-rep-filter');
-
-    if (prospectIsAdmin()) {
-      // The hub: one chip per rep, plus both together. No "Mine" -- an admin
-      // has no territory of his own, and a chip that silently meant
-      // "everyone" would be a lie on his screen.
-      var repChips = PROSPECT_TERRITORIES.map(function (t) {
-        return { key: t.key, label: prospectTerritoryRep(t).name, color: prospectTerritoryRep(t).color };
-      }).concat([{ key: 'all', label: 'Everyone' }]);
-
-      row.innerHTML = repChips.map(function (c) {
-        var on = prospectState.rep === c.key;
-        var style = on && c.color ? ' style="background:' + c.color + '; border-color:' + c.color + '; color:#102f44;"' : '';
-        return '<button type="button" class="chip' + (on ? ' selected' : '') + '" data-rep="' + c.key + '"' + style + '>' +
-          escapeHtml(c.label) + '</button>';
-      }).join('');
-    } else {
-      // The field: no chips at all. The screen is his own territory, and the
-      // only question left is which region of it.
-      row.innerHTML = '';
-      prospectState.rep = 'mine';
-    }
+    // Anyone can work any route, so there is no "whose doors" control any
+    // more -- the route dropdown is the whole question.
+    var repRow = document.getElementById('prospect-rep-filter');
+    if (repRow) repRow.innerHTML = '';
 
     renderProspectRegionSelect();
     renderProspectTierChips();
@@ -4128,12 +4248,11 @@
     document.getElementById('prospect-sort').value = prospectState.sort;
   }
 
-  /** Tier chips, counted against what the rep is actually looking at: the
-   *  plan's 324/156/71 are county-wide totals and would be somebody else's
-   *  numbers on James's phone. */
+  /** Tier chips, counted against the region in view rather than the plan's
+   *  county-wide 324/156/71. */
   function renderProspectTierChips() {
     var scope = allProspects().filter(function (p) {
-      return prospectMatchesRegion(p) && prospectMatchesRep(p);
+      return prospectMatchesRegion(p);
     });
     var counts = { A: 0, B: 0, C: 0 };
     scope.forEach(function (p) { if (counts[p.tier] !== undefined) counts[p.tier]++; });
@@ -4163,67 +4282,28 @@
       : '';
   }
 
-  /** The region list is rebuilt whenever the rep changes, because a rep's
-   *  regions are the only ones worth offering him -- showing James the option
-   *  to filter to R1 would be offering him a route he does not work. */
+  /** Every route and second-pass group, in the plan's working order. Any rep
+   *  can pick any of them: which route to work today is a choice, and the
+   *  progress on it is shared, so a route half-done by the other rep simply
+   *  shows what is left. */
   function renderProspectRegionSelect() {
     var select = document.getElementById('prospect-region');
-    var territories = prospectVisibleTerritories();
-
-    var routes = [], groups = [];
-    territories.forEach(function (t) {
-      t.routes.forEach(function (r) { routes.push({ value: 'route:' + r, label: r, order: prospectRoutePriority(r) }); });
-      t.groups.forEach(function (g) {
-        var full = prospectGroupName(g);
-        if (full) groups.push({ value: 'group:' + full, label: full.split(' (')[0] });
-      });
-    });
-    routes.sort(function (a, b) { return a.order - b.order; });
-    groups.sort(function (a, b) { return a.label.localeCompare(b.label); });
-
-    function opts(list) {
-      return list.map(function (o) {
-        return '<option value="' + escapeHtml(o.value) + '">' + escapeHtml(o.label) + '</option>';
-      }).join('');
-    }
-
-    var html = '<option value="">' + (prospectIsAdmin() ? 'All regions' : 'All my regions') + '</option>';
-    if (routes.length) html += '<optgroup label="Routes">' + opts(routes) + '</optgroup>';
-    if (groups.length) html += '<optgroup label="Second pass (the route\u2019s tail)">' + opts(groups) + '</optgroup>';
-    html += '<optgroup label="Outside the split">' + opts(PROSPECT_OUTSIDE_TRACKS) + '</optgroup>';
-
-    if (select.getAttribute('data-built-for') !== prospectState.rep) {
+    if (!select.options.length) {
+      var all = prospectRouteOptions();
+      var routes = all.filter(function (o) { return o.value.indexOf('route:') === 0; });
+      var groups = all.filter(function (o) { return o.value.indexOf('group:') === 0; });
+      var opts = function (list) {
+        return list.map(function (o) {
+          return '<option value="' + escapeHtml(o.value) + '">' + escapeHtml(o.label) + '</option>';
+        }).join('');
+      };
+      var html = '<option value="">All routes</option>';
+      if (routes.length) html += '<optgroup label="Routes">' + opts(routes) + '</optgroup>';
+      if (groups.length) html += '<optgroup label="Second pass (the route\u2019s tail)">' + opts(groups) + '</optgroup>';
+      html += '<optgroup label="Other tracks">' + opts(PROSPECT_OUTSIDE_TRACKS) + '</optgroup>';
       select.innerHTML = html;
-      select.setAttribute('data-built-for', prospectState.rep);
-      // A region that belonged to the rep we just switched away from is no
-      // longer in the list, so the select would silently fall back to its
-      // first option while prospectState still held the old value.
-      if (!select.querySelector('option[value="' + prospectState.region.replace(/"/g, '\\"') + '"]')) {
-        prospectState.region = '';
-      }
     }
     select.value = prospectState.region;
-  }
-
-  /** Which territories the current rep chip is looking at. */
-  function prospectVisibleTerritories() {
-    if (prospectState.rep === 'all') return PROSPECT_TERRITORIES;
-    if (prospectState.rep === 'mine') {
-      var mine = myTerritory();
-      return mine ? [mine] : PROSPECT_TERRITORIES;
-    }
-    return PROSPECT_TERRITORIES.filter(function (t) { return t.key === prospectState.rep; });
-  }
-
-  function prospectRoutePriority(route) {
-    var hit = allProspects().filter(function (p) { return p.route === route; })[0];
-    return hit && hit.routePriority ? hit.routePriority : 99;
-  }
-
-  /** S1 -> the group's full sheet name, which is what the data carries. */
-  function prospectGroupName(prefix) {
-    var hit = allProspects().filter(function (p) { return p.group.indexOf(prefix) === 0; })[0];
-    return hit ? hit.group : '';
   }
 
   /** The corridor sweep (column O) for whatever route is in view. It is the
@@ -4311,7 +4391,8 @@
               ? '<span class="prospect-tag prospect-tag--review">Team determination</span>'
               : '') +
             (prospectStatusKey(p) !== 'new'
-              ? '<span class="prospect-tag" style="background:' + s.color + '22; color:' + s.color + ';">' + escapeHtml(s.label) + '</span>'
+              ? '<span class="prospect-tag" style="background:' + s.color + '22; color:' + s.color + ';">' +
+                escapeHtml(s.label + ' \u00b7 ' + visitedByLine(prospectMark(p.id))) + '</span>'
               : '') +
           '</span>' +
         '</span>' +
@@ -4356,18 +4437,13 @@
     prospectState.run = loadRun();
     // Send anything stranded from yesterday -- including whatever this phone
     // recorded before the server existed -- then take what the office has.
-    if (loadProspectToken()) backfillProspectMarks();
-    flushProspectQueue();
-    pullProspectVisits().then(function (changed) {
+    syncProspectsNow().then(function (changed) {
       if (changed) renderProspects();
       renderProspectSyncState();
     });
     prospectState.limit = PROSPECT_PAGE;
-    // An admin opens on the whole board; a rep opens on his own streets.
-    prospectState.rep = prospectIsAdmin() ? 'all' : 'mine';
     prospectState.region = '';
     prospectState.tier = 'all';
-    document.getElementById('prospect-region').removeAttribute('data-built-for');
     showScreen('screen-prospects');
     // Leaflet measures the container, so it has to be visible first -- the
     // same reason openAccountsMap defers.
@@ -4376,14 +4452,6 @@
 
   document.getElementById('btn-prospects').addEventListener('click', openProspects);
   document.getElementById('back-prospects-to-home').addEventListener('click', function () { showScreen('screen-home'); });
-
-  document.getElementById('prospect-rep-filter').addEventListener('click', function (e) {
-    var chip = e.target.closest('[data-rep]');
-    if (!chip) return;
-    prospectState.rep = chip.getAttribute('data-rep');
-    prospectState.limit = PROSPECT_PAGE;
-    renderProspects();
-  });
 
   document.getElementById('prospect-tier-filter').addEventListener('click', function (e) {
     var chip = e.target.closest('[data-tier]');
@@ -4469,7 +4537,52 @@
 
     renderProspectStatusButtons();
     renderProspectFacts(p);
+    document.getElementById('prospect-trail').innerHTML = '';
+    renderProspectTrail();
     showScreen('screen-prospect');
+  }
+
+  /** Who has been to this door, newest first, from the server's trail. A
+   *  rep who has just marked it sees his own entry once the flush lands. */
+  function renderProspectTrail() {
+    var p = prospectState.current;
+    var el = document.getElementById('prospect-trail');
+    if (!p || !el) return;
+    var token = loadProspectToken();
+    if (!token) {
+      el.innerHTML = '<div class="empty-note">Sign out and back in to see who has been here.</div>';
+      return;
+    }
+    if (!el.innerHTML) el.innerHTML = '<div class="empty-note">Loading the trail\u2026</div>';
+    var id = p.id;
+    fetch(PROSPECT_API + '/visits?trail=' + id, { headers: { Authorization: 'Bearer ' + token } })
+      .then(function (r) { return r.status === 401 ? null : r.json(); })
+      .then(function (res) {
+        if (!prospectState.current || prospectState.current.id !== id) return;
+        if (!res || !res.ok) {
+          el.innerHTML = '<div class="empty-note">The trail is not available right now.</div>';
+          return;
+        }
+        if (!res.trail.length) {
+          el.innerHTML = '<div class="empty-note">Nobody has been here yet.</div>';
+          return;
+        }
+        el.innerHTML = res.trail.map(function (t) {
+          var st = t.status === 'new' ? { label: 'Cleared', color: '#8b97a3' } : (PROSPECT_STATUS_BY_KEY[t.status] || PROSPECT_STATUSES[0]);
+          return '<div class="trail-row">' +
+            '<i class="prospect-dot" style="background:' + st.color + ';"></i>' +
+            '<div><b>' + escapeHtml(repFirstName(t.rep)) + '</b> \u00b7 ' +
+              '<span style="color:' + st.color + ';">' + escapeHtml(st.label) + '</span>' +
+              '<small>' + escapeHtml(whenLabel(new Date(t.markedAt).getTime())) + '</small>' +
+              (t.note ? '<em>' + escapeHtml(t.note) + '</em>' : '') +
+            '</div></div>';
+        }).join('');
+      })
+      .catch(function () {
+        if (!prospectState.current || prospectState.current.id !== id) return;
+        if (el.querySelector('.trail-row')) return; // keep what is already on screen
+        el.innerHTML = '<div class="empty-note">The trail is not available offline.</div>';
+      });
   }
 
   function renderProspectStatusButtons() {
@@ -4488,7 +4601,7 @@
     var status = PROSPECT_STATUS_BY_KEY[current];
     banner.innerHTML = '<b style="color:' + status.color + ';">' + escapeHtml(status.label) + '</b> — ' +
       escapeHtml(status.blurb) +
-      (mark && mark.at ? '<br/>Marked ' + escapeHtml(new Date(mark.at).toLocaleDateString()) + '.' : '');
+      (visitedByLine(mark) ? '<br/>Last visit: ' + escapeHtml(visitedByLine(mark)) + '.' : '');
   }
 
   function renderProspectFacts(p) {
@@ -4502,10 +4615,7 @@
       })()],
       ['Wave', p.wave],
       ['Where it falls', prospectPlanLine(p)],
-      ['Territory', (function () {
-        var t = prospectTerritory(p);
-        return t ? prospectTerritoryRep(t).name + ' — ' + t.label : 'Outside the split';
-      })()],
+      ['Last visit', visitedByLine(prospectMark(p.id))],
       ['ZIP', p.zip]
     ];
     var sweep = prospectSweep(p);
@@ -4534,15 +4644,15 @@
     if (key === 'new') {
       // Back to untouched. The note is deliberately kept: a rep clearing a
       // wrong status has not asked to lose what they wrote about the door.
-      if (existing.note) prospectState.marks[p.id] = { status: 'new', note: existing.note, at: Date.now() };
+      if (existing.note) prospectState.marks[p.id] = { status: 'new', note: existing.note, at: Date.now(), rep: state.rep };
       else delete prospectState.marks[p.id];
     } else {
-      prospectState.marks[p.id] = { status: key, note: existing.note || '', at: Date.now() };
+      prospectState.marks[p.id] = { status: key, note: existing.note || '', at: Date.now(), rep: state.rep };
     }
 
     saveProspectMarks();
-    if (key === 'new') queueProspectDelete(p.id);
-    else queueProspectVisit(p.id, prospectState.marks[p.id]);
+    (key === 'new' ? queueProspectDelete(p.id) : queueProspectVisit(p.id, prospectState.marks[p.id]))
+      .then(function () { if (prospectState.current && prospectState.current.id === p.id) renderProspectTrail(); });
     renderProspectStatusButtons();
     refreshProspectPin(p);
     renderProspectProgress();
@@ -4558,7 +4668,7 @@
     prospectNoteTimer = setTimeout(function () {
       var existing = prospectMark(p.id) || { status: 'new', at: Date.now() };
       if (!note && existing.status === 'new') delete prospectState.marks[p.id];
-      else prospectState.marks[p.id] = { status: existing.status || 'new', note: note, at: existing.at || Date.now() };
+      else prospectState.marks[p.id] = { status: existing.status || 'new', note: note, at: existing.at || Date.now(), rep: existing.rep || state.rep };
       saveProspectMarks();
       if (prospectState.marks[p.id] && prospectState.marks[p.id].status !== 'new') {
         queueProspectVisit(p.id, prospectState.marks[p.id]);
@@ -4598,12 +4708,51 @@
   });
 
   // ---------- Boot ----------
+  // A restored session is not enough on its own. The prospect API needs a
+  // token, the only thing that can mint one is the PIN, and the PIN is
+  // deliberately never stored -- so a rep who signed in before prospect
+  // syncing existed stays signed in forever, never re-PINs, and never gets a
+  // token. Every mark he makes queues on his phone and reaches nobody.
+  //
+  // That is not hypothetical: it is what happened. The office saw an empty
+  // board while both reps' phones held weeks of marks, because the only exit
+  // from that state was a rep noticing a grey line in the prospecting tab and
+  // choosing to sign out.
+  //
+  // So ask for the PIN once when the token is missing. It costs one entry and
+  // nothing is lost: the queue and the marks are keyed on the rep's name, not
+  // on the session, and backfillProspectMarks pushes the backlog the next
+  // time he opens prospecting.
+  //
+  // Not while the phone is offline, though. A PIN cannot be checked without
+  // signal, so bouncing an offline rep to the login screen would cost him the
+  // whole app -- ordering included -- for a sync he could not have done
+  // anyway. He keeps his session and is asked at the next boot that has
+  // signal. Only `false` counts as offline: browsers that do not implement
+  // onLine report undefined, and that should not be read as "no signal".
   var existing = loadSession();
-  if (existing) {
+  // apiConfigured() is false only in the dev fallback, where submitPinLogin
+  // signs in as Demo Rep without ever calling the token endpoint -- asking
+  // there would mean a PIN screen on every launch that can never satisfy
+  // itself.
+  var needsRepin = Boolean(existing) && apiConfigured() && !loadProspectToken()
+    && navigator.onLine !== false;
+
+  if (existing && !needsRepin) {
     state.rep = existing;
     state.repRole = loadRole();
     enterHome();
+    // A phone that already has a token empties its queue on launch, so a rep
+    // who never opens the prospecting tab still reports what he marked.
+    syncProspectsNow();
   } else {
+    // The session is left in localStorage rather than cleared: completeLogin
+    // rewrites it, and leaving it means a rep who backgrounds the app at the
+    // PIN screen is no worse off than before.
+    if (needsRepin) {
+      var reauthNote = document.getElementById('pin-reauth-note');
+      if (reauthNote) reauthNote.hidden = false;
+    }
     // #screen-login already carries .active in the markup, so there is
     // nothing to show -- just make sure the pad starts empty (a reload
     // mid-entry would otherwise leave stale dots filled in).
