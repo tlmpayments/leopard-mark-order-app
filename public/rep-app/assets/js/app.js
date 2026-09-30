@@ -26,6 +26,21 @@
     'screen-run-overview': 'run-ov-footer'
   };
 
+  // The basemap every map in the app shares. CARTO's free basemap started
+  // answering with an "API KEY REQUIRED" watermark instead of map tiles, which
+  // blanked all four maps at once; OpenStreetMap's own tiles need no key.
+  // One function so the next provider change is one edit, not four.
+  //
+  // OSM's tile policy asks for visible attribution and light use -- a handful
+  // of reps panning a map is well inside it. Heavy use should move to a paid
+  // tile provider with a key in an environment variable.
+  function baseMapLayer() {
+    return L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    });
+  }
+
   function showScreen(id) {
     Object.keys(screens).forEach(function (k) { screens[k].classList.toggle('active', k === id); });
     Object.keys(SCREEN_FOOTERS).forEach(function (screenId) {
@@ -1193,12 +1208,10 @@
     document.getElementById('territory-legend').innerHTML = '';
 
     if (!homeTerritoryMapInstance) {
-      homeTerritoryMapInstance = L.map('home-territory-map', { zoomControl: false, attributionControl: false, scrollWheelZoom: false });
+      homeTerritoryMapInstance = L.map('home-territory-map', { zoomControl: false, scrollWheelZoom: false });
+      homeTerritoryMapInstance.attributionControl.setPrefix(false);
       L.control.zoom({ position: 'bottomright' }).addTo(homeTerritoryMapInstance);
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-        maxZoom: 19,
-        subdomains: 'abcd'
-      }).addTo(homeTerritoryMapInstance);
+      baseMapLayer().addTo(homeTerritoryMapInstance);
     } else {
       homeTerritoryMapInstance.eachLayer(function (layer) {
         if (layer instanceof L.Marker) homeTerritoryMapInstance.removeLayer(layer);
@@ -1248,11 +1261,7 @@
     setTimeout(function () {
       if (!accountsMapInstance) {
         accountsMapInstance = L.map('accounts-map');
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-          maxZoom: 19,
-          subdomains: 'abcd',
-          attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; OpenStreetMap contributors'
-        }).addTo(accountsMapInstance);
+        baseMapLayer().addTo(accountsMapInstance);
       } else {
         accountsMapInstance.eachLayer(function (layer) {
           if (layer instanceof L.Marker) accountsMapInstance.removeLayer(layer);
@@ -3558,11 +3567,7 @@
     if (!window.L) return;
     if (!prospectState.map) {
       prospectState.map = L.map('prospects-map');
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-        maxZoom: 19,
-        subdomains: 'abcd',
-        attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; OpenStreetMap contributors'
-      }).addTo(prospectState.map);
+      baseMapLayer().addTo(prospectState.map);
       prospectState.map.on('popupopen', function (e) {
         var link = e.popup._contentNode.querySelector('.popup-open-prospect');
         if (!link) return;
@@ -3841,11 +3846,7 @@
     if (!window.L) return;
     if (!runOverviewMap) {
       runOverviewMap = L.map('run-ov-map');
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-        maxZoom: 19,
-        subdomains: 'abcd',
-        attribution: '&copy; <a href="https://carto.com/attributions">CARTO</a> &copy; OpenStreetMap contributors'
-      }).addTo(runOverviewMap);
+      baseMapLayer().addTo(runOverviewMap);
     }
     runOverviewLayers.forEach(function (l) { runOverviewMap.removeLayer(l); });
     runOverviewLayers = [];

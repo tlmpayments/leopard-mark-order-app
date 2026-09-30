@@ -1,0 +1,610 @@
+/* ==========================================================================
+   Apple-style skin for the rep app.
+
+   Loaded AFTER app.css and changes nothing in it: delete the <link> in
+   index.html and the app is exactly as it was. Every rule here is a
+   presentation rule -- no class, id or structure was touched -- so the JS
+   keeps working untouched.
+
+   What it does, in the order Apple's own guidance puts it:
+   - One system font, with tracking that depends on size (tight when large).
+   - Flat grouped surfaces on a neutral canvas, separated by hairlines rather
+     than borders, shadows or colour blocks.
+   - One accent colour for "you can act here"; status colours stay as data.
+   - Translucent chrome (footers, sheets) that content scrolls under.
+   - Feedback on press, instantly; hover only where a pointer can hover.
+   - Reduced motion / transparency / contrast respected.
+   ========================================================================== */
+
+:root {
+  --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", system-ui, sans-serif;
+  --font-serif: var(--font-display);
+
+  /* Canvas and surfaces */
+  --canvas: #f2f2f7;
+  --surface: #ffffff;
+  --surface-2: #f2f2f7;
+  --hairline: rgba(60, 60, 67, .16);
+  --fill: rgba(120, 120, 128, .12);
+
+  /* Text */
+  --ink: #1c1c1e;
+  --silver: #3a3a3c;
+  --silver-dim: #8a8a8e;
+
+  /* The one accent. Brand navy is kept for the wordmark only. */
+  --accent: #007aff;
+  --accent-press: #0062cc;
+  --accent-tint: rgba(0, 122, 255, .12);
+  --coral: #007aff;
+  --good: #248a3d;
+  --warn: #b25000;
+  --danger: #d70015;
+
+  /* Keep the legacy palette names resolving to the new neutrals, so every
+     rule in app.css that reads them follows along. */
+  --navy-950: #f2f2f7;
+  --navy-900: #ffffff;
+  --navy-800: #ffffff;
+  --navy-700: #f2f2f7;
+  --navy-600: #d1d1d6;
+  --navy-500: #c7c7cc;
+  --white: #1c1c1e;
+  --cream: #f2f2f7;
+  --foam: #ffffff;
+  --line: rgba(60, 60, 67, .16);
+  --radius: 14px;
+
+  --ease-out: cubic-bezier(.23, 1, .32, 1);
+}
+
+/* ---- base ---------------------------------------------------------------- */
+html {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+html, body {
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+body { background: var(--canvas); }
+button, input, select, textarea { font-family: inherit; }
+button, a, [role="button"], .chip, .order-row.clickable {
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+input, textarea, select { -webkit-user-select: text; user-select: text; font-size: 16px; }
+
+/* Screens fade in; they no longer rise. Nothing should move the content the
+   eye is already on. */
+@keyframes screen-arrive { from { opacity: 0; } to { opacity: 1; } }
+.screen {
+  max-width: 560px;
+  padding: max(16px, env(safe-area-inset-top)) 20px calc(112px + env(safe-area-inset-bottom));
+  animation: screen-arrive .22s ease-out;
+}
+
+/* ---- type ---------------------------------------------------------------- */
+.rep-block .name,
+.run-name {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -.022em;
+  line-height: 1.08;
+}
+.rep-block .name { font-size: clamp(30px, 8.2vw, 34px); }
+.rep-block .rep-label,
+.brand-sub {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--silver-dim);
+}
+.section-title {
+  margin: 28px 4px 8px;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: var(--silver-dim);
+}
+label { font-size: 13px; font-weight: 500; color: var(--silver-dim); letter-spacing: 0; }
+
+/* ---- top bar ------------------------------------------------------------- */
+.topbar { align-items: center; margin-bottom: 14px; }
+.topbar-logo { height: 34px; }
+#screen-home .topbar { margin-bottom: 14px; }
+#screen-home .topbar-logo { height: 34px; }
+.icon-btn, .btn-ghost {
+  background: var(--accent-tint);
+  border: 0;
+  color: var(--accent);
+  box-shadow: none;
+  font-weight: 600;
+}
+.icon-btn { padding: 8px 14px; border-radius: 999px; font-size: 15px; }
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0 0 6px -4px;
+  padding: 8px 6px 8px 0;
+  font-size: 17px;
+  font-weight: 400;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+/* ---- cards and stats ----------------------------------------------------- */
+.stat-card, .form-card, .order-summary, .product-details-card, .mk-cat {
+  background: var(--surface);
+  border: 0;
+  border-radius: var(--radius);
+  box-shadow: none;
+}
+.stat-card { padding: 14px 16px; }
+.stat-card .value { font-size: 28px; font-weight: 700; letter-spacing: -.03em; }
+.stat-card .label { font-size: 13px; font-weight: 400; color: var(--silver-dim); text-transform: none; letter-spacing: 0; }
+.stat-grid { gap: 12px; margin-bottom: 20px; }
+
+/* ---- buttons ------------------------------------------------------------- */
+.btn {
+  min-height: 50px;
+  border-radius: 14px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  box-shadow: none;
+  transition: transform 120ms var(--ease-out), background-color 120ms, opacity 120ms;
+}
+.btn:active { transform: scale(.98); }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:active { background: var(--accent-press); }
+.btn-primary:disabled { opacity: .4; }
+
+.cta-btn {
+  min-height: 56px;
+  padding: 14px 16px;
+  background: var(--accent);
+  border: 0;
+  border-radius: 14px;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  box-shadow: none;
+  transition: transform 120ms var(--ease-out), background-color 120ms;
+}
+.cta-btn:active { transform: scale(.985); background: var(--accent-press); }
+.cta-btn small { margin-top: 2px; font-size: 13px; font-weight: 400; letter-spacing: 0; color: rgba(255,255,255,.8); opacity: 1; }
+.cta-btn.secondary { background: var(--surface); color: var(--ink); border: 0; box-shadow: none; }
+.cta-btn.secondary:active { background: var(--fill); }
+.cta-btn.secondary small { color: var(--silver-dim); }
+.cta-btn.admin { background: var(--ink); box-shadow: none; }
+.cta-btn-icon { width: auto; height: auto; background: transparent; font-size: 0; }
+.cta-btn-icon::after {
+  content: "";
+  display: block;
+  width: 9px; height: 9px;
+  border-top: 2.5px solid currentColor;
+  border-right: 2.5px solid currentColor;
+  transform: rotate(45deg);
+  opacity: .55;
+}
+
+/* ---- home: a grouped inset list, not five coloured blocks ------------------ */
+#screen-home .cta-row {
+  display: block;
+  margin: 0 0 24px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+#screen-home .cta-row .cta-btn[class] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 62px;
+  margin: 0;
+  padding: 11px 16px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  text-align: left;
+  transform: none;
+}
+#screen-home .cta-row .cta-btn[class] + .cta-btn[class] { box-shadow: inset 0 .5px 0 var(--hairline); }
+#screen-home .cta-row .cta-btn[class]:active { background: var(--fill); transform: none; }
+#screen-home .cta-row .cta-btn small { color: var(--silver-dim); font-size: 13px; }
+#screen-home .cta-row .cta-btn .cta-btn-icon { color: var(--silver-dim); background: transparent; }
+#screen-home .cta-row .cta-btn .cta-btn-icon::after { opacity: .5; }
+/* The add button's "+" is an action, not a chevron. */
+#screen-home .cta-btn--new-account .cta-btn-icon::after {
+  width: 18px; height: 18px; border: 0; transform: none; opacity: 1;
+  background:
+    linear-gradient(var(--accent), var(--accent)) center / 100% 2.5px no-repeat,
+    linear-gradient(var(--accent), var(--accent)) center / 2.5px 100% no-repeat;
+}
+
+.territory-module {
+  margin: 0 0 24px;
+  padding: 16px;
+  background: var(--surface);
+  border: 0;
+  border-radius: var(--radius);
+  box-shadow: none;
+}
+.territory-heading h2 { color: var(--ink); font-family: var(--font-display); font-size: 20px; font-weight: 700; letter-spacing: -.02em; }
+.territory-heading p { color: var(--silver-dim); font-size: 13px; }
+.territory-open {
+  background: var(--accent-tint);
+  border: 0;
+  color: var(--accent);
+  font-weight: 600;
+}
+.territory-legend, .territory-legend b { color: var(--silver-dim); }
+.home-territory-map { border-radius: 10px; overflow: hidden; }
+
+/* ---- forms --------------------------------------------------------------- */
+input, textarea, select {
+  min-height: 46px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 0;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 .5px var(--hairline);
+  transition: box-shadow 120ms;
+}
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+textarea { min-height: 84px; }
+.form-card input, .form-card textarea, .form-card select { background: var(--surface-2); box-shadow: none; }
+.form-card input:focus, .form-card textarea:focus, .form-card select:focus { box-shadow: inset 0 0 0 2px var(--accent); }
+
+/* ---- chips: quiet pills, the selected one carries the accent --------------- */
+.chip {
+  background: var(--fill);
+  border: 0;
+  border-radius: 999px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 7px 14px;
+  box-shadow: none;
+  transition: transform 120ms var(--ease-out), background-color 120ms;
+}
+.chip:active { transform: scale(.96); }
+.chip.selected { background: var(--accent); color: #fff; border: 0; }
+
+/* ---- list rows: one grouped card, hairlines between ------------------------ */
+.order-history {
+  background: var(--surface);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.order-row {
+  background: var(--surface);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0;
+  padding: 12px 16px;
+}
+.order-row + .order-row { box-shadow: inset 0 .5px 0 var(--hairline); }
+.order-row .oname { font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
+.order-row .osub { font-size: 13px; color: var(--silver-dim); }
+.order-row.clickable { transition: background-color 100ms; }
+.order-row.clickable:active { background: var(--fill); border-color: transparent; }
+
+/* ---- sticky footers: translucent material, content scrolls under ----------- */
+.sticky-footer {
+  background: rgba(242, 242, 247, .72);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border-top: .5px solid var(--hairline);
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+/* ---- toast --------------------------------------------------------------- */
+.toast {
+  background: rgba(28, 28, 30, .86);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border-radius: 14px;
+  font-size: 15px;
+  font-weight: 500;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
+}
+.toast.error { background: rgba(215, 0, 21, .92); }
+
+/* ---- login: an iOS keypad --------------------------------------------------- */
+#screen-login { gap: 14px; }
+.login-logo { width: min(220px, 62%); }
+.pin-instructions { font-size: 17px; font-weight: 600; letter-spacing: -.01em; color: var(--ink); }
+.pin-dot { width: 13px; height: 13px; background: transparent; border: 1.5px solid var(--ink); }
+.pin-dot.filled { background: var(--ink); border-color: var(--ink); }
+.pin-dot.error { border-color: var(--danger); }
+.pin-pad { gap: 14px 22px; max-width: 300px; margin-left: auto; margin-right: auto; }
+.pin-pad button {
+  aspect-ratio: 1;
+  font-variant-numeric: tabular-nums;
+  min-height: 0;
+  background: var(--surface);
+  border: 0;
+  border-radius: 50%;
+  color: var(--ink);
+  font-size: 30px;
+  font-weight: 400;
+  letter-spacing: -.01em;
+  box-shadow: none;
+  transition: background-color 80ms;
+}
+.pin-pad button:active { background: #d1d1d6; transform: none; box-shadow: none; }
+.pin-pad .pin-key-back { background: transparent; color: var(--silver-dim); font-size: 22px; }
+.pin-pad .pin-key-back:active { background: var(--fill); }
+.pin-help, .pin-reauth { color: var(--silver-dim); font-size: 13px; }
+
+/* ==========================================================================
+   Prospecting
+   ========================================================================== */
+.prospect-progress {
+  padding: 16px;
+  background: var(--surface);
+  border-radius: var(--radius);
+}
+.prospect-progress .pp-line { font-size: 15px; color: var(--ink); }
+.pp-bar { height: 6px; border-radius: 3px; background: var(--fill); overflow: hidden; }
+.prospect-legend { font-size: 13px; color: var(--silver-dim); }
+.prospect-legend b { color: var(--ink); }
+.prospect-sync { margin: 10px 4px 0; font-size: 12px; font-weight: 500; }
+.prospect-reset { color: var(--danger); font-size: 15px; font-weight: 500; }
+.prospects-map { border: 0; border-radius: var(--radius); box-shadow: none; overflow: hidden; }
+
+/* Your days */
+.plan-card {
+  margin-top: 16px;
+  background: var(--surface);
+  border: 0;
+  border-radius: var(--radius);
+}
+.plan-card-title {
+  padding: 14px 16px 10px;
+  font-size: 17px; font-weight: 700; letter-spacing: -.02em;
+  cursor: default;
+}
+.plan-card-title small { font-size: 13px; font-weight: 400; letter-spacing: 0; color: var(--silver-dim); }
+.plan-day {
+  padding: 12px 16px;
+  border: 0;
+  border-top: .5px solid var(--hairline);
+  transition: background-color 100ms;
+}
+.plan-day:active { background: var(--fill); }
+.plan-day-main b { font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
+.plan-day-main small { font-size: 13px; color: var(--silver-dim); }
+.plan-day-go { color: var(--accent); font-size: 15px; font-weight: 600; }
+
+/* Route tiles: large, flat, calm. Done is grey; the one you started is tinted. */
+.route-picker-title { padding: 0 4px 8px; font-size: 22px; font-weight: 700; letter-spacing: -.022em; }
+.route-picker-title small { font-size: 13px; font-weight: 400; letter-spacing: 0; color: var(--silver-dim); }
+.route-tile {
+  min-height: 148px;
+  padding: 14px;
+  background: var(--surface);
+  border: 0;
+  border-radius: 18px;
+  box-shadow: none;
+  color: var(--ink);
+  transition: transform 120ms var(--ease-out), background-color 120ms;
+}
+.route-tile:active { transform: scale(.97); box-shadow: none; }
+.route-tile.is-started { box-shadow: inset 0 0 0 2px var(--accent); }
+.route-tile-code { font-family: var(--font-display); font-size: 34px; font-weight: 700; letter-spacing: -.03em; line-height: 1; }
+.route-tile-name { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+.route-tile-count, .route-tile-last { font-size: 13px; color: var(--silver-dim); }
+.route-tile-bar { height: 4px; background: var(--fill); }
+.route-tile-bar i { background: var(--accent); }
+.route-tile-go { font-size: 15px; font-weight: 600; color: var(--accent); }
+.route-tile.is-done { background: rgba(255, 255, 255, .55); color: #aeaeb2; filter: none; box-shadow: none; }
+.route-tile.is-done .route-tile-bar i { background: #c7c7cc; }
+.route-tile.is-done .route-tile-go,
+.route-tile.is-done .route-tile-count,
+.route-tile.is-done .route-tile-last { color: #aeaeb2; }
+
+/* Resume banner */
+.cta-btn--run, #screen-home .cta-btn--run {
+  background: var(--accent);
+  box-shadow: none;
+  border-radius: 14px;
+}
+.run-abandon { color: var(--danger); font-size: 15px; }
+
+/* Tags on rows */
+.prospect-row .prospect-stop {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: var(--fill);
+  color: var(--ink);
+  font-size: 13px; font-weight: 600;
+}
+.prospect-tag {
+  border-radius: 6px;
+  background: var(--fill);
+  color: var(--silver);
+  font-size: 12px; font-weight: 500;
+}
+.prospect-day-divider {
+  margin: 0;
+  padding: 10px 16px;
+  background: var(--surface-2);
+  border: 0;
+  font-size: 13px; font-weight: 500;
+  letter-spacing: 0; text-transform: none;
+  color: var(--silver-dim);
+}
+.prospect-controls .field select { background: var(--surface); }
+.prospect-sweep { border-radius: var(--radius); background: var(--surface); border: 0; }
+
+/* Run screen */
+.run-head { margin-bottom: 10px; }
+.run-route { font-size: 13px; font-weight: 500; color: var(--silver-dim); letter-spacing: 0; text-transform: none; }
+.run-count { font-size: 15px; color: var(--ink); font-weight: 600; }
+.run-bar { height: 6px; border-radius: 3px; background: var(--fill); overflow: hidden; }
+.run-bar i { background: var(--accent); border-radius: 3px; }
+.run-card {
+  background: var(--surface);
+  color: var(--ink);
+  border: 0;
+  border-radius: 20px;
+  box-shadow: none;
+  padding: 20px;
+}
+.run-name { font-size: 26px; color: var(--ink); }
+.run-address { font-size: 15px; color: var(--silver-dim); }
+.run-stop-no { color: var(--silver-dim); font-size: 13px; font-weight: 600; }
+.run-visited { color: var(--silver-dim); }
+.run-card .prospect-tag { background: var(--fill); color: var(--silver); }
+.run-card .prospect-tag.tier-A { background: #ffe9c2; color: #8a5a06; }
+.run-card .prospect-tag.tier-B { background: #dde7f8; color: #21396d; }
+.run-card .prospect-tag.tier-C { background: var(--fill); color: var(--silver); }
+.run-warning { border-radius: 12px; background: #fff4d6; color: #7a4b00; }
+.run-navigate {
+  display: block;
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 17px; font-weight: 600; text-align: center; text-decoration: none;
+  transition: transform 120ms var(--ease-out), background-color 120ms;
+}
+.run-navigate:active { transform: scale(.98); background: var(--accent-press); }
+
+/* The answers: a clean 2-up of white cells, the chosen one outlined. */
+.prospect-status-grid { gap: 10px; }
+.prospect-status-btn {
+  min-height: 54px;
+  background: var(--surface);
+  border: 0;
+  border-radius: 14px;
+  box-shadow: none;
+  font-size: 16px; font-weight: 600; letter-spacing: -.01em;
+  transition: transform 100ms var(--ease-out), background-color 100ms;
+}
+.prospect-status-btn:active { transform: scale(.97); background: var(--fill); }
+.prospect-status-btn.selected { box-shadow: inset 0 0 0 2px currentColor; }
+
+.run-ov-day { background: var(--surface); border-radius: 12px; }
+.run-ov-day a, .prospect-day-divider .day-links a { color: var(--accent); font-weight: 600; }
+
+/* Detail */
+.prospect-status-banner { background: var(--surface); border: 0; border-radius: var(--radius); }
+.trail-row small { color: var(--silver-dim); }
+.prospect-trail { background: var(--surface); border-radius: var(--radius); padding: 14px 16px; }
+
+/* ---- fixes found on screen ------------------------------------------------------ */
+
+/* A screen's own title under the back link reads as a large title. */
+.back-link + .section-title {
+  margin: 0 4px 12px;
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: -.03em;
+  line-height: 1.08;
+  text-transform: none;
+  color: var(--ink);
+}
+
+/* Footers: the markup says footer-inner, the old CSS only styled inner. One
+   full-width button, no leftover chunky shadow. */
+.sticky-footer { padding: 12px 20px max(12px, env(safe-area-inset-bottom)); justify-content: center; }
+.sticky-footer .footer-inner, .sticky-footer .inner { width: 100%; max-width: 520px; display: flex; gap: 10px; }
+.sticky-footer .btn { flex: 1; box-shadow: none; }
+.sticky-footer .btn-primary { box-shadow: none; }
+.run-ov-footer .btn, .run-footer .btn { letter-spacing: -.01em; }
+
+/* Reset: a quiet text button, not a bordered box. */
+.prospect-reset {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 8px 4px;
+  margin: 4px 0 0;
+  text-align: left;
+}
+
+/* Directions links: tinted pills, readable. */
+.run-ov-day {
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 0;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.run-ov-day a {
+  padding: 6px 12px;
+  background: var(--accent-tint);
+  color: var(--accent);
+  font: 600 14px var(--font-body);
+}
+.run-ov-map { border: 0; border-radius: var(--radius); overflow: hidden; }
+.run-ov-row.is-worked { opacity: .7; }
+.run-ov-links { gap: 8px; }
+
+/* Map chrome: Leaflet controls in system style. */
+.leaflet-bar { border: 0 !important; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 6px rgba(0,0,0,.18) !important; }
+.leaflet-bar a { color: var(--accent); background: rgba(255,255,255,.92); border-bottom: .5px solid var(--hairline); }
+.leaflet-popup-content-wrapper { border-radius: 14px; box-shadow: 0 8px 28px rgba(0,0,0,.2); }
+
+/* Map tiles: OpenStreetMap is colourful; mute it so the status-coloured pins
+   are the loudest thing on the map, as they were on the old grey basemap. */
+.leaflet-tile-pane { filter: grayscale(.75) contrast(.92) brightness(1.04); }
+.leaflet-container { background: #e9ebee; font-family: var(--font-body); }
+.leaflet-control-attribution,
+.home-territory-map .leaflet-control-attribution {
+  display: block;
+  background: rgba(255,255,255,.72) !important;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: var(--silver-dim);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px 0 0 0;
+}
+.leaflet-control-attribution a { color: var(--silver-dim); }
+
+/* ---- hover only where there is a hover ---------------------------------------- */
+@media (hover: hover) and (pointer: fine) {
+  .order-row.clickable:hover, .plan-day:hover { background: var(--fill); }
+  .route-tile:not(.is-done):hover { background: #fafafc; }
+}
+
+/* ---- accessibility -------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .screen { animation: none; }
+  * { transition-duration: .01ms !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .sticky-footer { background: var(--canvas); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .toast { background: #1c1c1e; -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (prefers-contrast: more) {
+  :root { --hairline: rgba(60, 60, 67, .5); --silver-dim: #55555a; }
+}
