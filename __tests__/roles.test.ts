@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 // test of it must not need NextAuth's request context to load.
 import {
   ADMIN_ROLES,
+  DELIVERY_ROLES,
   DOCS_ROLES,
   HUB_ROLES,
   LEDGER_ROLES,
@@ -46,6 +47,15 @@ describe("who may reach which surface", () => {
 
   it("automation toggles and settings are admin only", () => {
     expect([...ADMIN_ROLES]).toEqual(["admin"]);
+  });
+
+  it("a driver reaches the delivery site but not the route builder behind it", () => {
+    // The builder under /delivery/admin is gated on LEDGER_ROLES (pages and
+    // actions) and HUB_ROLES (proxy). A driver holds a delivery session and
+    // neither of those, so typing the address gets him nothing.
+    expect(DELIVERY_ROLES).toContain("driver");
+    expect(LEDGER_ROLES).not.toContain("driver");
+    expect(HUB_ROLES).not.toContain("driver");
   });
 
   it("docs_only holds the narrowest possible grant: paperwork and nothing more", () => {

@@ -18,7 +18,7 @@ async function editableRoute(id: string) {
   return { route, user };
 }
 function refresh(id: string) {
-  revalidatePath("/ops/deliveries"); revalidatePath(`/ops/deliveries/routes/${id}`); revalidatePath("/ops/deliveries/week"); revalidatePath("/delivery");
+  revalidatePath("/ops/deliveries"); revalidatePath(`/ops/deliveries/routes/${id}`); revalidatePath("/ops/deliveries/week"); revalidatePath("/delivery"); revalidatePath("/delivery/admin"); revalidatePath(`/delivery/admin/routes/${id}`);
 }
 export async function searchDeliveryAccounts(query: string) {
   await assertRole(LEDGER_ROLES);

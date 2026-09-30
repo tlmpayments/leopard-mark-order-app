@@ -148,6 +148,12 @@ export default auth((req) => {
     if (!role || !DELIVERY_ROLES.includes(role)) {
       return Response.redirect(new URL(landingFor(role), req.nextUrl));
     }
+    // The route builder is office work: a driver holds a delivery session but
+    // not authority over how routes are made. Every page and action under it
+    // re-checks the role too; this just saves him the round trip.
+    if (path.startsWith("/delivery/admin") && !HUB_ROLES.includes(role)) {
+      return Response.redirect(new URL("/delivery", req.nextUrl));
+    }
   }
 
   // /docs needs a session but no particular role -- that is the whole point of

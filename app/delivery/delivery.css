@@ -1,71 +1,53 @@
 /* ============================================================================
-   delivery.tlmbg.co — the driver's surface.
+   delivery.tlmbg.co -- the driver's surface, and the admin route builder.
 
-   Same design language as the rep ordering app (public/rep-app/assets/css/
-   app.css): a warm light ground, foam-white cards, navy ink, and the solid
-   offset "ledge" shadow that compresses when a control is pressed. Two people
-   at this company use two of these apps; they should not look like they came
-   from two companies.
+   Apple-style: one system font, a neutral grouped canvas, flat white surfaces
+   separated by hairlines rather than borders and offset shadows, one accent
+   for "you can act here", translucent chrome, instant press feedback.
 
-   What is NOT borrowed is the sizing. This is still a phone held in one hand,
-   in a truck, in daylight, sometimes with gloves on: nothing under 15px
-   carries meaning, every control clears 48px, and there are no hover states
-   because there is no cursor.
+   Same skin as the rep app (public/rep-app/assets/css/apple.css) so the two
+   apps read as one company's.
+
+   What stays from the old version is the sizing. This is still a phone held
+   in one hand, in a truck, in daylight, sometimes with gloves on: nothing
+   under 15px carries meaning, every control clears 48px, and hover styles
+   exist only for devices that can hover.
+
+   Class names are unchanged -- this file restyles, it does not restructure.
    ============================================================================ */
-
-@font-face {
-  font-family: "Bowery Lane";
-  src: url("/rep-app/assets/fonts/BoweryLane-Medium.woff") format("woff");
-  font-weight: 600;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Tomato Grotesk";
-  src: url("/rep-app/assets/fonts/TomatoGrotesk-Regular.woff") format("woff");
-  font-weight: 400;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Tomato Grotesk";
-  src: url("/rep-app/assets/fonts/TomatoGrotesk-Medium.woff") format("woff");
-  font-weight: 600;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Bogart";
-  src: url("/rep-app/assets/fonts/Bogart-Semibold.woff") format("woff");
-  font-weight: 600;
-  font-display: swap;
-}
 
 .dv {
   color-scheme: light;
 
-  /* The rep app's palette, verbatim. */
-  --ink: #102f44;
-  --muted: #697a86;
-  --cream: #fff8ec;
-  --foam: #fffdf8;
-  --line: #e8d8bd;
-  --ground: #d7d8d4;
+  --ink: #1c1c1e;
+  --muted: #8a8a8e;
+  --foam: #ffffff;
+  --cream: #f2f2f7;
+  --ground: #f2f2f7;
+  --line: rgba(60, 60, 67, 0.16);
+  --fill: rgba(120, 120, 128, 0.12);
 
-  --navy: #263b78;
-  --navy-deep: #182852;
-  --coral: #ed633f;
-  --coral-deep: #c74c30;
-  --lager: #efb11d;
-  --lager-deep: #c78708;
-  --good: #16866f;
-  --good-deep: #14584a;
-  --mint: #bcebd5;
-  --sand-deep: #e2d3b9;
+  --accent: #007aff;
+  --accent-press: #0062cc;
+  --accent-tint: rgba(0, 122, 255, 0.12);
+  /* Legacy names, kept so inline styles and older rules still resolve. */
+  --navy: #007aff;
+  --navy-deep: #0062cc;
+  --coral: #d70015;
+  --coral-deep: #d70015;
+  --good: #248a3d;
+  --good-deep: #1b6b2f;
+  --mint: #dff3e4;
+  --lager: #b25000;
+  --sand-deep: rgba(60, 60, 67, 0.16);
 
-  --r: 20px;
-  --r-sm: 14px;
-  --font-body: "Tomato Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-display: "Bowery Lane", var(--font-body);
-  --font-serif: "Bogart", Georgia, serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --r: 18px;
+  --r-sm: 12px;
+  --font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", system-ui, sans-serif;
+  --font-serif: var(--font-display);
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 
   min-height: 100dvh;
   color: var(--ink);
@@ -73,76 +55,69 @@
   font-size: 16px;
   line-height: 1.45;
   -webkit-text-size-adjust: 100%;
-  background:
-    radial-gradient(circle at 100% 0, rgba(38, 59, 120, 0.12), transparent 31rem),
-    radial-gradient(circle at 0 100%, rgba(83, 89, 88, 0.1), transparent 29rem),
-    var(--ground);
+  -webkit-tap-highlight-color: transparent;
+  -webkit-font-smoothing: antialiased;
+  background: var(--ground);
 }
 
 .dv * { box-sizing: border-box; }
 .dv a { color: inherit; text-decoration: none; }
-.dv h1, .dv h2, .dv h3 { font-family: var(--font-display); font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+.dv button, .dv a { touch-action: manipulation; }
+.dv button { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.dv h1, .dv h2, .dv h3 { font-family: var(--font-display); font-weight: 700; margin: 0; letter-spacing: -0.022em; }
 .dv .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .dv .muted { color: var(--muted); }
 .dv .sm { font-size: 14px; }
 
-.dv-shell { max-width: 560px; margin: 0 auto; padding: 0 18px 40px; }
+.dv-shell { max-width: 560px; margin: 0 auto; padding: 0 20px 40px; }
+/* The admin area is used at a desk as often as on a phone. */
+.dv-shell:has(.dv-admin) { max-width: 1040px; }
 
+/* ---------- header: translucent, content scrolls under ---------- */
 .dv-top {
+  position: sticky; top: 0; z-index: 20;
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 18px 2px 16px; margin-bottom: 20px;
-  border-bottom: 1px solid rgba(207, 191, 166, 0.6);
+  margin: 0 -20px 16px; padding: max(12px, env(safe-area-inset-top)) 20px 12px;
+  background: rgba(242, 242, 247, 0.72);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 0.5px solid var(--line);
 }
-.dv-top .id { font-family: var(--font-display); font-size: 24px; letter-spacing: -0.02em; }
+.dv-top .id { font-size: 22px; font-weight: 700; letter-spacing: -0.022em; line-height: 1.1; }
 .dv-top .id small {
   display: block; margin-top: 2px;
-  font-family: var(--font-body); font-size: 11px; font-weight: 600;
-  letter-spacing: 0.11em; text-transform: uppercase; color: var(--muted);
+  font-size: 13px; font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--muted);
 }
+.dv-top .nav { display: flex; gap: 8px; }
 
-/* ---------- controls ----------
-   The ledge shadow is the rep app's signature: a solid offset below the
-   control plus a soft ambient one, collapsing on :active so the thing
-   physically goes down under a thumb. */
+/* ---------- controls ---------- */
 .dv-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   width: 100%; min-height: 52px; padding: 14px 18px;
-  border: 1px solid var(--line); border-radius: 18px;
-  background: linear-gradient(135deg, var(--foam), #fff4de);
-  color: var(--ink); font: inherit; font-weight: 600; font-size: 16px; text-align: center;
-  box-shadow: 0 7px 0 var(--sand-deep), 0 12px 24px rgba(92, 57, 14, 0.07);
-  transition: transform 0.16s ease, box-shadow 0.16s ease;
+  border: 0; border-radius: 14px;
+  background: var(--accent-tint); color: var(--accent);
+  font: inherit; font-weight: 600; font-size: 17px; letter-spacing: -0.01em; text-align: center;
+  box-shadow: none; cursor: pointer;
+  transition: transform 120ms var(--ease-out), background-color 120ms, opacity 120ms;
 }
-.dv-btn:active { transform: translateY(4px); box-shadow: 0 3px 0 var(--sand-deep), 0 7px 14px rgba(92, 57, 14, 0.06); }
+.dv-btn:active { transform: scale(0.98); background: rgba(0, 122, 255, 0.2); }
 
-.dv-btn.primary {
-  background: var(--navy); border-color: var(--navy); color: var(--foam);
-  box-shadow: 0 8px 0 var(--navy-deep), 0 16px 26px rgba(38, 59, 120, 0.2);
-}
-.dv-btn.primary:active { transform: translateY(4px); box-shadow: 0 4px 0 var(--navy-deep), 0 9px 16px rgba(38, 59, 120, 0.18); }
+.dv-btn.primary { background: var(--accent); color: #fff; }
+.dv-btn.primary:active { background: var(--accent-press); }
 
 /* The one affirmative action in the app. Green, and bigger than everything. */
-.dv-btn.go {
-  min-height: 64px; font-size: 19px;
-  background: var(--good); border-color: var(--good); color: var(--foam);
-  box-shadow: 0 9px 0 var(--good-deep), 0 17px 27px rgba(20, 88, 74, 0.18);
-}
-.dv-btn.go:active { transform: translateY(5px); box-shadow: 0 4px 0 var(--good-deep), 0 8px 15px rgba(20, 88, 74, 0.16); }
+.dv-btn.go { min-height: 60px; font-size: 19px; background: var(--good); color: #fff; }
+.dv-btn.go:active { background: var(--good-deep); }
 
-.dv-btn.quiet {
-  background: rgba(255, 255, 255, 0.72); border-color: var(--line); color: var(--ink);
-  box-shadow: 0 4px 14px rgba(89, 59, 20, 0.06);
-}
-.dv-btn.quiet:active { transform: translateY(2px); }
+.dv-btn.quiet { background: var(--fill); color: var(--ink); }
+.dv-btn.quiet:active { background: rgba(120, 120, 128, 0.22); transform: scale(0.98); }
 
-.dv-btn.danger {
-  background: transparent; border-color: rgba(237, 99, 63, 0.5); color: var(--coral-deep);
-  box-shadow: none;
-}
-.dv-btn.danger:active { transform: translateY(2px); }
+.dv-btn.danger { background: transparent; color: var(--coral-deep); }
+.dv-btn.danger:active { background: rgba(215, 0, 21, 0.08); transform: scale(0.98); }
 
-.dv-btn:disabled { opacity: 0.5; box-shadow: none; transform: none; }
-.dv-btn.inline { width: auto; min-height: 44px; padding: 10px 15px; border-radius: 999px; font-size: 14px; }
+.dv-btn:disabled { opacity: 0.4; transform: none; cursor: default; }
+.dv-btn.inline { width: auto; min-height: 40px; padding: 8px 16px; border-radius: 999px; font-size: 15px; }
+.dv-btn.tiny { width: auto; min-height: 34px; padding: 6px 14px; border-radius: 999px; font-size: 15px; }
 
 .dv-row { display: flex; gap: 12px; }
 .dv-row > * { flex: 1; }
@@ -150,117 +125,107 @@
 /* ---------- the route ---------- */
 .dv-route { margin-bottom: 28px; }
 .dv-route-head {
-  background: rgba(255, 255, 255, 0.82);
-  border: 1px solid rgba(207, 191, 166, 0.78);
-  border-radius: 25px; padding: 20px; margin-bottom: 16px;
-  box-shadow: 0 12px 30px rgba(90, 57, 15, 0.08);
+  background: var(--foam); border-radius: 20px; padding: 20px; margin-bottom: 16px;
 }
-.dv-route-head h2 { font-family: var(--font-serif); font-size: 26px; line-height: 1.05; }
-.dv-route-head .meta { color: var(--muted); font-size: 14px; margin-top: 6px; }
+.dv-route-head h2 { font-size: 26px; line-height: 1.1; }
+.dv-route-head .meta { color: var(--muted); font-size: 15px; margin-top: 6px; }
 .dv-route-head .note {
   margin-top: 14px; padding: 12px 14px; border-radius: var(--r-sm);
-  background: rgba(239, 177, 29, 0.16); border: 1px solid rgba(213, 150, 9, 0.35);
-  color: #7a5406; font-size: 14px;
+  background: #fff4d6; color: #7a4b00; font-size: 15px;
 }
 
 .dv-prog { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
-.dv-prog .bar { flex: 1; height: 10px; border-radius: 5px; background: rgba(16, 47, 68, 0.1); overflow: hidden; }
-.dv-prog .bar i { display: block; height: 100%; background: var(--good); border-radius: 5px; }
+.dv-prog .bar { flex: 1; height: 6px; border-radius: 3px; background: var(--fill); overflow: hidden; }
+.dv-prog .bar i { display: block; height: 100%; background: var(--good); border-radius: 3px; }
 .dv-prog .n { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--muted); }
 
-.dv-stops { display: flex; flex-direction: column; gap: 14px; }
-.dv-stop {
-  display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 14px; align-items: center;
-  min-height: 82px; padding: 16px 16px 16px 14px;
-  background: var(--foam); border: 1px solid #d8c6a6; border-radius: var(--r);
-  box-shadow: 0 8px 0 var(--sand-deep), 0 15px 24px rgba(89, 57, 15, 0.08);
-  transition: transform 0.16s ease, box-shadow 0.16s ease;
+/* Stops: one grouped card, hairlines between rows. */
+.dv-stops {
+  display: flex; flex-direction: column;
+  background: var(--foam); border-radius: 20px; overflow: hidden;
 }
-.dv-stop:active { transform: translateY(4px); box-shadow: 0 3px 0 var(--sand-deep), 0 8px 15px rgba(89, 57, 15, 0.07); }
-.dv-stop.done { background: #f4fbf7; border-color: rgba(22, 134, 111, 0.35); box-shadow: 0 8px 0 #cfe7dd, 0 15px 24px rgba(20, 88, 74, 0.1); }
-.dv-stop.failed { border-color: rgba(237, 99, 63, 0.45); box-shadow: 0 8px 0 #f0cfc3, 0 15px 24px rgba(193, 67, 34, 0.1); }
+.dv-stop {
+  display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 14px; align-items: center;
+  min-height: 74px; padding: 14px 16px;
+  background: var(--foam);
+  transition: background-color 100ms;
+}
+.dv-stop + .dv-stop { box-shadow: inset 0 0.5px 0 var(--line); }
+.dv-stop:active { background: var(--fill); }
+.dv-stop.done .name { color: var(--muted); }
 
 .dv-stop .seq {
-  width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center;
-  background: var(--navy); color: var(--foam);
-  font-family: var(--font-mono); font-size: 16px; font-weight: 600;
+  width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--accent); color: #fff;
+  font-family: var(--font-mono); font-size: 15px; font-weight: 600;
 }
 .dv-stop.done .seq { background: var(--good); }
-.dv-stop.failed .seq { background: var(--coral); }
-/* Both are spans inside the stop's <a>, so they need to be told to stack --
-   left inline they render as "Zeitgeist6 units". */
-.dv-stop .name { display: block; font-weight: 600; font-size: 18px; line-height: 1.25; }
-.dv-stop .sub { display: block; color: var(--muted); font-size: 14px; margin-top: 3px; }
-.dv-stop .chev { color: #b4a184; font-size: 24px; }
+.dv-stop.failed .seq { background: var(--coral-deep); }
+/* Both are spans inside the stop's <a>, so they need to be told to stack. */
+.dv-stop .name { display: block; font-weight: 600; font-size: 17px; line-height: 1.25; letter-spacing: -0.01em; }
+.dv-stop .sub { display: block; color: var(--muted); font-size: 14px; margin-top: 2px; }
+.dv-stop .chev { color: #c4c4c7; font-size: 26px; font-weight: 300; }
 
-/* Stop zero: the warehouse. Navy while it is the thing to do, and it keeps a
-   row in the list afterwards so the day still reads as "loaded, then four
-   drops" rather than starting mid-story. */
-.dv-stop.pickup.now {
-  background: var(--navy); border-color: var(--navy-deep); color: var(--foam);
-  box-shadow: 0 8px 0 var(--navy-deep), 0 16px 26px rgba(38, 59, 120, 0.2);
-}
-.dv-stop.pickup.now .seq { background: rgba(255, 253, 248, 0.19); color: var(--foam); }
-.dv-stop.pickup.now .sub { color: rgba(255, 253, 248, 0.78); }
-.dv-stop.pickup.done { opacity: 0.72; }
-.dv-stop.pickup:active { transform: none; }
+/* Stop zero: the warehouse. Accent while it is the thing to do. */
+.dv-stop.pickup.now { background: var(--accent); color: #fff; }
+.dv-stop.pickup.now .seq { background: rgba(255, 255, 255, 0.25); color: #fff; }
+.dv-stop.pickup.now .sub { color: rgba(255, 255, 255, 0.82); }
+.dv-stop.pickup.done { opacity: 0.75; }
+.dv-stop.pickup:active { background: var(--foam); }
+.dv-stop.pickup.now:active { background: var(--accent-press); }
 
 /* ---------- one stop ---------- */
 .dv-card {
-  background: rgba(255, 255, 255, 0.82);
-  border: 1px solid rgba(207, 191, 166, 0.78);
-  border-radius: var(--r); padding: 18px; margin-bottom: 16px;
-  box-shadow: 0 12px 30px rgba(90, 57, 15, 0.08);
+  background: var(--foam); border-radius: 20px; padding: 18px; margin-bottom: 16px;
 }
 .dv-card h3 {
-  font-family: var(--font-body); font-size: 13px; font-weight: 600;
-  letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 12px;
+  font-family: var(--font-body); font-size: 13px; font-weight: 400;
+  letter-spacing: 0; text-transform: uppercase; color: var(--muted); margin-bottom: 12px;
 }
-.dv-addr { font-size: 19px; font-weight: 600; line-height: 1.35; }
+.dv-addr { font-size: 20px; font-weight: 600; line-height: 1.3; letter-spacing: -0.015em; }
 .dv-instr {
   margin-top: 14px; padding: 13px 14px; border-radius: var(--r-sm);
-  background: rgba(239, 177, 29, 0.16); border: 1px solid rgba(213, 150, 9, 0.35);
-  color: #7a5406; font-size: 15px;
+  background: #fff4d6; color: #7a4b00; font-size: 15px;
 }
 
 .dv-line {
   display: grid; grid-template-columns: minmax(0, 1fr) 96px; gap: 14px; align-items: center;
-  padding: 14px 0; border-bottom: 1px solid rgba(207, 191, 166, 0.55);
+  padding: 14px 0; border-bottom: 0.5px solid var(--line);
 }
 .dv-line:last-of-type { border-bottom: 0; padding-bottom: 0; }
-.dv-line .what { font-weight: 600; font-size: 17px; }
+.dv-line .what { font-weight: 600; font-size: 17px; letter-spacing: -0.01em; }
 .dv-line .fmt { color: var(--muted); font-size: 14px; margin-top: 2px; }
 .dv-line .lot { margin-top: 10px; }
 
 .dv-in {
-  width: 100%; min-height: 52px; padding: 12px 14px;
-  border: 1px solid var(--line); border-radius: var(--r-sm);
-  background: var(--foam); color: var(--ink); font: inherit; font-size: 17px;
-  box-shadow: inset 0 1px 2px rgba(92, 57, 14, 0.04);
+  width: 100%; min-height: 50px; padding: 12px 14px;
+  border: 0; border-radius: var(--r-sm);
+  background: var(--fill); color: var(--ink); font: inherit; font-size: 17px;
+  box-shadow: none;
+  transition: box-shadow 120ms;
 }
 .dv-in.num { text-align: center; font-family: var(--font-mono); font-weight: 600; }
-.dv-in::placeholder { color: #a8b2bb; }
-.dv-in:focus-visible { outline: 2px solid var(--coral); outline-offset: 1px; border-color: var(--coral); }
-.dv-lab { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+.dv-in::placeholder { color: #aeaeb2; }
+.dv-in:focus, .dv-in:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
+.dv-lab { display: block; font-size: 13px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--muted); margin-bottom: 6px; }
 
 .dv-pill {
-  display: inline-flex; align-items: center; padding: 6px 13px; border-radius: 999px;
+  display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 999px;
   font-size: 14px; font-weight: 600;
 }
 .dv-pill.good { background: var(--mint); color: var(--good-deep); }
-.dv-pill.warn { background: rgba(239, 177, 29, 0.24); color: #7a5406; }
-.dv-pill.bad { background: rgba(237, 99, 63, 0.16); color: var(--coral-deep); }
+.dv-pill.warn { background: #fff0cc; color: #7a4b00; }
+.dv-pill.bad { background: rgba(215, 0, 21, 0.1); color: var(--coral-deep); }
+.dv-pill.neutral { background: var(--fill); color: var(--muted); }
+.dv-pill.info { background: var(--accent-tint); color: var(--accent); }
 
 .dv-empty {
   text-align: center; padding: 52px 22px; color: var(--muted);
-  background: rgba(255, 255, 255, 0.6); border: 1px dashed #c9b795; border-radius: 25px;
+  background: var(--foam); border-radius: 20px;
 }
-.dv-empty b { display: block; font-family: var(--font-serif); font-size: 24px; color: var(--ink); margin-bottom: 8px; }
+.dv-empty b { display: block; font-size: 22px; font-weight: 700; letter-spacing: -0.022em; color: var(--ink); margin-bottom: 8px; }
 
-/* ---------- proof of delivery ----------
-   Square thumbnails, big enough to tell apart at a glance in daylight; the
-   point is confirming a shot exists and is not of the driver's boot, not
-   examining it. The full photo is an ops-screen concern. */
+/* ---------- proof of delivery ---------- */
 .dv-shots {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   gap: 10px; margin-bottom: 14px;
@@ -268,28 +233,27 @@
 .dv-shot { position: relative; margin: 0; aspect-ratio: 1; }
 .dv-shot img {
   width: 100%; height: 100%; object-fit: cover;
-  border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--cream);
-  box-shadow: 0 4px 12px rgba(89, 57, 15, 0.1);
+  border-radius: var(--r-sm); background: var(--fill);
 }
-/* 34px, offset into the corner: reachable by a thumb but not on the path to
-   the shutter button, so a mis-tap deletes nothing. */
 .dv-shot button {
   position: absolute; top: -7px; right: -7px;
   width: 34px; height: 34px; border-radius: 50%;
-  border: 1px solid var(--line); background: var(--foam);
+  border: 0; background: var(--foam);
   color: var(--ink); font-size: 15px; line-height: 1; display: grid; place-items: center;
-  box-shadow: 0 3px 8px rgba(89, 57, 15, 0.16);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
 }
 .dv-shot button:disabled { opacity: 0.45; }
 
 /* ---------- sign in ---------- */
-.dv-login { max-width: 400px; margin: 0 auto; padding: 56px 18px; text-align: center; }
-.dv-login img { width: min(275px, 80%); margin: 0 auto 14px; display: block; }
+.dv-login { max-width: 400px; margin: 0 auto; padding: max(56px, env(safe-area-inset-top)) 20px 40px; text-align: center; }
+.dv-login img { width: min(220px, 62%); margin: 0 auto 14px; display: block; }
 .dv-login .kicker {
-  font-size: 11px; font-weight: 600; letter-spacing: 0.11em; text-transform: uppercase;
-  color: var(--muted); margin-bottom: 30px;
+  font-size: 15px; font-weight: 500; letter-spacing: 0; text-transform: none;
+  color: var(--muted); margin-bottom: 28px;
 }
-.dv-login form { display: flex; flex-direction: column; gap: 16px; text-align: left; }
+.dv-login form {
+  display: flex; flex-direction: column; gap: 14px; text-align: left;
+}
 .dv-login .err { color: var(--coral-deep); font-size: 14px; min-height: 20px; text-align: center; }
 
 /* A stop's own action bar sticks to the bottom of the viewport: the driver's
@@ -297,5 +261,106 @@
    below three screens of line items. */
 .dv-sticky {
   position: sticky; bottom: 0; padding: 14px 0 max(14px, env(safe-area-inset-bottom));
-  background: linear-gradient(to top, var(--ground) 62%, rgba(215, 216, 212, 0));
+  background: linear-gradient(to top, var(--ground) 62%, rgba(242, 242, 247, 0));
 }
+
+/* ============================================================================
+   Admin: build a route from scratch
+   ============================================================================ */
+.dv-admin { padding-top: 4px; }
+.dv-title { font-size: 34px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.08; margin: 4px 2px 6px; }
+.dv-sub { color: var(--muted); font-size: 15px; margin: 0 2px 18px; }
+.dv-back { display: inline-block; margin: 6px 0 4px -2px; padding: 8px 4px 8px 0; font-size: 17px; color: var(--accent); }
+.dv-section { margin: 26px 4px 8px; font-size: 13px; text-transform: uppercase; color: var(--muted); }
+
+/* Grouped list: one white card, hairlines between cells. */
+.dv-list { background: var(--foam); border-radius: var(--r); overflow: hidden; }
+.dv-cell {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px; min-height: 60px;
+  background: var(--foam);
+  transition: background-color 100ms;
+}
+.dv-cell + .dv-cell { box-shadow: inset 0 0.5px 0 var(--line); }
+a.dv-cell:active { background: var(--fill); }
+.dv-cell .grow { flex: 1; min-width: 0; }
+.dv-cell .t { display: block; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.dv-cell .s { display: block; margin-top: 2px; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+.dv-cell .seq {
+  flex: 0 0 auto; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--accent); color: #fff; font-family: var(--font-mono); font-size: 14px; font-weight: 600;
+}
+.dv-cell .seq.origin { background: #636366; }
+.dv-cell .tail { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
+.dv-cell .t-timing { color: var(--accent); font-variant-numeric: tabular-nums; font-size: 13px; margin-top: 2px; display: block; }
+.dv-list-empty { padding: 28px 18px; text-align: center; color: var(--muted); }
+.dv-list-empty b { display: block; color: var(--ink); font-size: 18px; margin-bottom: 4px; }
+
+.dv-search {
+  width: 100%; min-height: 44px; padding: 10px 14px 10px 38px;
+  border: 0; border-radius: 12px; background: var(--fill) no-repeat 12px center;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%238a8a8e' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20 20l-3.5-3.5'/%3E%3C/svg%3E");
+  color: var(--ink); font: inherit; font-size: 17px;
+}
+.dv-search:focus { outline: none; box-shadow: inset 0 0 0 2px var(--accent); }
+
+/* Segmented control. */
+.dv-seg { display: flex; padding: 2px; border-radius: 10px; background: var(--fill); margin-bottom: 14px; }
+.dv-seg button {
+  flex: 1; min-height: 34px; border: 0; border-radius: 8px; background: transparent;
+  color: var(--ink); font: inherit; font-size: 15px; font-weight: 500;
+  transition: background-color 150ms, box-shadow 150ms;
+}
+.dv-seg button[aria-pressed="true"] { background: var(--foam); font-weight: 600; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14); }
+
+.dv-banner { padding: 14px 16px; margin-bottom: 14px; border-radius: var(--r-sm); background: #fff4d6; color: #7a4b00; font-size: 15px; }
+.dv-banner b { display: block; margin-bottom: 2px; }
+.dv-banner.error { background: rgba(215, 0, 21, 0.1); color: #a0000f; }
+.dv-banner ul { margin: 6px 0 0; padding-left: 18px; }
+
+/* Two columns on a desk, one on a phone. */
+.dv-builder { display: block; }
+.dv-cols { display: grid; grid-template-columns: 1fr; gap: 20px; align-items: start; }
+.dv-panel[hidden] { display: none; }
+@media (min-width: 900px) {
+  .dv-cols { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); }
+  .dv-panel[hidden] { display: block; }
+  .dv-only-mobile { display: none !important; }
+}
+
+.dv-day-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 16px; }
+.dv-day-bar .seg { display: flex; padding: 2px; border-radius: 10px; background: var(--fill); }
+.dv-day-bar .seg a { padding: 6px 12px; border-radius: 8px; font-size: 15px; color: var(--muted); }
+.dv-day-bar .seg a.on { background: var(--foam); color: var(--ink); font-weight: 600; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14); }
+
+.dv-form { display: grid; gap: 12px; padding: 16px; background: var(--foam); border-radius: var(--r); }
+.dv-form .dv-row { align-items: end; }
+
+.dv-map-card { margin-top: 20px; background: var(--foam); border-radius: var(--r); padding: 16px; }
+.dv-map-card h2 { font-size: 20px; }
+.dv .route-map { width: 100%; height: 420px; margin-top: 12px; border-radius: 12px; overflow: hidden; background: #e9ebee; z-index: 0; }
+.dv .route-pin {
+  display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%;
+  font: 600 12px/1 var(--font-body); color: #fff; background: var(--accent); border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+.dv .route-pin.origin { background: #636366; }
+.dv .leaflet-tile-pane { filter: grayscale(0.75) contrast(0.92) brightness(1.04); }
+.dv .leaflet-bar { border: 0 !important; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.18) !important; }
+.dv .leaflet-bar a { color: var(--accent); }
+.dv-push { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 16px; }
+.dv-push p { margin: 0; color: var(--muted); font-size: 15px; }
+.dv-push .dv-btn { width: auto; min-width: 180px; }
+@media (max-width: 520px) { .dv-push { flex-direction: column; align-items: stretch; } .dv-push .dv-btn { width: 100%; } .dv .route-map { height: 320px; } }
+
+/* ---------- hover only where there is a hover ---------- */
+@media (hover: hover) and (pointer: fine) {
+  a.dv-cell:hover, .dv-stop:hover { background: var(--fill); }
+  .dv-btn:not(:disabled):hover { filter: brightness(0.97); }
+}
+
+/* ---------- accessibility ---------- */
+@media (prefers-reduced-motion: reduce) { .dv * { transition-duration: 0.01ms !important; } }
+@media (prefers-reduced-transparency: reduce) {
+  .dv-top { background: var(--ground); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+@media (prefers-contrast: more) { .dv { --line: rgba(60, 60, 67, 0.5); --muted: #55555a; } }

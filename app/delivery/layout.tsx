@@ -1,6 +1,7 @@
 import Link from "next/link";
 import "./delivery.css";
 import { currentDeliveryUser } from "@/lib/ops/session";
+import { LEDGER_ROLES } from "@/lib/ops/roles";
 import { todayYmd } from "@/lib/routes";
 import { RegisterSW } from "./_components/RegisterSW";
 
@@ -35,7 +36,7 @@ export const metadata = {
 export const viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#d7d8d4",
+  themeColor: "#f2f2f7",
   // The one screen where pinch-zoom genuinely helps: a delivery address read
   // at arm's length. Never disable it here.
   maximumScale: 5,
@@ -69,9 +70,18 @@ export default async function DeliveryLayout({ children }: LayoutProps<"/deliver
               {user.name.split(" ")[0]}
               <small>{DAY.format(new Date(`${todayYmd()}T12:00:00Z`))}</small>
             </div>
-            <Link className="dv-btn quiet inline sm" href="/delivery">
-              My route
-            </Link>
+            <nav className="nav">
+              <Link className="dv-btn quiet inline sm" href="/delivery">
+                {LEDGER_ROLES.includes(user.role) ? "Today" : "My route"}
+              </Link>
+              {/* Office staff only. A driver never sees this link, and the proxy
+                  and the pages themselves refuse him if he types the address. */}
+              {LEDGER_ROLES.includes(user.role) ? (
+                <Link className="dv-btn primary inline sm" href="/delivery/admin">
+                  Admin
+                </Link>
+              ) : null}
+            </nav>
           </header>
         ) : null}
         {children}
