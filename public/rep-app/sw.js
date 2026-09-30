@@ -1,9 +1,10 @@
-var CACHE = 'lmb-orders-v14';
+var CACHE = 'lmb-orders-v15';
 var ASSETS = [
   './',
   'index.html',
   'manifest.json',
   'assets/css/app.css',
+  'assets/css/apple.css',
   'assets/js/config.js',
   'assets/js/products.js',
   'assets/js/marketing-materials.js',
