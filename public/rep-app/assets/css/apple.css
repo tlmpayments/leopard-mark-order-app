@@ -608,3 +608,50 @@ textarea { min-height: 84px; }
 @media (prefers-contrast: more) {
   :root { --hairline: rgba(60, 60, 67, .5); --silver-dim: #55555a; }
 }
+
+/* ---- Survey: the questions a rep answers at the door ------------------------
+   One list of questions drives this form, the Prospects tab's columns and the
+   server's validation. Fields stack on a phone and pair up when there is room;
+   16px inputs so iOS does not zoom the page on focus. */
+.survey {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  padding: 16px;
+  background: var(--surface);
+  border-radius: var(--radius);
+}
+@media (min-width: 520px) { .survey { grid-template-columns: 1fr 1fr; } }
+.sv-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.sv-field > span { font-size: 13px; font-weight: 500; color: var(--silver-dim); letter-spacing: 0; text-transform: none; }
+.sv-field input, .sv-field select {
+  min-height: 46px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  box-shadow: none;
+  border-radius: 12px;
+  font-size: 16px;
+  width: 100%;
+  max-width: 100%;
+}
+.sv-field input:focus, .sv-field select:focus { box-shadow: inset 0 0 0 2px var(--accent); }
+
+.survey-fold { margin-top: 14px; background: var(--surface); border-radius: var(--radius); overflow: hidden; }
+.survey-fold > summary {
+  list-style: none;
+  display: flex; align-items: center; justify-content: space-between;
+  min-height: 52px; padding: 12px 16px;
+  font-size: 17px; font-weight: 600; letter-spacing: -0.01em;
+  cursor: pointer;
+}
+.survey-fold > summary::-webkit-details-marker { display: none; }
+.survey-fold > summary::after {
+  content: "";
+  width: 9px; height: 9px;
+  border-top: 2.5px solid var(--silver-dim); border-right: 2.5px solid var(--silver-dim);
+  transform: rotate(45deg);
+  transition: transform 160ms var(--ease-out);
+}
+.survey-fold[open] > summary::after { transform: rotate(135deg); }
+.survey-fold > summary small { margin-left: 8px; font-weight: 400; color: var(--silver-dim); }
+.survey-fold .survey { border-radius: 0; padding-top: 4px; }

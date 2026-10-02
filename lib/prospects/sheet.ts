@@ -3,8 +3,12 @@ import { FIELD_COLUMNS, STATUS_LABEL, SURVEY, PLAN_COLUMNS } from "@/lib/prospec
 /**
  * The server's line to the "Prospects" tab, through the Apps Script web app.
  *
- * Both directions need SYNC_SHARED_SECRET (here as an env var, there as a
- * Script Property). Until it and APPS_SCRIPT_URL are both set, `configured()`
+
+ * Both directions need PROSPECTS_SHEET_SECRET (here as an env var; there as
+ * the PROSPECTS_SECRET Script Property). It is its own secret on purpose: the
+ * order sync's SYNC_SHARED_SECRET also switches on DB->Sheet order syncing, which
+ * is not live in production and must not be turned on as a side effect of this.
+ * Until it and APPS_SCRIPT_URL are both set, `configured()`
  * is false and every caller degrades quietly: the plan falls back to the
  * static door list and the mirror job skips instead of failing. A rep's visit
  * is saved in the database first and always, so a sheet that is not connected
@@ -12,12 +16,12 @@ import { FIELD_COLUMNS, STATUS_LABEL, SURVEY, PLAN_COLUMNS } from "@/lib/prospec
  */
 
 export function configured(): boolean {
-  return Boolean(process.env.APPS_SCRIPT_URL && process.env.SYNC_SHARED_SECRET);
+  return Boolean(process.env.APPS_SCRIPT_URL && process.env.PROSPECTS_SHEET_SECRET);
 }
 
 async function call<T>(body: Record<string, unknown>): Promise<T> {
   const url = process.env.APPS_SCRIPT_URL;
-  const secret = process.env.SYNC_SHARED_SECRET;
+  const secret = process.env.PROSPECTS_SHEET_SECRET;
   if (!url || !secret) throw new Error("not configured");
   // Apps Script answers a POST with a redirect to the real response; follow it.
   const response = await fetch(url, {
@@ -36,8 +40,14 @@ async function call<T>(body: Record<string, unknown>): Promise<T> {
 
 export type PlanDoor = {
   id: number;
-  /** Only the fields the sheet actually had a value for; the rest stay static. */
-  [field: string]: string | number | undefined;
+  /**
+   * The plan fields as the sheet has them. The sheet is the authority for the
+   * plan columns: a blank Route or Stop cell comes through as "" / null and
+   * takes the door out of its route. Latitude and Longitude are the exception --
+   * a blank there leaves the pin where the app already has it, because a door
+   * with no coordinates is not a useful thing to want.
+   */
+  [field: string]: string | number | null | undefined;
 };
 
 type ListResponse = { ok: boolean; error?: string; rows?: Array<Record<string, unknown>> };
@@ -50,12 +60,16 @@ export function planDoorFromRow(row: Record<string, unknown>): PlanDoor | null {
   for (const col of PLAN_COLUMNS) {
     if (!col.field) continue;
     const raw = row[col.header];
-    if (raw === "" || raw === null || raw === undefined) continue;
+    const blank = raw === "" || raw === null || raw === undefined;
+    if (col.field === "lat" || col.field === "lng") {
+      if (!blank && Number.isFinite(Number(raw))) door[col.field] = Number(raw);
+      continue;
+    }
     if (NUMERIC.has(col.field)) {
-      const n = Number(raw);
-      if (Number.isFinite(n)) door[col.field] = n;
+      const n = blank ? NaN : Number(raw);
+      door[col.field] = Number.isFinite(n) ? n : null;
     } else {
-      door[col.field] = String(raw).trim();
+      door[col.field] = blank ? "" : String(raw).trim();
     }
   }
   if (!Number.isInteger(door.id) || door.id < 1) return null;

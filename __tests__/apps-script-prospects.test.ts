@@ -26,7 +26,7 @@ function load(grid: Cell[][], secret: string | null = "s3cret") {
   const sheet = fakeSheet(grid);
   const env = {
     SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: (n: string) => (n === "Prospects" ? sheet : null), getSpreadsheetTimeZone: () => "America/Los_Angeles" }), flush: () => {} },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: (k: string) => (k === "SYNC_SHARED_SECRET" ? secret : null) }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: (k: string) => (k === "PROSPECTS_SECRET" ? secret : null) }) },
     LockService: { getScriptLock: () => ({ waitLock: () => {}, releaseLock: () => {} }) },
   };
   const code = readFileSync("apps-script/Code.gs", "utf8");

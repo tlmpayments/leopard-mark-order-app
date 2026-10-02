@@ -2891,6 +2891,7 @@
   // shared live, so two people on the same streets are coordinated by a
   // schedule rather than a fence.
   var PROSPECT_PLAN = window.LM_PROSPECT_PLAN;
+  var planOrder = PROSPECT_PLAN.planOrder;
   var prospectScheduleCache = null;
 
   function prospectSchedule() {
@@ -3038,6 +3039,7 @@
       prospectId: prospectId,
       status: mark.status,
       note: mark.note || '',
+      survey: mark.survey || null,
       markedAt: new Date(mark.at || Date.now()).toISOString()
     });
     saveProspectQueue(queue);
@@ -3154,7 +3156,7 @@
         var merged = {};
         res.visits.forEach(function (v) {
           if (pending[v.prospectId]) return;
-          merged[v.prospectId] = { status: v.status, note: v.note || '', at: new Date(v.markedAt).getTime(), rep: v.rep };
+          merged[v.prospectId] = { status: v.status, note: v.note || '', survey: v.survey || null, at: new Date(v.markedAt).getTime(), rep: v.rep };
         });
         Object.keys(before).forEach(function (id) {
           // Kept: anything still waiting to be sent, and a note on a door
@@ -3167,7 +3169,7 @@
         Object.keys(before).concat(Object.keys(merged)).forEach(function (id) { ids[id] = true; });
         Object.keys(ids).forEach(function (id) {
           var a = before[id], b = merged[id];
-          if (!a || !b || a.status !== b.status || a.rep !== b.rep || a.at !== b.at || a.note !== b.note) changed.push(Number(id));
+          if (!a || !b || a.status !== b.status || a.rep !== b.rep || a.at !== b.at || a.note !== b.note || JSON.stringify(a.survey || null) !== JSON.stringify(b.survey || null)) changed.push(Number(id));
         });
 
         prospectState.marks = merged;
@@ -3255,6 +3257,7 @@
   function livePullProspects() {
     if (prospectPulling || document.hidden || !prospectScreenIsLive() || !loadProspectToken()) return Promise.resolve();
     prospectPulling = true;
+    loadProspectPlan(false).then(function (changed) { if (changed) onProspectPlanChanged(); });
     // Flush before pull, for the same reason syncProspectsNow does. No
     // reload of marks from storage here: an edit a rep is typing right now is
     // in memory a moment before it is on disk.
@@ -3342,6 +3345,198 @@
   }
 
 
+
+  // ---- the plan, from the Prospects tab -------------------------------------
+  //
+  // The door list this app ships is a fallback. The Prospects tab in the TLM
+  // Distribution Master File is the plan: change a Stop number there and the
+  // route reorders here, move a door to another Route, fix an address. The
+  // server hands the sheet's version over at /api/prospects/plan and it is
+  // overlaid on the static list by id. The last copy is kept on the phone, so
+  // a rep in a basement works the order the office last set rather than the
+  // order the app was built with.
+  //
+  // The sheet is the authority for where a door sits -- Route, Stop, Second
+  // Pass Group, Route Priority -- so a cleared cell takes it off its route.
+  // For descriptive fields (name, address, tier...) a blank cell leaves the
+  // app's own value alone.
+  var PROSPECT_PLAN_KEY = 'lm_prospect_plan_v1';
+  var PROSPECT_PLAN_REFRESH_MS = 60000;
+  var PLACEMENT_FIELDS = ['route', 'stop', 'group', 'routePriority'];
+  var DESCRIPTIVE_FIELDS = ['name', 'owner', 'licType', 'abcStatus', 'zip', 'address', 'city', 'segment', 'tier', 'wave', 'lat', 'lng'];
+  var prospectPlanSignature = '';
+  var prospectPlanAt = 0;
+
+  function applyProspectPlan(doors) {
+    if (!doors || !doors.length) return false;
+    var signature = doors.map(function (d) {
+      return [d.id, d.route || '', d.stop == null ? '' : d.stop, d.group || '', d.routePriority == null ? '' : d.routePriority, d.name || '', d.address || ''].join(':');
+    }).join('|');
+    if (signature === prospectPlanSignature) return false;
+
+    var list = allProspects();
+    var byId = {};
+    list.forEach(function (p) { byId[p.id] = p; });
+    doors.forEach(function (d) {
+      var p = byId[d.id];
+      if (!p) {
+        // A door added in the sheet. It needs a position to be a pin.
+        if (typeof d.lat !== 'number' || typeof d.lng !== 'number') return;
+        p = { id: d.id, name: '', owner: '', licType: '', abcStatus: 'ACTIVE', zip: '', address: '', city: '', segment: 'Independent',
+          tier: 'B', wave: 'First push', routePriority: null, route: '', stop: null, sweep: null, group: '', lat: d.lat, lng: d.lng, geo: 'rooftop' };
+        list.push(p);
+        byId[d.id] = p;
+      }
+      PLACEMENT_FIELDS.forEach(function (f) { if (d[f] !== undefined) p[f] = d[f]; });
+      DESCRIPTIVE_FIELDS.forEach(function (f) { if (d[f] !== undefined && d[f] !== '' && d[f] !== null) p[f] = d[f]; });
+      if (d.sweep !== undefined && d.sweep !== '') p._sweepText = d.sweep;
+    });
+    prospectPlanSignature = signature;
+    prospectScheduleCache = null; // the schedule is built from these, so it follows the sheet
+    return true;
+  }
+
+  function restoreProspectPlan() {
+    try {
+      var raw = localStorage.getItem(PROSPECT_PLAN_KEY);
+      if (raw) applyProspectPlan(JSON.parse(raw));
+    } catch (e) { /* a bad copy is no copy */ }
+  }
+  restoreProspectPlan();
+
+  /** Ask the server for the sheet's plan; resolves true when it changed anything. */
+  function loadProspectPlan(force) {
+    var token = loadProspectToken();
+    if (!token) return Promise.resolve(false);
+    if (!force && Date.now() - prospectPlanAt < PROSPECT_PLAN_REFRESH_MS) return Promise.resolve(false);
+    prospectPlanAt = Date.now();
+    return fetch(PROSPECT_API + '/plan', { headers: { Authorization: 'Bearer ' + token } })
+      .then(function (r) {
+        if (r.status === 401) { saveProspectToken(''); return null; }
+        return r.json();
+      })
+      .then(function (res) {
+        if (!res || !res.ok || res.source !== 'sheet' || !res.doors) return false;
+        try { localStorage.setItem(PROSPECT_PLAN_KEY, JSON.stringify(res.doors)); } catch (e) {}
+        return applyProspectPlan(res.doors);
+      })
+      .catch(function () { return false; });
+  }
+
+  /** The order changed under whatever the rep is looking at. */
+  function onProspectPlanChanged() {
+    var screen = activeScreenId();
+    if (screen === 'screen-prospects') renderProspects();
+    else if (screen === 'screen-run-overview' && prospectState.run) { refreshRunOrder(prospectState.run); openRunOverview(true); }
+  }
+
+  /** Re-derive a run's stops from the current plan. Keeps "where he left off"
+   *  honest: the first door nobody has worked is where he resumes. */
+  function refreshRunOrder(run) {
+    if (!run) return;
+    var ids, legs = null;
+    if (run.plan) {
+      var key = myCrewKey();
+      var iso = String(run.region || '').slice(5);
+      var day = prospectSchedule().filter(function (d) { return d.date === iso; })[0];
+      if (!key || !day) return;
+      ids = planDayIds(day, key);
+      legs = {};
+      day.together.forEach(function (id) { legs[id] = 'together'; });
+      (day.legs[key] || []).forEach(function (id) { legs[id] = 'solo'; });
+    } else {
+      ids = prospectRunDoors(run.region).map(function (p) { return p.id; });
+    }
+    if (ids.length && ids.join(',') !== run.ids.join(',')) {
+      run.ids = ids;
+      if (legs) run.legs = legs;
+      run.index = runNextUnworked(run, 0);
+      saveRun(run);
+    }
+  }
+
+  // ---- the survey -----------------------------------------------------------
+  // The questions come from lib/prospects/sheetColumns.ts (generated into
+  // prospect-survey.js), so the form, the sheet's columns and the server's
+  // validation are one list. Answers ride on the same mark as the status and
+  // note and reach the door's row in the Prospects tab with them.
+  var SURVEY_QUESTIONS = window.LM_PROSPECT_SURVEY || [];
+
+  function surveyAnswers(p) {
+    var m = prospectMark(p.id);
+    return (m && m.survey) || {};
+  }
+
+  function surveyFieldHtml(q, value) {
+    var id = 'sv-' + q.key;
+    var head = '<label class="sv-field" for="' + id + '"><span>' + escapeHtml(q.label) + '</span>';
+    if (q.kind === 'choice' || q.kind === 'yesno') {
+      var choices = q.kind === 'yesno' ? ['Yes', 'No'] : q.choices;
+      return head + '<select id="' + id + '" data-survey="' + q.key + '"><option value="">—</option>' + choices.map(function (c) {
+        return '<option value="' + escapeHtml(c) + '"' + (c === value ? ' selected' : '') + '>' + escapeHtml(c) + '</option>';
+      }).join('') + '</select></label>';
+    }
+    return head + '<input id="' + id + '" data-survey="' + q.key + '" type="' + (q.kind === 'date' ? 'date' : 'text') + '" value="' + escapeHtml(value || '') +
+      '" placeholder="' + escapeHtml(q.placeholder || '') + '" autocomplete="off" /></label>';
+  }
+
+  function renderSurvey(el, p, countEl) {
+    if (!el || !p) return;
+    var answers = surveyAnswers(p);
+    el.setAttribute('data-prospect-id', p.id);
+    el.innerHTML = SURVEY_QUESTIONS.map(function (q) { return surveyFieldHtml(q, answers[q.key]); }).join('');
+    updateSurveyCount(countEl, answers);
+  }
+
+  function updateSurveyCount(countEl, answers) {
+    if (!countEl) return;
+    var n = Object.keys(answers).length;
+    countEl.textContent = n ? '· ' + n + ' answered' : '';
+  }
+
+  /** The time a mark carries. A rep working one door keeps one entry in the
+   *  trail (the survey saves as he types) instead of one per keystroke. */
+  function markTime(existing) {
+    var mine = existing && String(existing.rep || '').toLowerCase() === String(state.rep || '').toLowerCase();
+    return mine && existing.at && Date.now() - existing.at < 15 * 60 * 1000 ? existing.at : Date.now();
+  }
+
+  function saveSurveyAnswer(p, key, value) {
+    var existing = prospectMark(p.id) || { status: 'new', note: '' };
+    var survey = {};
+    Object.keys(existing.survey || {}).forEach(function (k) { survey[k] = existing.survey[k]; });
+    if (value) survey[key] = value; else delete survey[key];
+    // Answering the survey means he is at the door: a door still "not visited"
+    // becomes "visited". Anything he already set (interested, signed...) stays.
+    var status = existing.status && existing.status !== 'new' ? existing.status : 'visited';
+    prospectState.marks[p.id] = { status: status, note: existing.note || '', at: markTime(existing), rep: state.rep, survey: survey };
+    saveProspectMarks();
+    queueProspectVisit(p.id, prospectState.marks[p.id]);
+    refreshProspectPin(p);
+    return prospectState.marks[p.id];
+  }
+
+  var surveyTimers = {};
+  function wireSurvey(el, countEl, onSaved) {
+    if (!el) return;
+    function handle(e, delay) {
+      var field = e.target.closest('[data-survey]');
+      if (!field) return;
+      var p = findProspect(parseInt(el.getAttribute('data-prospect-id'), 10));
+      if (!p) return;
+      var key = field.getAttribute('data-survey'), value = field.value;
+      var timerKey = el.id + key;
+      clearTimeout(surveyTimers[timerKey]);
+      surveyTimers[timerKey] = setTimeout(function () {
+        var mark = saveSurveyAnswer(p, key, value);
+        updateSurveyCount(countEl, mark.survey || {});
+        if (onSaved) onSaved(p);
+      }, delay);
+    }
+    el.addEventListener('change', function (e) { handle(e, 0); });
+    el.addEventListener('input', function (e) { if (e.target.tagName === 'INPUT' && e.target.type === 'text') handle(e, 500); });
+  }
+
   function prospectMark(id) { return prospectState.marks[id] || null; }
   function prospectStatusKey(p) {
     var m = prospectMark(p.id);
@@ -3351,6 +3546,8 @@
 
   function allProspects() { return window.LM_PROSPECTS || []; }
   function prospectSweep(p) {
+    // The sheet's own text, once the plan has been read from it.
+    if (p._sweepText !== undefined) return p._sweepText;
     var list = window.LM_PROSPECT_SWEEPS || [];
     return p.sweep === null || p.sweep === undefined ? '' : (list[p.sweep] || '');
   }
@@ -3431,7 +3628,7 @@
       // stop, then the second-pass groups, then everything excluded), which
       // is exactly what "give it to them in an order that makes sense" means
       // on this sheet. Sorting by id reproduces the printed plan.
-      list.sort(function (a, b) { return a.id - b.id; });
+      list.sort(planOrder);
 
       // ...and then, if asked, walked in the shortest order within each day.
       // The sheet's stop order is a one-way sweep by house number, set before
@@ -3648,7 +3845,7 @@
       if (region === 'wave:arts') return isArtsDoor(p);
       return false;
     });
-    list.sort(function (a, b) { return a.id - b.id; });
+    list.sort(planOrder);
     return list;
   }
 
@@ -3782,7 +3979,7 @@
     live = live === true;
     var run = prospectState.run;
     if (!run) { showScreen('screen-prospects'); return; }
-    if (!live) runSkipWorkedByOthers(run);
+    if (!live) { refreshRunOrder(run); runSkipWorkedByOthers(run); }
     var doors = run.ids.map(findProspect).filter(Boolean);
     var worked = runWorkedCount(run);
     var left = doors.length - worked;
@@ -3942,6 +4139,7 @@
     document.getElementById('run-navigate').href =
       'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + p.lat + ',' + p.lng;
     document.getElementById('run-note').value = (prospectMark(p.id) || {}).note || '';
+    renderSurvey(document.getElementById('run-survey'), p, document.getElementById('run-survey-count'));
 
     document.getElementById('run-tags').innerHTML =
       '<span class="prospect-tag tier-' + escapeHtml(p.tier) + '">Tier ' + escapeHtml(p.tier) + '</span>' +
@@ -3998,7 +4196,8 @@
       status: key,
       note: document.getElementById('run-note').value || existing.note || '',
       at: Date.now(),
-      rep: state.rep
+      rep: state.rep,
+      survey: existing.survey || null
     };
     saveProspectMarks();
     queueProspectVisit(p.id, prospectState.marks[p.id]);
@@ -4361,7 +4560,7 @@
         dayInfo[d.day] = {
           doors: d.doors.length,
           miles: prospectPathMiles(d.doors),
-          planMiles: prospectPathMiles(d.doors.slice().sort(function (a, b) { return a.id - b.id; })),
+          planMiles: prospectPathMiles(d.doors.slice().sort(planOrder)),
           links: chunks.map(function (chunk, i) {
             return {
               url: prospectMapsUrl(chunk),
@@ -4456,6 +4655,7 @@
   }
 
   function openProspects() {
+    loadProspectPlan(true).then(function (changed) { if (changed) onProspectPlanChanged(); });
     prospectState.marks = loadProspectMarks();
     prospectState.run = loadRun();
     // Send anything stranded from yesterday -- including whatever this phone
@@ -4555,6 +4755,7 @@
     document.getElementById('prospect-name').textContent = prospectTitle(p);
     document.getElementById('prospect-address').textContent = p.address;
     document.getElementById('prospect-note').value = (prospectMark(id) || {}).note || '';
+    renderSurvey(document.getElementById('prospect-survey'), p);
     document.getElementById('prospect-directions').href =
       'https://www.google.com/maps/dir/?api=1&destination=' + p.lat + ',' + p.lng;
 
@@ -4667,10 +4868,10 @@
     if (key === 'new') {
       // Back to untouched. The note is deliberately kept: a rep clearing a
       // wrong status has not asked to lose what they wrote about the door.
-      if (existing.note) prospectState.marks[p.id] = { status: 'new', note: existing.note, at: Date.now(), rep: state.rep };
+      if (existing.note) prospectState.marks[p.id] = { status: 'new', note: existing.note, at: Date.now(), rep: state.rep, survey: existing.survey || null };
       else delete prospectState.marks[p.id];
     } else {
-      prospectState.marks[p.id] = { status: key, note: existing.note || '', at: Date.now(), rep: state.rep };
+      prospectState.marks[p.id] = { status: key, note: existing.note || '', at: Date.now(), rep: state.rep, survey: existing.survey || null };
     }
 
     saveProspectMarks();
@@ -4691,12 +4892,24 @@
     prospectNoteTimer = setTimeout(function () {
       var existing = prospectMark(p.id) || { status: 'new', at: Date.now() };
       if (!note && existing.status === 'new') delete prospectState.marks[p.id];
-      else prospectState.marks[p.id] = { status: existing.status || 'new', note: note, at: existing.at || Date.now(), rep: existing.rep || state.rep };
+      else prospectState.marks[p.id] = { status: existing.status || 'new', note: note, at: existing.at || Date.now(), rep: existing.rep || state.rep, survey: existing.survey || null };
       saveProspectMarks();
       if (prospectState.marks[p.id] && prospectState.marks[p.id].status !== 'new') {
         queueProspectVisit(p.id, prospectState.marks[p.id]);
       }
     }, 400);
+  });
+
+  wireSurvey(document.getElementById('prospect-survey'), null, function (p) {
+    if (prospectState.current && prospectState.current.id === p.id) {
+      renderProspectStatusButtons();
+      renderProspectProgress();
+    }
+  });
+  wireSurvey(document.getElementById('run-survey'), document.getElementById('run-survey-count'), function (p) {
+    // The status may have moved from "not visited": show the answer as taken.
+    renderRunStatusButtons(p);
+    document.getElementById('run-next').textContent = 'Next Location \u2192';
   });
 
   document.getElementById('back-prospect').addEventListener('click', function () {

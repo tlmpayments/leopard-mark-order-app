@@ -2566,7 +2566,9 @@ function handleSyncDelivery(body) {
 //   FIELD columns (grey headers)   -- owned by the APP. Overwritten on visit.
 //
 // Script Properties this depends on (Project Settings, never hardcoded):
-//   SYNC_SHARED_SECRET -- the same secret the order sync already uses.
+//   PROSPECTS_SECRET -- a secret used ONLY by the Prospects tab. Deliberately
+//   not SYNC_SHARED_SECRET: that one also switches on the order sync, and the
+//   prospect mirror must not be able to turn that on by accident.
 // =====================================================================
 var PROSPECTS_SHEET_NAME = 'Prospects';
 var PROSPECTS_SEED_URL = 'https://orders.tlmbg.co/rep-app/prospects-seed.json';
@@ -2684,7 +2686,7 @@ function prospectsHeaderMap(sheet) {
 }
 
 function prospectsAuthorized(body) {
-  var secret = PropertiesService.getScriptProperties().getProperty('SYNC_SHARED_SECRET');
+  var secret = PropertiesService.getScriptProperties().getProperty('PROSPECTS_SECRET');
   return !!secret && body && body.secret === secret;
 }
 

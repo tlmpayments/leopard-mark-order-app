@@ -10,11 +10,17 @@ describe("reading the plan from the Prospects tab", () => {
     expect(door).toMatchObject({ id: 7, name: "KALUAS NIGHT CLUB", route: "R1 Huntington Park", stop: 3, routePriority: 1, tier: "A", lat: 33.97, lng: -118.2 });
   });
 
-  it("leaves a field out when the sheet cell is blank, so the app keeps its own value", () => {
+  it("carries a blank Route or Stop through as blank: the sheet decides, and a cleared cell takes the door off its route", () => {
     const door = planDoorFromRow({ ID: 9, Route: "", Stop: "", "Business Name": "X" })!;
-    expect("route" in door).toBe(false);
-    expect("stop" in door).toBe(false);
+    expect(door.route).toBe("");
+    expect(door.stop).toBeNull();
     expect(door.name).toBe("X");
+  });
+
+  it("but never blanks a pin: an empty Latitude or Longitude leaves the app's coordinates alone", () => {
+    const door = planDoorFromRow({ ID: 9, Latitude: "", Longitude: null })!;
+    expect("lat" in door).toBe(false);
+    expect("lng" in door).toBe(false);
   });
 
   it("drops rows without a usable ID", () => {
@@ -109,6 +115,12 @@ describe("the seed file that builds the tab", () => {
       expect(seen.has(key), key).toBe(false);
       seen.add(key);
     }
+  });
+
+  it("ships the survey the server validates against", () => {
+    const sandbox: { LM_PROSPECT_SURVEY?: unknown } = {};
+    new Function("window", readFileSync("public/rep-app/assets/js/prospect-survey.js", "utf8"))(sandbox);
+    expect(sandbox.LM_PROSPECT_SURVEY).toEqual(JSON.parse(JSON.stringify(SURVEY)));
   });
 
   it("is in step with the door list the app ships", () => {

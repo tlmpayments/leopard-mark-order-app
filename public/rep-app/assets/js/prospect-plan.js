@@ -60,6 +60,28 @@
     return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
   }
 
+  /**
+   * The order doors are worked in: routes by priority, doors within a route by
+   * their Stop number. Stop is a column in the Prospects tab, so reordering a
+   * route is typing a different number there; doors with no route keep the
+   * plan's own (ID) order, with a group's doors ordered by Stop among
+   * themselves.
+   */
+  function planOrder(a, b) {
+    var pa = a.route ? (a.routePriority || 998) : 999;
+    var pb = b.route ? (b.routePriority || 998) : 999;
+    if (pa !== pb) return pa - pb;
+    var sa = a.stop === null || a.stop === undefined ? 1e9 : a.stop;
+    var sb = b.stop === null || b.stop === undefined ? 1e9 : b.stop;
+    if (a.route && b.route) {
+      if (a.route !== b.route) return a.route < b.route ? -1 : 1;
+      if (sa !== sb) return sa - sb;
+    } else if (a.group && b.group && a.group === b.group && sa !== sb) {
+      return sa - sb;
+    }
+    return a.id - b.id;
+  }
+
   function isExcluded(p) { return String(p.wave || '').indexOf('Excluded') === 0; }
 
   /** The Downtown Arts District track (ZIP 90021): 17 doors that sit outside
@@ -98,13 +120,13 @@
         .filter(function (p) {
           return !isExcluded(p) && (r.kind === 'route' ? p.route === r.name : p.group === r.name);
         })
-        .sort(function (a, b) { return a.id - b.id; })
+        .sort(planOrder)
         .forEach(function (p) { queue.push(p); });
     });
     // Buyer order, which column A already encodes.
     prospects
       .filter(function (p) { return isArts(p) && !isExcluded(p); })
-      .sort(function (a, b) { return a.id - b.id; })
+      .sort(planOrder)
       .forEach(function (p) { queue.push(p); });
     return queue;
   }
@@ -180,6 +202,7 @@
     crewKey: crewKey,
     crewName: crewName,
     buildSchedule: buildSchedule,
+    planOrder: planOrder,
     regionOrder: regionOrder,
     doorQueue: doorQueue,
     isoOf: isoOf,
