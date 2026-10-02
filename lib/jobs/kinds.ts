@@ -16,6 +16,7 @@ export const JOB_KINDS = [
   "write_delivery_to_sheet",
   "keg_custody_nudge",
   "sheet_reconcile",
+  "prospect_to_sheet",
 ] as const;
 
 export type JobKind = (typeof JOB_KINDS)[number];
@@ -35,6 +36,7 @@ export const JOB_KIND_LABELS: Record<JobKind, string> = {
   write_delivery_to_sheet: "Write delivery facts to Sheet",
   keg_custody_nudge: "Keg custody nudge",
   sheet_reconcile: "Nightly Sheet reconcile",
+  prospect_to_sheet: "Write prospect visit to Sheet",
 };
 
 /**

@@ -3,6 +3,10 @@ import { db } from "@/lib/db";
 import { currentOpsUser } from "@/lib/ops/session";
 import { repTokenFromRequest, verifyRepToken } from "@/lib/prospects/repToken";
 import type { ProspectVisitStatus } from "@/app/generated/prisma/enums";
+import { Prisma } from "@/app/generated/prisma/client";
+import { enqueue } from "@/lib/jobs/queue";
+import { kickJobs } from "@/lib/jobs/kick";
+import { cleanSurvey } from "@/lib/prospects/survey";
 
 const STATUSES: readonly ProspectVisitStatus[] = ["visited", "interested", "comeback", "signed", "nofit"];
 /** One flush of a rep's offline queue. Generous, but not unbounded. */
@@ -12,6 +16,7 @@ type IncomingVisit = {
   prospectId?: unknown;
   status?: unknown;
   note?: unknown;
+  survey?: unknown;
   markedAt?: unknown;
 };
 
@@ -62,7 +67,7 @@ export async function GET(request: Request): Promise<Response> {
       where: { prospectId },
       orderBy: { markedAt: "desc" },
       take: 50,
-      select: { status: true, note: true, repName: true, markedAt: true },
+      select: { status: true, note: true, survey: true, repName: true, markedAt: true },
     });
     return NextResponse.json({
       ok: true,
@@ -70,6 +75,7 @@ export async function GET(request: Request): Promise<Response> {
       trail: events.map((e) => ({
         status: e.status,
         note: e.note ?? "",
+        survey: e.survey ?? null,
         rep: e.repName,
         markedAt: e.markedAt.toISOString(),
       })),
@@ -83,7 +89,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const visits = await db.prospectVisit.findMany({
     orderBy: { prospectId: "asc" },
-    select: { prospectId: true, status: true, note: true, repName: true, markedAt: true, updatedAt: true },
+    select: { prospectId: true, status: true, note: true, survey: true, repName: true, markedAt: true, updatedAt: true },
   });
 
   return NextResponse.json({
@@ -93,6 +99,7 @@ export async function GET(request: Request): Promise<Response> {
       prospectId: v.prospectId,
       status: v.status,
       note: v.note ?? "",
+      survey: v.survey ?? null,
       rep: v.repName,
       markedAt: v.markedAt.toISOString(),
       updatedAt: v.updatedAt.toISOString(),
@@ -125,7 +132,7 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ ok: false, error: `Send at most ${MAX_BATCH} visits at a time.` }, { status: 413 });
   }
 
-  const clean: Array<{ prospectId: number; status: ProspectVisitStatus; note: string; markedAt: Date }> = [];
+  const clean: Array<{ prospectId: number; status: ProspectVisitStatus; note: string; survey: Record<string, string> | null; markedAt: Date }> = [];
   for (const raw of incoming) {
     const prospectId = Number(raw?.prospectId);
     const status = String(raw?.status ?? "") as ProspectVisitStatus;
@@ -136,6 +143,7 @@ export async function POST(request: Request): Promise<Response> {
       prospectId,
       status,
       note: String(raw?.note ?? "").slice(0, 2000),
+      survey: cleanSurvey(raw?.survey),
       // A device clock can be wrong or absent; now is a defensible fallback,
       // and a clock running ahead of the server is clamped so a broken phone
       // cannot win every conflict forever.
@@ -156,8 +164,8 @@ export async function POST(request: Request): Promise<Response> {
     clean.map((v) =>
       db.prospectVisitEvent.upsert({
         where: { prospectId_repName_markedAt: { prospectId: v.prospectId, repName: who.name, markedAt: v.markedAt } },
-        create: { prospectId: v.prospectId, status: v.status, note: v.note || null, repName: who.name, markedAt: v.markedAt },
-        update: { status: v.status, note: v.note || null },
+        create: { prospectId: v.prospectId, status: v.status, note: v.note || null, survey: v.survey ?? Prisma.DbNull, repName: who.name, markedAt: v.markedAt },
+        update: { status: v.status, note: v.note || null, survey: v.survey ?? Prisma.DbNull },
       }),
     ),
   );
@@ -175,11 +183,20 @@ export async function POST(request: Request): Promise<Response> {
     }
     await db.prospectVisit.upsert({
       where: { prospectId: visit.prospectId },
-      create: { ...visit, repName: who.name },
-      update: { status: visit.status, note: visit.note, markedAt: visit.markedAt, repName: who.name },
+      create: { ...visit, survey: visit.survey ?? Prisma.DbNull, repName: who.name },
+      update: { status: visit.status, note: visit.note, survey: visit.survey ?? Prisma.DbNull, markedAt: visit.markedAt, repName: who.name },
     });
     written++;
   }
+
+  // Mirror each door onto its row in the Prospects tab. After the database
+  // write, never before: the sheet is where the office reads, the database is
+  // the record. One job per door and mark; the handler writes the door's
+  // current state, so order and replays do not matter.
+  for (const visit of clean) {
+    await enqueue("prospect_to_sheet", `${visit.prospectId}:${visit.markedAt.getTime()}`, { prospectId: visit.prospectId });
+  }
+  kickJobs();
 
   return NextResponse.json({ ok: true, written, skipped });
 }
@@ -199,13 +216,20 @@ export async function DELETE(request: Request): Promise<Response> {
     await db.prospectVisit.deleteMany({ where: { prospectId } });
     // A clear is part of the door's story too: someone said "not visited"
     // over another rep's mark, and the trail should show who.
+    const now = new Date();
     await db.prospectVisitEvent.create({
-      data: { prospectId, status: "new", repName: who.name, markedAt: new Date() },
+      data: { prospectId, status: "new", repName: who.name, markedAt: now },
     });
+    await enqueue("prospect_to_sheet", `${prospectId}:${now.getTime()}`, { prospectId });
+    kickJobs();
     return NextResponse.json({ ok: true, deleted: 1 });
   }
   if (rep) {
+    const affected = await db.prospectVisit.findMany({ where: { repName: rep }, select: { prospectId: true } });
     const result = await db.prospectVisit.deleteMany({ where: { repName: rep } });
+    const now = Date.now();
+    for (const a of affected) await enqueue("prospect_to_sheet", `${a.prospectId}:${now}`, { prospectId: a.prospectId });
+    if (affected.length) kickJobs();
     return NextResponse.json({ ok: true, deleted: result.count });
   }
   return NextResponse.json({ ok: false, error: "Name a rep or a prospectId." }, { status: 400 });

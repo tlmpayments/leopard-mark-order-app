@@ -1264,6 +1264,11 @@ model ProspectVisit {
   prospectId Int                 @unique @map("prospect_id")
   status     ProspectVisitStatus
   note       String?
+  /// The survey answers, {questionKey: answer}, as defined by SURVEY in
+  /// lib/prospects/sheetColumns.ts. Json rather than a column per question so a
+  /// question can be added or reworded without a migration; the keys are the
+  /// contract and the sheet's column titles are derived from them.
+  survey     Json?
   /// The rep as the PIN login names him ("James Williams"), not an id: the
   /// rep app authenticates against the Apps Script Reps sheet, which has no
   /// stable key of its own.
@@ -1297,6 +1302,8 @@ model ProspectVisitEvent {
   prospectId Int      @map("prospect_id")
   status     String
   note       String?
+  /// What the survey said at this visit. See ProspectVisit.survey.
+  survey     Json?
   repName    String   @map("rep_name")
   markedAt   DateTime @map("marked_at")
   createdAt  DateTime @default(now()) @map("created_at")

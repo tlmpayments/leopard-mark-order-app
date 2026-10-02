@@ -10,6 +10,7 @@ import { syncDeliveryToSheet } from "@/lib/sheetSync";
 
 import { db } from "@/lib/db";
 import { syncOrderToSheet } from "@/lib/sheetSync";
+import { configured as prospectSheetConfigured, writeVisit } from "@/lib/prospects/sheet";
 import { ensureStripeCustomer, sendPaymentSetupLink } from "@/lib/stripeCustomer";
 import { issueInvoiceForOrder } from "@/lib/billing/issue";
 import { checkAvailability, kegCustodyBalances } from "@/lib/inventory";
@@ -83,6 +84,42 @@ export const HANDLERS: Record<JobKind, JobHandler> = {
       payload: { slackChannel: result.slackChannel ?? null, slackTs: result.slackTs ?? null },
     });
     return "synced to Sales tab";
+  },
+
+  // ---- Prospecting ----
+  // Mirror a rep's visit onto the door's row in the Prospects tab. One-way and
+  // last-state-wins: it writes whatever the database says NOW, not what was true
+  // when the job was queued, so a stale or replayed job cannot put old notes
+  // back. Skips (rather than fails) while the sheet connection is not set up --
+  // the visit is already saved in the database and that is the record.
+  prospect_to_sheet: async (p) => {
+    const prospectId = Number(p["prospectId"]);
+    if (!Number.isInteger(prospectId)) throw new Error('Job payload is missing "prospectId"');
+    if (!prospectSheetConfigured()) return "skipped: sheet connection not configured";
+
+    const [visit, latest, count] = await Promise.all([
+      db.prospectVisit.findUnique({ where: { prospectId } }),
+      db.prospectVisitEvent.findFirst({ where: { prospectId }, orderBy: { markedAt: "desc" } }),
+      db.prospectVisitEvent.count({ where: { prospectId, status: { not: "new" } } }),
+    ]);
+    // Cleared door: no current row. Blank the status columns, keep the log.
+    const source = visit
+      ? { status: visit.status as string, note: visit.note, survey: visit.survey, repName: visit.repName, markedAt: visit.markedAt }
+      : latest
+        ? { status: "new", note: null, survey: null, repName: latest.repName, markedAt: latest.markedAt }
+        : null;
+    if (!source) return "skipped: nothing recorded for this door";
+
+    const result = await writeVisit({
+      prospectId,
+      status: source.status,
+      note: source.note,
+      survey: (source.survey as Record<string, unknown> | null) ?? null,
+      repName: source.repName,
+      markedAt: source.markedAt,
+      visitCount: count,
+    });
+    return `written to Prospects row ${result.row}`;
   },
 
   slack_new_order: async (p) => {

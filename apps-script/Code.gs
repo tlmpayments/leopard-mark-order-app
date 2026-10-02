@@ -94,6 +94,8 @@ function doPost(e) {
     if (body.action === 'syncDelivery') return respond(handleSyncDelivery(body));
     if (body.action === 'marketingOrder') return respond(handleMarketingOrder(body));
     if (body.action === 'writeOrderIds') return respond(handleWriteOrderIds(body));
+    if (body.action === 'prospectsList') return respond(handleProspectsList(body));
+    if (body.action === 'prospectVisit') return respond(handleProspectVisit(body));
     return respond({ ok: false, error: 'Unknown action' });
   } catch (err) {
     return respond({ ok: false, error: err.message });
@@ -2543,5 +2545,219 @@ function handleSyncDelivery(body) {
     });
     SpreadsheetApp.flush();
     return { ok: true, rowsUpdated: rows.length };
+  } finally { lock.releaseLock(); }
+}
+
+
+// =====================================================================
+// PROSPECTS: the "Prospects" tab -- every prospective account, one row each.
+//
+// Why it lives in the sheet. The rep app's "Find Prospective Accounts" used to
+// carry its door list as a static file, so the order of a route was a thing
+// only a developer could change. Now the order is a column here: change a
+// Stop number and the route is reordered in the app. And what reps find at a
+// door (status, notes, survey answers) is written back onto that door's own
+// row, so the office reads one line per account.
+//
+// Two kinds of column (see lib/prospects/sheetColumns.ts, which is the single
+// definition; the seed file carries the header names so this code stays
+// generic):
+//   PLAN columns  (white headers)  -- owned by the SHEET. Edit freely.
+//   FIELD columns (grey headers)   -- owned by the APP. Overwritten on visit.
+//
+// Script Properties this depends on (Project Settings, never hardcoded):
+//   SYNC_SHARED_SECRET -- the same secret the order sync already uses.
+// =====================================================================
+var PROSPECTS_SHEET_NAME = 'Prospects';
+var PROSPECTS_SEED_URL = 'https://orders.tlmbg.co/rep-app/prospects-seed.json';
+var PROSPECT_LOG_MAX_CHARS = 30000; // a cell holds 50,000; leave a wide margin
+
+/**
+ * Create the Prospects tab. Run ONCE from the Apps Script editor (select
+ * setupProspectsTab, press Run). Safe to run again: it never overwrites a tab
+ * that already has data -- it only adds any field columns that are missing.
+ */
+function setupProspectsTab() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var response = UrlFetchApp.fetch(PROSPECTS_SEED_URL, { muteHttpExceptions: true });
+  if (response.getResponseCode() !== 200) {
+    throw new Error('Could not fetch the prospect list from ' + PROSPECTS_SEED_URL + ' (HTTP ' + response.getResponseCode() + '). Is the rep app deployed with prospects-seed.json?');
+  }
+  var seed = JSON.parse(response.getContentText());
+  var headers = seed.headers.concat(seed.fieldHeaders);
+
+  var sheet = ss.getSheetByName(PROSPECTS_SHEET_NAME);
+  if (sheet && sheet.getLastRow() > 1) {
+    // Already built. Add any new field columns and stop.
+    var existing = sheet.getRange(1, 1, 1, Math.max(1, sheet.getLastColumn())).getValues()[0].map(String);
+    var added = [];
+    headers.forEach(function (h) {
+      if (existing.indexOf(h) === -1) {
+        sheet.getRange(1, existing.length + added.length + 1).setValue(h);
+        added.push(h);
+      }
+    });
+    styleProspectsHeaders(sheet, seed);
+    return { ok: true, created: false, addedColumns: added, rows: sheet.getLastRow() - 1 };
+  }
+
+  if (!sheet) sheet = ss.insertSheet(PROSPECTS_SHEET_NAME);
+  sheet.clear();
+
+  var values = [headers];
+  seed.rows.forEach(function (row) {
+    values.push(headers.map(function (h) { return row[h] === undefined ? '' : row[h]; }));
+  });
+  // Plain text for ZIP and ID-like fields: a ZIP typed as a number loses its
+  // leading zero, and a licence type such as "M: 47, 58" must not be parsed.
+  sheet.getRange(1, 1, values.length, headers.length).setNumberFormat('@');
+  sheet.getRange(1, 1, values.length, headers.length).setValues(values);
+  // ...but the numeric columns should be numbers, so they sort and reorder properly.
+  ['ID', 'Route Priority', 'Stop', 'Latitude', 'Longitude'].forEach(function (h) {
+    var i = headers.indexOf(h);
+    if (i === -1) return;
+    var range = sheet.getRange(2, i + 1, values.length - 1, 1);
+    range.setNumberFormat('0.######');
+    range.setValues(values.slice(1).map(function (r) { return [r[i] === '' ? '' : Number(r[i])]; }));
+  });
+  sheet.getRange(1, 1, 1, headers.length).setNumberFormat('@');
+
+  styleProspectsHeaders(sheet, seed);
+  sheet.setFrozenRows(1);
+  sheet.setFrozenColumns(2); // ID + Business Name stay put while scrolling right
+
+  // Dropdowns on the app-written columns, so anything typed by hand is valid.
+  Object.keys(seed.choices || {}).forEach(function (h) {
+    var i = headers.indexOf(h);
+    if (i === -1) return;
+    var rule = SpreadsheetApp.newDataValidation().requireValueInList(seed.choices[h], true).setAllowInvalid(true).build();
+    sheet.getRange(2, i + 1, values.length - 1, 1).setDataValidation(rule);
+  });
+
+  // Two doors on the same stop of the same route is a mistake someone will make
+  // while reordering. Flag it red rather than let the app quietly pick one.
+  var routeCol = headers.indexOf('Route') + 1, stopCol = headers.indexOf('Stop') + 1;
+  if (routeCol && stopCol) {
+    var colA = columnLetter(routeCol), colB = columnLetter(stopCol);
+    var dup = SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied('=AND($' + colA + '2<>"",$' + colB + '2<>"",COUNTIFS($' + colA + '$2:$' + colA + ',$' + colA + '2,$' + colB + '$2:$' + colB + ',$' + colB + '2)>1)')
+      .setBackground('#f4c7c3')
+      .setRanges([sheet.getRange(2, stopCol, values.length - 1, 1)])
+      .build();
+    sheet.setConditionalFormatRules([dup]);
+  }
+
+  // Say what the Stop column does, where somebody will look.
+  var stopIdx = headers.indexOf('Stop');
+  if (stopIdx !== -1) sheet.getRange(1, stopIdx + 1).setNote('Change this number to reorder the route. Stops are numbered within a Route; the app reads them every minute or so. A red cell means two doors share a stop.');
+  var statusIdx = headers.indexOf('Visit Status');
+  if (statusIdx !== -1) sheet.getRange(1, statusIdx + 1).setNote('Grey columns from here on are written by the rep app when a rep visits a door. Edits here are overwritten on the next visit to that door.');
+
+  SpreadsheetApp.flush();
+  return { ok: true, created: true, rows: values.length - 1, columns: headers.length };
+}
+
+function columnLetter(n) {
+  var s = '';
+  while (n > 0) { var m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+
+function styleProspectsHeaders(sheet, seed) {
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(String);
+  headers.forEach(function (h, i) {
+    var cell = sheet.getRange(1, i + 1);
+    var isField = seed.fieldHeaders.indexOf(h) !== -1;
+    cell.setFontWeight('bold').setBackground(isField ? '#d9d9d9' : '#ffffff').setBorder(false, false, true, false, false, false);
+    var w = (seed.widths && seed.widths[h]) || (h === 'Rep Notes' || h === 'Visit Log' ? 320 : 130);
+    sheet.setColumnWidth(i + 1, w);
+    if (h === 'Rep Notes' || h === 'Visit Log') sheet.getRange(2, i + 1, Math.max(1, sheet.getLastRow() - 1), 1).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
+  });
+}
+
+/** header text -> 0-based column index, for the Prospects tab. */
+function prospectsHeaderMap(sheet) {
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var map = {};
+  headers.forEach(function (h, i) { map[String(h).trim()] = i; });
+  return map;
+}
+
+function prospectsAuthorized(body) {
+  var secret = PropertiesService.getScriptProperties().getProperty('SYNC_SHARED_SECRET');
+  return !!secret && body && body.secret === secret;
+}
+
+/**
+ * The whole tab as a list of {header: value} objects, for the Next.js app to
+ * read the PLAN columns (route, stop, ...) from. POST + secret rather than a
+ * public GET: this tab also holds reps' notes and survey answers.
+ */
+function handleProspectsList(body) {
+  if (!prospectsAuthorized(body)) return { ok: false, error: 'Unauthorized' };
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PROSPECTS_SHEET_NAME);
+  if (!sheet) return { ok: false, error: 'Prospects tab not found; run setupProspectsTab()' };
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return { ok: true, headers: [], rows: [] };
+  var data = sheet.getRange(1, 1, lastRow, sheet.getLastColumn()).getValues();
+  var headers = data[0].map(String);
+  var rows = [];
+  for (var i = 1; i < data.length; i++) {
+    var row = {};
+    headers.forEach(function (h, c) {
+      var v = data[i][c];
+      row[h] = v instanceof Date ? v.toISOString() : v;
+    });
+    rows.push(row);
+  }
+  return { ok: true, headers: headers, rows: rows };
+}
+
+/**
+ * Write what a rep found onto the door's row. `values` is {header: value}; only
+ * headers that exist are written, and only FIELD columns the caller names, so a
+ * bad request cannot touch a plan column. `logLine` is prepended to the Visit
+ * Log, newest first, and the log is trimmed from the old end. `visitCount`
+ * is set, not incremented, so a replayed request is a no-op rather than a
+ * double count.
+ */
+function handleProspectVisit(body) {
+  if (!prospectsAuthorized(body)) return { ok: false, error: 'Unauthorized' };
+  var id = Number(body.prospectId);
+  if (!id) return { ok: false, error: 'Missing prospectId' };
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PROSPECTS_SHEET_NAME);
+    if (!sheet) return { ok: false, error: 'Prospects tab not found; run setupProspectsTab()' };
+    var map = prospectsHeaderMap(sheet);
+    if (map['ID'] === undefined) return { ok: false, error: 'Prospects tab has no ID column' };
+    var ids = sheet.getRange(2, map['ID'] + 1, Math.max(1, sheet.getLastRow() - 1), 1).getValues();
+    var rowNumber = -1;
+    for (var i = 0; i < ids.length; i++) { if (Number(ids[i][0]) === id) { rowNumber = i + 2; break; } }
+    if (rowNumber === -1) return { ok: false, error: 'ID ' + id + ' is not on the Prospects tab' };
+
+    var written = [];
+    var values = body.values || {};
+    Object.keys(values).forEach(function (h) {
+      if (map[h] === undefined) return;
+      sheet.getRange(rowNumber, map[h] + 1).setValue(values[h]);
+      written.push(h);
+    });
+
+    if (body.logLine && map['Visit Log'] !== undefined) {
+      var cell = sheet.getRange(rowNumber, map['Visit Log'] + 1);
+      var current = String(cell.getValue() || '');
+      // Replays (a queued mark re-sent after a timeout) must not log twice.
+      if (current.indexOf(body.logLine) === -1) {
+        var next = body.logLine + (current ? '\n' + current : '');
+        if (next.length > PROSPECT_LOG_MAX_CHARS) next = next.slice(0, next.lastIndexOf('\n', PROSPECT_LOG_MAX_CHARS) > 0 ? next.lastIndexOf('\n', PROSPECT_LOG_MAX_CHARS) : PROSPECT_LOG_MAX_CHARS);
+        cell.setValue(next);
+        written.push('Visit Log');
+      }
+    }
+    SpreadsheetApp.flush();
+    return { ok: true, row: rowNumber, written: written };
   } finally { lock.releaseLock(); }
 }
