@@ -2550,7 +2550,7 @@ function handleSyncDelivery(body) {
 
 
 // =====================================================================
-// PROSPECTS: the "Prospects" tab -- every prospective account, one row each.
+// PROSPECTS: the "Routes" tab -- every prospective account, one row each.
 //
 // Why it lives in the sheet. The rep app's "Find Prospective Accounts" used to
 // carry its door list as a static file, so the order of a route was a thing
@@ -2566,16 +2566,16 @@ function handleSyncDelivery(body) {
 //   FIELD columns (grey headers)   -- owned by the APP. Overwritten on visit.
 //
 // Script Properties this depends on (Project Settings, never hardcoded):
-//   PROSPECTS_SECRET -- a secret used ONLY by the Prospects tab. Deliberately
+//   PROSPECTS_SECRET -- a secret used ONLY by the Routes tab. Deliberately
 //   not SYNC_SHARED_SECRET: that one also switches on the order sync, and the
 //   prospect mirror must not be able to turn that on by accident.
 // =====================================================================
-var PROSPECTS_SHEET_NAME = 'Prospects';
+var PROSPECTS_SHEET_NAME = 'Routes';
 var PROSPECTS_SEED_URL = 'https://orders.tlmbg.co/rep-app/prospects-seed.json';
 var PROSPECT_LOG_MAX_CHARS = 30000; // a cell holds 50,000; leave a wide margin
 
 /**
- * Create the Prospects tab. Run ONCE from the Apps Script editor (select
+ * Create the Routes tab (or fill it, if you made it empty). Run ONCE from the Apps Script editor (select
  * setupProspectsTab, press Run). Safe to run again: it never overwrites a tab
  * that already has data -- it only adds any field columns that are missing.
  */
@@ -2677,7 +2677,7 @@ function styleProspectsHeaders(sheet, seed) {
   });
 }
 
-/** header text -> 0-based column index, for the Prospects tab. */
+/** header text -> 0-based column index, for the Routes tab. */
 function prospectsHeaderMap(sheet) {
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   var map = {};
@@ -2698,7 +2698,7 @@ function prospectsAuthorized(body) {
 function handleProspectsList(body) {
   if (!prospectsAuthorized(body)) return { ok: false, error: 'Unauthorized' };
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PROSPECTS_SHEET_NAME);
-  if (!sheet) return { ok: false, error: 'Prospects tab not found; run setupProspectsTab()' };
+  if (!sheet) return { ok: false, error: 'Routes tab not found; run setupProspectsTab()' };
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return { ok: true, headers: [], rows: [] };
   var data = sheet.getRange(1, 1, lastRow, sheet.getLastColumn()).getValues();
@@ -2732,13 +2732,13 @@ function handleProspectVisit(body) {
   lock.waitLock(20000);
   try {
     var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(PROSPECTS_SHEET_NAME);
-    if (!sheet) return { ok: false, error: 'Prospects tab not found; run setupProspectsTab()' };
+    if (!sheet) return { ok: false, error: 'Routes tab not found; run setupProspectsTab()' };
     var map = prospectsHeaderMap(sheet);
-    if (map['ID'] === undefined) return { ok: false, error: 'Prospects tab has no ID column' };
+    if (map['ID'] === undefined) return { ok: false, error: 'Routes tab has no ID column' };
     var ids = sheet.getRange(2, map['ID'] + 1, Math.max(1, sheet.getLastRow() - 1), 1).getValues();
     var rowNumber = -1;
     for (var i = 0; i < ids.length; i++) { if (Number(ids[i][0]) === id) { rowNumber = i + 2; break; } }
-    if (rowNumber === -1) return { ok: false, error: 'ID ' + id + ' is not on the Prospects tab' };
+    if (rowNumber === -1) return { ok: false, error: 'ID ' + id + ' is not on the Routes tab' };
 
     var written = [];
     var values = body.values || {};

@@ -4,7 +4,7 @@ import { planDoorFromRow, sheetStamp, surveyColumns, visitPayload } from "@/lib/
 import { cleanSurvey } from "@/lib/prospects/survey";
 import { ALL_HEADERS, FIELD_COLUMNS, PLAN_COLUMNS, SURVEY } from "@/lib/prospects/sheetColumns";
 
-describe("reading the plan from the Prospects tab", () => {
+describe("reading the plan from the Routes tab", () => {
   it("turns a sheet row into the plan fields, with numbers as numbers", () => {
     const door = planDoorFromRow({ ID: 7, "Business Name": "KALUAS NIGHT CLUB", Route: "R1 Huntington Park", Stop: "3", "Route Priority": 1, Tier: "A", Latitude: "33.97", Longitude: -118.2 });
     expect(door).toMatchObject({ id: 7, name: "KALUAS NIGHT CLUB", route: "R1 Huntington Park", stop: 3, routePriority: 1, tier: "A", lat: 33.97, lng: -118.2 });
@@ -30,7 +30,7 @@ describe("reading the plan from the Prospects tab", () => {
   });
 });
 
-describe("writing a visit to the Prospects tab", () => {
+describe("writing a visit to the Routes tab", () => {
   const base = { prospectId: 12, status: "interested", note: "owner out until 4", survey: null, repName: "Zack Bone", markedAt: new Date("2026-10-02T21:31:00Z"), visitCount: 2 };
 
   it("formats the time the way a person reads a sheet, in Pacific", () => {

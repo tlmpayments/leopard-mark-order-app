@@ -87,7 +87,7 @@ export const HANDLERS: Record<JobKind, JobHandler> = {
   },
 
   // ---- Prospecting ----
-  // Mirror a rep's visit onto the door's row in the Prospects tab. One-way and
+  // Mirror a rep's visit onto the door's row in the Routes tab. One-way and
   // last-state-wins: it writes whatever the database says NOW, not what was true
   // when the job was queued, so a stale or replayed job cannot put old notes
   // back. Skips (rather than fails) while the sheet connection is not set up --

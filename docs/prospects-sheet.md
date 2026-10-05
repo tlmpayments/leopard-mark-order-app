@@ -1,7 +1,7 @@
-# The Prospects tab
+# The Routes tab
 
 "Find Prospective Accounts" in the rep app (orders.tlmbg.co) is backed by a
-**Prospects** tab in the *TLM Distribution Master File* Google Sheet: one row per
+**Routes** tab in the *TLM Distribution Master File* Google Sheet: one row per
 prospective account (551 doors, from the CA ABC on-premise list).
 
 ## Who owns which column
@@ -45,7 +45,7 @@ again in Apps Script (it adds any new columns and never touches existing data).
    - Deploy → Manage deployments → ✏️ → Version: **New version** → Deploy
      (keeps the same URL; "Who has access" stays as it is).
    - In the editor choose `setupProspectsTab` and press **Run** (authorise once).
-     The Prospects tab appears. It is safe to run again.
+     The Routes tab appears. It is safe to run again.
 4. **Vercel** (project `leopard-mark-order-app`, Production): add
    **`PROSPECTS_SHEET_SECRET`** with the *same* value, then redeploy.
 

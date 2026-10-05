@@ -1,7 +1,7 @@
 import { FIELD_COLUMNS, STATUS_LABEL, SURVEY, PLAN_COLUMNS } from "@/lib/prospects/sheetColumns";
 
 /**
- * The server's line to the "Prospects" tab, through the Apps Script web app.
+ * The server's line to the "Routes" tab, through the Apps Script web app.
  *
 
  * Both directions need PROSPECTS_SHEET_SECRET (here as an env var; there as
@@ -96,7 +96,7 @@ export async function readPlan(): Promise<{ doors: PlanDoor[]; stale: boolean } 
     cache = { at: Date.now(), doors };
     return { doors, stale: false };
   } catch (error) {
-    console.error("[prospects] could not read the Prospects tab", error);
+    console.error("[prospects] could not read the Routes tab", error);
     return cache ? { doors: cache.doors, stale: true } : null;
   }
 }

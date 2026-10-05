@@ -189,7 +189,7 @@ export async function POST(request: Request): Promise<Response> {
     written++;
   }
 
-  // Mirror each door onto its row in the Prospects tab. After the database
+  // Mirror each door onto its row in the Routes tab. After the database
   // write, never before: the sheet is where the office reads, the database is
   // the record. One job per door and mark; the handler writes the door's
   // current state, so order and replays do not matter.

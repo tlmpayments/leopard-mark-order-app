@@ -1,5 +1,5 @@
 /**
- * The "Prospects" tab of the TLM Distribution Master File: one row per door.
+ * The "Routes" tab of the TLM Distribution Master File: one row per door.
  *
  * Two kinds of column, and the line between them is the whole design:
  *

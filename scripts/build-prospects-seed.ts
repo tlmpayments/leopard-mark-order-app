@@ -4,7 +4,7 @@
  *   npx tsx scripts/build-prospects-seed.ts
  *
  * The seed is what the Apps Script's setupProspectsTab() fetches to create the
- * "Prospects" tab in the TLM Distribution Master File, so it has to be a
+ * "Routes" tab in the TLM Distribution Master File, so it has to be a
  * plain, public, versioned file the script can reach with UrlFetchApp. The
  * door list itself is public licence data (CA ABC) -- nothing private here.
  *

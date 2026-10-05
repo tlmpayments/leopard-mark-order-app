@@ -25,7 +25,7 @@ function fakeSheet(grid: Cell[][]) {
 function load(grid: Cell[][], secret: string | null = "s3cret") {
   const sheet = fakeSheet(grid);
   const env = {
-    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: (n: string) => (n === "Prospects" ? sheet : null), getSpreadsheetTimeZone: () => "America/Los_Angeles" }), flush: () => {} },
+    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: (n: string) => (n === "Routes" ? sheet : null), getSpreadsheetTimeZone: () => "America/Los_Angeles" }), flush: () => {} },
     PropertiesService: { getScriptProperties: () => ({ getProperty: (k: string) => (k === "PROSPECTS_SECRET" ? secret : null) }) },
     LockService: { getScriptLock: () => ({ waitLock: () => {}, releaseLock: () => {} }) },
   };
@@ -37,7 +37,7 @@ function load(grid: Cell[][], secret: string | null = "s3cret") {
 const HEADERS = ["ID", "Business Name", "Route", "Stop", "Visit Status", "Last Visited By", "Rep Notes", "Decision Maker", "Visit Count", "Visit Log"];
 const grid = (): Cell[][] => [HEADERS, [1, "A", "R1", 1, "", "", "", "", "", ""], [2, "B", "R1", 2, "", "", "", "", "", ""], [3, "C", "R1", 3, "", "", "", "", "", ""]];
 
-describe("Prospects tab: reading", () => {
+describe("Routes tab: reading", () => {
   it("returns the rows as {header: value}", () => {
     const { handleProspectsList } = load(grid());
     const res = handleProspectsList({ secret: "s3cret" });
@@ -52,7 +52,7 @@ describe("Prospects tab: reading", () => {
   });
 });
 
-describe("Prospects tab: writing a visit", () => {
+describe("Routes tab: writing a visit", () => {
   it("finds the row by ID and writes only the named columns", () => {
     const g = grid();
     const { handleProspectVisit } = load(g);

@@ -4,7 +4,7 @@ import { repTokenFromRequest, verifyRepToken } from "@/lib/prospects/repToken";
 import { configured, readPlan } from "@/lib/prospects/sheet";
 
 /**
- * The plan: where each door falls in its route, as the Prospects tab has it.
+ * The plan: where each door falls in its route, as the Routes tab has it.
  *
  * This is how a Stop number typed into the sheet reaches a rep's phone. The
  * app ships a static door list as a fallback and overlays whatever this
