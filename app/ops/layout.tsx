@@ -56,13 +56,17 @@ export default async function OpsLayout({ children }: LayoutProps<"/ops">) {
       <div className="shell">
         <aside className="rail">
           <div className="brand">
-            <div className="crest" aria-hidden="true">
-              LM
-            </div>
-            <div className="wm">
-              Leopard Mark
-              <small>Ops</small>
-            </div>
+            {/* Plain <img>: a 520px PNG shown at ~140px, served from /brand
+                (outside the proxy matcher, so it loads on every hostname). */}
+            <a
+              className="ops-logo"
+              href="https://www.theleopardmark.com"
+              aria-label="The Leopard Mark Brewing Co. — visit theleopardmark.com"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/brand/tlm-logo.png" alt="The Leopard Mark Brewing Co." width={520} height={222} />
+            </a>
+            <span className="brand-tag">Ops Hub</span>
           </div>
           <Navigation items={nav} />
           <div className="foot">
