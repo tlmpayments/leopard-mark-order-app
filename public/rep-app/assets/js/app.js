@@ -2892,6 +2892,9 @@
   // schedule rather than a fence.
   var PROSPECT_PLAN = window.LM_PROSPECT_PLAN;
   var planOrder = PROSPECT_PLAN.planOrder;
+  // The order a rep works in: the sheet's Stop order, with what is already
+  // visited held above what is not. See visitedFirst in prospect-plan.js.
+  var visitedFirstOrder = PROSPECT_PLAN.visitedFirst(function (p) { return prospectStatusKey(p) !== 'new'; });
   var prospectScheduleCache = null;
 
   function prospectSchedule() {
@@ -3628,7 +3631,7 @@
       // stop, then the second-pass groups, then everything excluded), which
       // is exactly what "give it to them in an order that makes sense" means
       // on this sheet. Sorting by id reproduces the printed plan.
-      list.sort(planOrder);
+      list.sort(visitedFirstOrder);
 
       // ...and then, if asked, walked in the shortest order within each day.
       // The sheet's stop order is a one-way sweep by house number, set before
@@ -3729,8 +3732,10 @@
   /** Is the list currently arranged as days of one route? Both the dividers
    *  and the optimiser need the same answer. */
   function prospectShowsDays() {
-    return /^(route|group):/.test(prospectState.region) &&
-      (prospectState.sort === 'plan' || prospectState.sort === 'walk');
+    // Day dividers are cut from Stop numbers, which no longer match the order
+    // the list is in (visited doors are held at the top), so only the legacy
+    // shortest-walk view still draws them.
+    return /^(route|group):/.test(prospectState.region) && prospectState.sort === 'walk';
   }
 
   // ---- pins ---------------------------------------------------------------
@@ -3845,23 +3850,19 @@
       if (region === 'wave:arts') return isArtsDoor(p);
       return false;
     });
-    list.sort(planOrder);
+    list.sort(visitedFirstOrder);
     return list;
   }
 
-  /** The doors of one region, in the order they should be walked: plan order,
-   *  then the shortest walk inside each day, exactly as the list shows them. */
+  /** The doors of one region, in the order they are worked: the sheet's Stop
+   *  order, exactly, with doors already visited held at the top.
+   *
+   *  This used to re-order each day's twelve doors by nearest neighbour. It no
+   *  longer does: the order is optimized in the sheet now (Stop is the office's
+   *  column), and a run that quietly re-sorted it would not be the order that
+   *  was set. */
   function prospectRunDoors(region) {
-    // The Arts District is worked in buyer order -- founder first, then the
-    // bar managers, then the chefs -- and the sheet says so in as many words.
-    // The shortest-walk optimiser would put the founder in the middle.
-    if (region === 'wave:arts') return prospectRegionDoors(region);
-    var walked = [];
-    prospectGroupByDay(prospectRegionDoors(region)).forEach(function (d) {
-      var optimised = prospectOptimiseDay(d.doors, null);
-      walked = walked.concat(prospectPathMiles(optimised) < prospectPathMiles(d.doors) ? optimised : d.doors);
-    });
-    return walked;
+    return prospectRegionDoors(region);
   }
 
   function prospectRegionLabel(region) {
@@ -3914,16 +3915,25 @@
     openRunOverview();
   }
 
-  /** The run's doors grouped into days. A scheduled day is one day by
-   *  definition; a whole route is cut along the plan's twelve-door days. */
+  /** The drive links for a run, grouped into days. Only what is left to do:
+   *  directions through doors already worked would send a rep back to them.
+   *  A scheduled day is one day by definition; a whole route is cut into
+   *  twelve-door days of the doors still ahead. */
   function runDayGroups(run, doors) {
-    return run.plan ? [{ day: 1, doors: doors }] : prospectGroupByDay(doors);
+    var left = doors.filter(function (p) { return prospectStatusKey(p) === 'new'; });
+    if (run.plan) return left.length ? [{ day: 1, doors: left }] : [];
+    var groups = [];
+    for (var i = 0; i < left.length; i += PROSPECT_DOORS_PER_DAY) {
+      groups.push({ day: groups.length + 1, doors: left.slice(i, i + PROSPECT_DOORS_PER_DAY) });
+    }
+    return groups;
   }
 
-  /** "together" / "solo" for a scheduled day, "day 2" for a route. */
+  /** "together" / "solo" for a scheduled day; nothing for a whole route, whose
+   *  doors are simply in order. */
   function runLegTag(run, p) {
     if (run.legs) return run.legs[p.id] === 'together' ? 'together' : 'solo';
-    return 'day ' + (prospectDay(p) || 1);
+    return '';
   }
 
   /** The next index at or after `from` whose door is still untouched, or the
@@ -3983,12 +3993,12 @@
     var doors = run.ids.map(findProspect).filter(Boolean);
     var worked = runWorkedCount(run);
     var left = doors.length - worked;
-    var days = run.plan ? 1 : Math.ceil(doors.length / PROSPECT_DOORS_PER_DAY);
+    var days = run.plan ? 1 : Math.ceil(left / PROSPECT_DOORS_PER_DAY);
 
     document.getElementById('run-ov-route').textContent = run.label;
     document.getElementById('run-ov-meta').textContent =
       doors.length + ' stops \u00b7 ' + prospectPathMiles(doors).toFixed(1) + ' mi' +
-      (run.plan ? '' : ' \u00b7 about ' + days + ' day' + (days === 1 ? '' : 's')) +
+      (run.plan || !left ? '' : ' \u00b7 about ' + days + ' day' + (days === 1 ? '' : 's') + ' left') +
       (worked ? ' \u00b7 ' + worked + ' already worked' : '');
 
     document.getElementById('run-ov-start').textContent =
@@ -4018,7 +4028,7 @@
           '<span class="osub">' + escapeHtml(p.address.split(',')[0]) + ' \u00b7 ' + escapeHtml(titleCase(p.city)) + '</span>' +
           '<span class="prospect-tags">' +
             '<span class="prospect-tag tier-' + escapeHtml(p.tier) + '">Tier ' + escapeHtml(p.tier) + '</span>' +
-            '<span class="prospect-tag">' + escapeHtml(runLegTag(run, p)) + '</span>' +
+            (runLegTag(run, p) ? '<span class="prospect-tag">' + escapeHtml(runLegTag(run, p)) + '</span>' : '') +
             (done ? '<span class="prospect-tag" style="background:' + st.color + '22; color:' + st.color + ';">' +
               escapeHtml(st.label + ' \u00b7 ' + visitedByLine(prospectMark(p.id))) + '</span>' : '') +
           '</span>' +
@@ -4079,8 +4089,7 @@
   /** "Stop 3 of 18 \u00b7 together" -- the position line, shared by the full
    *  render and the in-place progress update. */
   function runCountText(run, p) {
-    var day = prospectDay(p);
-    var where = run.plan ? runLegTag(run, p) : (day ? 'day ' + day : '');
+    var where = run.plan ? runLegTag(run, p) : '';
     return 'Stop ' + (run.index + 1) + ' of ' + run.ids.length + (where ? ' \u00b7 ' + where : '');
   }
 
@@ -4133,7 +4142,10 @@
     var visitedEl = document.getElementById('run-visited');
     visitedEl.textContent = by ? 'Last visit: ' + by : '';
     visitedEl.style.display = by ? 'block' : 'none';
-    document.getElementById('run-stop-no').textContent = p.stop || '\u2014';
+    // Position in this run, matching "Stop 5 of 36" above it -- not the sheet's Stop
+    // number, which is the door's place in the optimized plan and no longer
+    // equals its place in line once visited doors are held at the top.
+    document.getElementById('run-stop-no').textContent = String(run.index + 1);
     document.getElementById('run-name').textContent = prospectTitle(p);
     document.getElementById('run-address').textContent = p.address;
     document.getElementById('run-navigate').href =

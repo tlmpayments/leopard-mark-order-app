@@ -82,6 +82,37 @@
     return a.id - b.id;
   }
 
+  /**
+   * planOrder, with one rule added: within a route (or a second-pass group), a
+   * door that has been visited sorts above every door that has not.
+   *
+   * Why it is a rule here and not a renumbering in the sheet. The Stop column is
+   * the office's: it says where a door belongs in the optimized sequence, and
+   * the app never writes it. But a rep needs the opposite from his list -- what
+   * he has done at the top, what is left below -- and a re-optimization must not
+   * be able to bury a door that has already been worked. Applying the rule at
+   * display time gives both: the sheet's numbers stay the plan, and whatever
+   * they are, only the unvisited part of a route is ever re-ordered by them.
+   * Among visited doors (and among unvisited ones) the Stop order still decides.
+   *
+   * Doors with neither a route nor a group (the Arts District, which is worked
+   * in buyer order) are untouched.
+   *
+   * `isVisited(door)` is passed in because the marks live in the app, not in
+   * this file.
+   */
+  function visitedFirst(isVisited) {
+    return function (a, b) {
+      var sameRoute = a.route && b.route && a.route === b.route;
+      var sameGroup = !a.route && !b.route && a.group && b.group && a.group === b.group;
+      if (sameRoute || sameGroup) {
+        var va = !!isVisited(a), vb = !!isVisited(b);
+        if (va !== vb) return va ? -1 : 1;
+      }
+      return planOrder(a, b);
+    };
+  }
+
   function isExcluded(p) { return String(p.wave || '').indexOf('Excluded') === 0; }
 
   /** The Downtown Arts District track (ZIP 90021): 17 doors that sit outside
@@ -203,6 +234,7 @@
     crewName: crewName,
     buildSchedule: buildSchedule,
     planOrder: planOrder,
+    visitedFirst: visitedFirst,
     regionOrder: regionOrder,
     doorQueue: doorQueue,
     isoOf: isoOf,

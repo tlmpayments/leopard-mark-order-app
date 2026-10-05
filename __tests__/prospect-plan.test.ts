@@ -82,6 +82,41 @@ describe("prospect schedule", () => {
     expect(days.filter((d) => d.label.includes("Arts District")).length).toBe(1);
   });
 
+  it("holds visited doors above unvisited ones within a route, whatever the Stop numbers say", () => {
+    const visited = new Set<number>();
+    const order = plan.visitedFirst((d: Door) => visited.has(d.id));
+    const r2 = doors.filter((d) => d.route === "R2A Maywood + Bell");
+    const byStop = [...r2].sort(plan.planOrder);
+    // Visit three doors that are deep in the route.
+    const deep = byStop.slice(-3).map((d) => d.id);
+    deep.forEach((id) => visited.add(id));
+    const sorted = [...r2].sort(order);
+    expect(sorted.slice(0, 3).map((d) => d.id)).toEqual(deep);                 // on top, in Stop order
+    expect(sorted.slice(3).map((d) => d.id)).toEqual(byStop.slice(0, -3).map((d) => d.id)); // the rest keep the plan's order
+  });
+
+  it("is stable when nothing is visited, and when everything is", () => {
+    const none = plan.visitedFirst(() => false);
+    const all = plan.visitedFirst(() => true);
+    const sample = doors.filter((d) => d.route === "R5 Downey core");
+    expect([...sample].sort(none).map((d) => d.id)).toEqual([...sample].sort(plan.planOrder).map((d) => d.id));
+    expect([...sample].sort(all).map((d) => d.id)).toEqual([...sample].sort(plan.planOrder).map((d) => d.id));
+  });
+
+  it("never mixes routes: visiting a door in a later route does not lift it into an earlier one", () => {
+    const first = doors.filter((d) => d.route === "R1 Huntington Park").sort(plan.planOrder)[0];
+    const later = doors.filter((d) => d.route === "R6 Montebello + Pico Rivera Whittier")[0];
+    const order = plan.visitedFirst((d: Door) => d.id === later.id);
+    expect(order(first, later)).toBeLessThan(0); // R1 still ahead of R6
+  });
+
+  it("leaves doors with no route or group (the Arts District) in buyer order", () => {
+    const arts = doors.filter((d) => d.wave.indexOf("Separate track") === 0);
+    const visitedLast = arts[arts.length - 1].id;
+    const order = plan.visitedFirst((d: Door) => d.id === visitedLast);
+    expect([...arts].sort(order).map((d) => d.id)).toEqual([...arts].sort(plan.planOrder).map((d) => d.id));
+  });
+
   it("matches the crew by first name", () => {
     expect(plan.crewKey("James Williams")).toBe("james");
     expect(plan.crewKey("J. Williams")).toBeNull();

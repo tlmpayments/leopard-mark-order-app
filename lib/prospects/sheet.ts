@@ -156,18 +156,31 @@ export function visitPayload(v: VisitForSheet): { values: Record<string, string 
   return { values, logLine: parts.join(" · ") };
 }
 
-export async function writeVisit(v: VisitForSheet): Promise<{ row: number }> {
-  const { values, logLine } = visitPayload(v);
+/**
+ * Write field-column values and/or one log line onto a door's row. Only field
+ * columns are accepted: a plan column (Stop, Route...) is the sheet's, and this
+ * refuses it, so no caller -- including a bulk backfill -- can overwrite the
+ * order someone set by hand.
+ */
+export async function writeRow(prospectId: number, values: Record<string, string | number>, logLine?: string): Promise<{ row: number }> {
+  for (const header of Object.keys(values)) {
+    if (!FIELD_COLUMNS.includes(header)) throw new Error(`"${header}" is not a column the app may write`);
+  }
   const res = await call<{ ok: boolean; error?: string; row?: number }>({
     action: "prospectVisit",
-    prospectId: v.prospectId,
+    prospectId,
     values,
-    logLine,
+    ...(logLine ? { logLine } : {}),
   });
   if (!res.ok) throw new Error(res.error ?? "prospectVisit failed");
   // The plan did not change, but the next read should not be a minute stale.
   cache = null;
   return { row: res.row ?? 0 };
+}
+
+export async function writeVisit(v: VisitForSheet): Promise<{ row: number }> {
+  const { values, logLine } = visitPayload(v);
+  return writeRow(v.prospectId, values, logLine);
 }
 
 /** Every header the app may write. Used by tests to keep the three lists aligned. */
