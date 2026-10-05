@@ -38,14 +38,23 @@ again in Apps Script (it adds any new columns and never touches existing data).
 1. **Database**: `npx prisma migrate deploy` (adds the survey columns; the
    migration is `20261002220000_prospect_survey`).
 2. **Deploy the app** so `https://orders.tlmbg.co/rep-app/prospects-seed.json` exists.
-3. **Apps Script** (Extensions → Apps Script on the Master File):
-   - Replace the project's `Code.gs` with `apps-script/Code.gs` from the repo.
-   - Project Settings → Script properties → add **`PROSPECTS_SECRET`** = a long
+3. **Apps Script** (Extensions -> Apps Script on the Master File). Add, do not replace:
+   - Click **+** next to *Files* -> *Script*, name it `Prospects`, and paste the
+     contents of `Prospects.gs` (everything in it is new code; it changes no
+     existing function). Save.
+   - In your existing `Code.gs`, find `function doPost(e)` and add these two
+     lines next to the other `if (body.action === ...)` lines, before the final
+     `return respond({ ok: false, error: 'Unknown action' });`:
+
+         if (body.action === 'prospectsList') return respond(handleProspectsList(body));
+         if (body.action === 'prospectVisit') return respond(handleProspectVisit(body));
+
+   - Project Settings -> Script properties -> add **`PROSPECTS_SECRET`** = a long
      random string (e.g. `openssl rand -hex 24`).
-   - Deploy → Manage deployments → ✏️ → Version: **New version** → Deploy
-     (keeps the same URL; "Who has access" stays as it is).
+   - Deploy -> Manage deployments -> pencil -> Version: **New version** -> Deploy
+     (same URL; "Who has access" stays as it is).
    - In the editor choose `setupProspectsTab` and press **Run** (authorise once).
-     The Routes tab appears. It is safe to run again.
+     The Routes tab fills in. It is safe to run again.
 4. **Vercel** (project `leopard-mark-order-app`, Production): add
    **`PROSPECTS_SHEET_SECRET`** with the *same* value, then redeploy.
 
