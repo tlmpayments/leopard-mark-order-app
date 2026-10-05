@@ -655,3 +655,8 @@ textarea { min-height: 84px; }
 .survey-fold[open] > summary::after { transform: rotate(135deg); }
 .survey-fold > summary small { margin-left: 8px; font-weight: 400; color: var(--silver-dim); }
 .survey-fold .survey { border-radius: 0; padding-top: 4px; }
+
+/* Come Back: the to-do list of doors a rep owes a second visit. */
+.route-tile.is-comeback .route-tile-code { color: #ed633f; }
+.route-tile.is-comeback.is-started { box-shadow: inset 0 0 0 2px #ed633f; }
+.route-tile.is-comeback.is-started .route-tile-go { color: #ed633f; }

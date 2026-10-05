@@ -3437,6 +3437,9 @@
    *  honest: the first door nobody has worked is where he resumes. */
   function refreshRunOrder(run) {
     if (!run) return;
+    // A Come Back run is a snapshot: doors leave the list as they are handled,
+    // and re-deriving it mid-run would shift the stop under the rep's feet.
+    if (run.region === COMEBACK_REGION) return;
     var ids, legs = null;
     if (run.plan) {
       var key = myCrewKey();
@@ -3590,7 +3593,9 @@
     // in "Other tracks" there and only the picker shows it here.
     var arts = allProspects().some(function (p) { return isArtsDoor(p); })
       ? [{ value: 'wave:arts', label: 'AD Arts District' }] : [];
-    return routes.concat(groups, arts);
+    // Come Back is always on the list, empty or not: it is where a rep looks
+    // first, so a tile that comes and goes would read as broken.
+    return [{ value: COMEBACK_REGION, label: 'CB Come Back' }].concat(routes, groups, arts);
   }
 
   function isArtsDoor(p) { return p.wave.indexOf('Separate track') === 0; }
@@ -3848,10 +3853,33 @@
       if (region.indexOf('route:') === 0) return p.route === region.slice(6);
       if (region.indexOf('group:') === 0) return p.group === region.slice(6);
       if (region === 'wave:arts') return isArtsDoor(p);
+      if (region === COMEBACK_REGION) return isMyComeback(p);
       return false;
     });
-    list.sort(visitedFirstOrder);
+    // Come Back is not a place on a map but a to-do list: the door that has
+    // waited longest is first, whatever route it sits on.
+    if (region === COMEBACK_REGION) {
+      list.sort(function (a, b) { return (prospectMark(a.id).at || 0) - (prospectMark(b.id).at || 0); });
+    } else list.sort(visitedFirstOrder);
     return list;
+  }
+
+  /** The "Come Back" list: every door this rep's own latest mark on is "Come
+   *  back". Marks are shared across the team, so another rep's come-back is
+   *  theirs to revisit, not this rep's; and once a door is re-marked as
+   *  anything else it leaves the list by itself. */
+  var COMEBACK_REGION = 'status:comeback';
+  function isMyComeback(p) {
+    var m = prospectMark(p.id);
+    return !!m && m.status === 'comeback' &&
+      String(m.rep || '').toLowerCase() === String(state.rep || '').toLowerCase();
+  }
+
+  /** What "still to do" means in a run. Everywhere else it is a door nobody
+   *  has been to; in the Come Back run every door has been, so it is the ones
+   *  still marked Come Back. */
+  function runPending(run, p) {
+    return run && run.region === COMEBACK_REGION ? prospectStatusKey(p) === 'comeback' : prospectStatusKey(p) === 'new';
   }
 
   /** The doors of one region, in the order they are worked: the sheet's Stop
@@ -3869,6 +3897,7 @@
     if (region.indexOf('route:') === 0) return region.slice(6);
     if (region.indexOf('group:') === 0) return region.slice(6).split(' (')[0];
     if (region === 'wave:arts') return 'Arts District';
+    if (region === COMEBACK_REGION) return 'Come Back';
     return '';
   }
 
@@ -3920,7 +3949,7 @@
    *  A scheduled day is one day by definition; a whole route is cut into
    *  twelve-door days of the doors still ahead. */
   function runDayGroups(run, doors) {
-    var left = doors.filter(function (p) { return prospectStatusKey(p) === 'new'; });
+    var left = doors.filter(function (p) { return runPending(run, p); });
     if (run.plan) return left.length ? [{ day: 1, doors: left }] : [];
     var groups = [];
     for (var i = 0; i < left.length; i += PROSPECT_DOORS_PER_DAY) {
@@ -3941,7 +3970,7 @@
   function runNextUnworked(run, from) {
     for (var i = from; i < run.ids.length; i++) {
       var p = findProspect(run.ids[i]);
-      if (p && prospectStatusKey(p) === 'new') return i;
+      if (p && runPending(run, p)) return i;
     }
     return run.ids.length;
   }
@@ -3949,7 +3978,7 @@
   function runWorkedCount(run) {
     return run.ids.filter(function (id) {
       var p = findProspect(id);
-      return p && prospectStatusKey(p) !== 'new';
+      return p && !runPending(run, p);
     }).length;
   }
 
@@ -4018,7 +4047,7 @@
 
     document.getElementById('run-ov-list').innerHTML = doors.map(function (p, i) {
       var st = prospectStatus(p);
-      var done = prospectStatusKey(p) !== 'new';
+      var done = !runPending(run, p);
       return '<div class="order-row prospect-row run-ov-row' + (done ? ' is-worked' : '') +
           '" data-run-index="' + i + '">' +
         '<span class="prospect-stop" style="background:' + (done ? st.color : '#f1e7d6') +
@@ -4173,7 +4202,7 @@
     // Until something is recorded, the footer says what skipping means rather
     // than pretending the door is done.
     document.getElementById('run-next').textContent =
-      prospectStatusKey(p) === 'new' ? 'Skip \u00b7 Next Location \u2192' : 'Next Location \u2192';
+      runPending(run, p) ? 'Skip \u00b7 Next Location \u2192' : 'Next Location \u2192';
   }
 
   function renderRunStatusButtons(p) {
@@ -4353,6 +4382,21 @@
   function renderRoutePicker() {
     var tiles = prospectRouteOptions().map(function (o, i) {
       var doors = prospectRegionDoors(o.value);
+      if (o.value === COMEBACK_REGION) {
+        var m0 = /^(\S+)\s+(.*)$/.exec(o.label);
+        var n = doors.length;
+        return {
+          order: -1,
+          html: '<button type="button" class="route-tile is-comeback' + (n ? ' is-started' : ' is-done') + '"' +
+              (n ? '' : ' disabled aria-disabled="true"') + ' data-route-region="' + COMEBACK_REGION + '">' +
+            '<span class="route-tile-code">' + escapeHtml(m0[1]) + '</span>' +
+            '<span class="route-tile-name">' + escapeHtml(m0[2]) + '</span>' +
+            '<span class="route-tile-count">' + (n ? n + ' to revisit' : 'None yet') + '</span>' +
+            '<span class="route-tile-last">' + (n ? 'Longest wait first' : 'Doors you mark \u201cCome back\u201d land here') + '</span>' +
+            '<span class="route-tile-go">' + (n ? 'Start \u2192' : '') + '</span>' +
+          '</button>'
+        };
+      }
       var worked = doors.filter(function (p) { return prospectStatusKey(p) !== 'new'; }).length;
       var done = doors.length > 0 && worked >= doors.length;
       var last = lastMarkAmong(doors);
